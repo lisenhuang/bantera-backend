@@ -12,7 +12,7 @@
 ## Run locally
 
 ```bash
-dotnet run
+dotnet run --project BanteraApi
 # http://localhost:5218        → Hello World
 # http://localhost:5218/swagger → Swagger UI
 ```
