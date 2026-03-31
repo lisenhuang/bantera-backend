@@ -19,7 +19,14 @@ app.UseSwaggerUI(options =>
     options.RoutePrefix = "swagger";
 });
 
-app.MapGet("/", () => "Hello World!!!!")
+app.MapGet("/", () => "Hello World!")
     .WithName("HelloWorld");
+
+app.MapGet("/version", () =>
+{
+    var version = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+    return Results.Ok(new { version });
+})
+.WithName("GetVersion");
 
 app.Run();
