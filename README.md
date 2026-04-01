@@ -27,78 +27,59 @@ docker compose up --build
 
 ---
 
-## CI — Build & Publish to GHCR
+## CI — Build Check (GitHub Actions)
 
-Every push to `main` triggers the GitHub Actions workflow at `.github/workflows/docker-publish.yml`.
+Every push to `main` triggers `.github/workflows/docker-publish.yml`.
 
 **What it does:**
-1. Checks out the code
-2. Logs in to GitHub Container Registry using the built-in `GITHUB_TOKEN` (no secrets to configure)
-3. Builds the Docker image from the repo's `Dockerfile`
-4. Pushes two tags to GHCR:
-   - `latest` — always points to the most recent `main` build
-   - `sha-<short-commit>` — immutable tag for that exact commit (e.g. `sha-a1b2c3d`)
+- Checks out the code
+- Builds the Docker image to verify the build succeeds
 
-**Image name:**
-```
-ghcr.io/lisenhuang/bantera-backend
-```
+**What it does NOT do:**
+- Does not push any image to a registry
+- Does not deploy anything
+- Requires no credentials or secrets
 
-**Published tags example:**
-```
-ghcr.io/lisenhuang/bantera-backend:latest
-ghcr.io/lisenhuang/bantera-backend:sha-a1b2c3d
-```
-
-The image is only pushed if the Docker build succeeds. A failed build produces no new image.
+If the build fails, the commit is marked red on GitHub. That's it.
 
 ---
 
-## Deploy to Ubuntu (GHCR + Cloudflare Tunnel)
+## Production Deployment (server-side)
 
-### 1. Authenticate Docker on the server
+Deployment is managed entirely on the Ubuntu server — GitHub Actions is not involved.
 
-Generate a GitHub Personal Access Token (PAT) with `read:packages` scope, then:
+### Flow
+
+```
+push to main
+    ↓
+GitHub Actions builds image (CI check only)
+    ↓
+On the server: git pull + docker compose up --build -d
+```
+
+### Deploy
+
+SSH into the server and run:
 
 ```bash
-echo <YOUR_PAT> | docker login ghcr.io -u <YOUR_GITHUB_USERNAME> --password-stdin
+bash /srv/bantera-backend/deploy/deploy.sh
 ```
 
-### 2. Pull and run the latest image
+This script:
+1. Pulls the latest code from `main`
+2. Rebuilds the Docker image locally
+3. Restarts the container
+
+### First-time server setup
 
 ```bash
-docker pull ghcr.io/lisenhuang/bantera-backend:latest
+git clone git@github.com:lisenhuang/bantera-backend.git /srv/bantera-backend
+cd /srv/bantera-backend
+docker compose up --build -d
 ```
 
-Update `docker-compose.yml` on the server to use the pre-built image instead of building locally:
-
-```yaml
-services:
-  api:
-    image: ghcr.io/lisenhuang/bantera-backend:latest
-    container_name: bantera-api
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-```
-
-Then start it:
-
-```bash
-docker compose up -d
-```
-
-### 3. Update to a new release
-
-```bash
-docker pull ghcr.io/lisenhuang/bantera-backend:latest && docker compose up -d
-```
-
-Wrap this in `deploy/deploy.sh` or a cron/webhook to automate.
-
-### 4. Point Cloudflare Tunnel at the container
+### Point Cloudflare Tunnel at the container
 
 In Cloudflare Zero Trust, set the public hostname to route to `http://localhost:8080`.
 
