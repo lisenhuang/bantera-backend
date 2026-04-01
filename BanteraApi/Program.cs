@@ -1,4 +1,6 @@
+using BanteraApi.Database;
 using BanteraApi.Storage;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +13,9 @@ builder.Services.AddSwaggerGen(options =>
         Version = "v1"
     });
 });
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
 
 builder.Services.Configure<R2Settings>(builder.Configuration.GetSection(R2Settings.Section));
 builder.Services.AddSingleton<R2StorageService>();
@@ -33,6 +38,26 @@ app.MapGet("/version", () =>
     return Results.Ok(new { version });
 })
 .WithName("GetVersion");
+
+// ── Postgres connectivity test (runs once at startup) ────────────────────────
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var dbLogger = scope.ServiceProvider.GetRequiredService<ILogger<AppDbContext>>();
+    try
+    {
+        dbLogger.LogInformation("[DB Test] Connecting to Postgres...");
+        await db.Database.OpenConnectionAsync();
+        dbLogger.LogInformation("[DB Test] Connection successful. Server version: {Version}",
+            db.Database.GetDbConnection().ServerVersion);
+        await db.Database.CloseConnectionAsync();
+    }
+    catch (Exception ex)
+    {
+        dbLogger.LogError(ex, "[DB Test] Failed — is the SSH tunnel running?");
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ── R2 connectivity test (runs once at startup) ───────────────────────────────
 var r2 = app.Services.GetRequiredService<R2StorageService>();
