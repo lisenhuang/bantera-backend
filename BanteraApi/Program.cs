@@ -39,55 +39,58 @@ app.MapGet("/version", () =>
 })
 .WithName("GetVersion");
 
-// ── Postgres connectivity test (runs once at startup) ────────────────────────
+// ── Startup checks ────────────────────────────────────────────────────────────
+var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
+var failures = new List<string>();
+
+// 1. Postgres
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var dbLogger = scope.ServiceProvider.GetRequiredService<ILogger<AppDbContext>>();
     try
     {
-        dbLogger.LogInformation("[DB Test] Connecting to Postgres...");
+        startupLogger.LogInformation("[Startup] Checking Postgres...");
         await db.Database.OpenConnectionAsync();
-        dbLogger.LogInformation("[DB Test] Connection successful. Server version: {Version}",
+        startupLogger.LogInformation("[Startup] Postgres OK — server version: {Version}",
             db.Database.GetDbConnection().ServerVersion);
         await db.Database.CloseConnectionAsync();
     }
     catch (Exception ex)
     {
-        dbLogger.LogError(ex, "[DB Test] Failed — is the SSH tunnel running?");
+        startupLogger.LogError("[Startup] Postgres FAILED: {Message}", ex.Message);
+        failures.Add("Postgres");
     }
 }
-// ─────────────────────────────────────────────────────────────────────────────
 
-// ── R2 connectivity test (runs once at startup) ───────────────────────────────
+// 2. Cloudflare R2
 var r2 = app.Services.GetRequiredService<R2StorageService>();
-var logger = app.Services.GetRequiredService<ILogger<Program>>();
-
 try
 {
-    const string testKey = "bantera-test.txt";
-    const string testContent = "Hello from Bantera R2 test!";
-
-    logger.LogInformation("[R2 Test] Uploading test object '{Key}'...", testKey);
-    await r2.UploadTextAsync(testKey, testContent);
-
-    logger.LogInformation("[R2 Test] Downloading test object '{Key}'...", testKey);
-    var downloaded = await r2.DownloadTextAsync(testKey);
-    logger.LogInformation("[R2 Test] Content: {Content}", downloaded);
-
-    logger.LogInformation("[R2 Test] Listing bucket objects...");
-    var objects = await r2.ListObjectsAsync();
-    logger.LogInformation("[R2 Test] Objects in bucket: {Objects}", string.Join(", ", objects));
-
-    logger.LogInformation("[R2 Test] Deleting test object...");
+    const string testKey = "bantera-startup-check.txt";
+    startupLogger.LogInformation("[Startup] Checking R2...");
+    await r2.UploadTextAsync(testKey, "ok");
     await r2.DeleteObjectAsync(testKey);
-
-    logger.LogInformation("[R2 Test] All checks passed.");
+    startupLogger.LogInformation("[Startup] R2 OK");
 }
 catch (Exception ex)
 {
-    logger.LogError(ex, "[R2 Test] Failed — check your R2 credentials in appsettings.Development.json");
+    startupLogger.LogError("[Startup] R2 FAILED: {Message}", ex.Message);
+    failures.Add("R2");
 }
+
+// 3. Abort if any check failed
+if (failures.Count > 0)
+{
+    startupLogger.LogCritical("╔══════════════════════════════════════════════╗");
+    startupLogger.LogCritical("║         STARTUP CHECKS FAILED — ABORTING     ║");
+    startupLogger.LogCritical("╠══════════════════════════════════════════════╣");
+    foreach (var f in failures)
+        startupLogger.LogCritical("║  ✗ {Service,-42}║", f);
+    startupLogger.LogCritical("╚══════════════════════════════════════════════╝");
+    Environment.Exit(1);
+}
+
+startupLogger.LogInformation("[Startup] All checks passed — starting server.");
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.Run();
