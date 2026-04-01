@@ -1,5 +1,8 @@
 services:
   api:
+    # Production: use pre-built image from GHCR
+    # image: ghcr.io/lisenhuang/bantera-backend:latest
+    # Local dev: build from source
     build: .
     container_name: bantera-api
     restart: unless-stopped

@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# deploy.sh — run on the Ubuntu server to pull latest code and redeploy.
-# Can be triggered manually or via a webhook/cron.
+# deploy.sh — run on the Ubuntu server to pull the latest image and redeploy.
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.yml"
 
-echo "==> Pulling latest code..."
-git -C "$REPO_DIR" pull
+echo "==> Pulling latest image from GHCR..."
+docker pull ghcr.io/lisenhuang/bantera-backend:latest
 
-echo "==> Rebuilding and restarting container..."
-docker compose -f "$REPO_DIR/docker-compose.yml" up --build -d
+echo "==> Restarting container..."
+docker compose -f "$COMPOSE_FILE" up -d
 
 echo "==> Done. Container status:"
-docker compose -f "$REPO_DIR/docker-compose.yml" ps
+docker compose -f "$COMPOSE_FILE" ps

@@ -13,7 +13,7 @@
 
 ```bash
 dotnet run --project BanteraApi
-# http://localhost:5218        → Hello World
+# http://localhost:5218         → Hello World
 # http://localhost:5218/swagger → Swagger UI
 ```
 
@@ -21,55 +21,86 @@ Or with Docker:
 
 ```bash
 docker compose up --build
-# http://localhost:8080        → Hello World
+# http://localhost:8080         → Hello World
 # http://localhost:8080/swagger → Swagger UI
 ```
 
 ---
 
-## Deploy to Ubuntu (Docker + GitHub deploy key + Cloudflare Tunnel)
+## CI — Build & Publish to GHCR
 
-### 1. Add a GitHub deploy key
+Every push to `main` triggers the GitHub Actions workflow at `.github/workflows/docker-publish.yml`.
 
-1. On your Ubuntu server, generate a key:
-   ```bash
-   ssh-keygen -t ed25519 -C "bantera-server" -f ~/.ssh/github_deploy -N ""
-   cat ~/.ssh/github_deploy.pub
-   ```
-2. In GitHub → repo **Settings → Deploy keys**, click **Add deploy key**, paste the public key. Read-only is enough.
-3. Configure SSH on the server to use it for GitHub:
-   ```bash
-   cat >> ~/.ssh/config <<'EOF'
-   Host github.com
-       IdentityFile ~/.ssh/github_deploy
-       IdentitiesOnly yes
-   EOF
-   ```
+**What it does:**
+1. Checks out the code
+2. Logs in to GitHub Container Registry using the built-in `GITHUB_TOKEN` (no secrets to configure)
+3. Builds the Docker image from the repo's `Dockerfile`
+4. Pushes two tags to GHCR:
+   - `latest` — always points to the most recent `main` build
+   - `sha-<short-commit>` — immutable tag for that exact commit (e.g. `sha-a1b2c3d`)
 
-### 2. Clone the repo on the server
-
-```bash
-git clone git@github.com:<YOUR_ORG>/bantera-backend.git /srv/bantera-backend
+**Image name:**
+```
+ghcr.io/lisenhuang/bantera-backend
 ```
 
-### 3. Start the container
+**Published tags example:**
+```
+ghcr.io/lisenhuang/bantera-backend:latest
+ghcr.io/lisenhuang/bantera-backend:sha-a1b2c3d
+```
+
+The image is only pushed if the Docker build succeeds. A failed build produces no new image.
+
+---
+
+## Deploy to Ubuntu (GHCR + Cloudflare Tunnel)
+
+### 1. Authenticate Docker on the server
+
+Generate a GitHub Personal Access Token (PAT) with `read:packages` scope, then:
 
 ```bash
-cd /srv/bantera-backend
-docker compose up --build -d
+echo <YOUR_PAT> | docker login ghcr.io -u <YOUR_GITHUB_USERNAME> --password-stdin
 ```
+
+### 2. Pull and run the latest image
+
+```bash
+docker pull ghcr.io/lisenhuang/bantera-backend:latest
+```
+
+Update `docker-compose.yml` on the server to use the pre-built image instead of building locally:
+
+```yaml
+services:
+  api:
+    image: ghcr.io/lisenhuang/bantera-backend:latest
+    container_name: bantera-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+```
+
+Then start it:
+
+```bash
+docker compose up -d
+```
+
+### 3. Update to a new release
+
+```bash
+docker pull ghcr.io/lisenhuang/bantera-backend:latest && docker compose up -d
+```
+
+Wrap this in `deploy/deploy.sh` or a cron/webhook to automate.
 
 ### 4. Point Cloudflare Tunnel at the container
 
-In your Cloudflare Zero Trust dashboard, create a tunnel and set the public hostname to route to `http://localhost:8080`.
-
-### 5. Deploy updates
-
-```bash
-bash /srv/bantera-backend/deploy/deploy.sh
-```
-
-This does `git pull` + `docker compose up --build -d`. Automate it with a cron job, GitHub Actions, or any webhook runner.
+In Cloudflare Zero Trust, set the public hostname to route to `http://localhost:8080`.
 
 ---
 
