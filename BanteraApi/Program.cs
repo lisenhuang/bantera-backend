@@ -1,6 +1,7 @@
 using System.Text;
 using BanteraApi.Auth;
 using BanteraApi.Database;
+using BanteraApi.Profile;
 using BanteraApi.Storage;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,7 @@ builder.Services.AddScoped<AuthService>();
 
 builder.Services.Configure<R2Settings>(builder.Configuration.GetSection(R2Settings.Section));
 builder.Services.AddSingleton<R2StorageService>();
+builder.Services.AddScoped<ProfileService>();
 
 // ── JWT Auth ──────────────────────────────────────────────────────────────────
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret is not configured.");
@@ -262,6 +264,121 @@ app.MapGet("/api/me", (System.Security.Claims.ClaimsPrincipal user) =>
 .Produces<ApiError>(401)
 .RequireAuthorization();
 
+app.MapGet("/api/me/profile", async (
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    ProfileService profileService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            statusCode: 401);
+
+    var profile = await profileService.GetProfileAsync(userId.Value, httpContext, cancellationToken);
+    return profile is null
+        ? Results.NotFound()
+        : Results.Ok(profile);
+})
+.WithName("GetMyProfile")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Get current profile",
+    "Returns the current user's editable profile fields, including name and profile image URL."))
+.Produces<UserProfileResponse>(200)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
+app.MapPut("/api/me/profile", async (
+    UpdateProfileRequest req,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    ProfileService profileService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            statusCode: 401);
+
+    var (response, errorCode) = await profileService.UpdateNameAsync(
+        userId.Value,
+        req.Name,
+        httpContext,
+        cancellationToken);
+
+    return response is null
+        ? Results.Json(
+            new ApiError(errorCode ?? ErrorCodes.InvalidProfile, "Name must be between 1 and 80 characters."),
+            statusCode: 400)
+        : Results.Ok(response);
+})
+.WithName("UpdateMyProfile")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Update current profile",
+    "Updates the current user's display name."))
+.Produces<UserProfileResponse>(200)
+.Produces<ApiError>(400)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
+app.MapPost("/api/me/profile-image", async (
+    IFormFile file,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    ProfileService profileService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            statusCode: 401);
+
+    var (response, errorCode) = await profileService.UpdateAvatarAsync(
+        userId.Value,
+        file,
+        httpContext,
+        cancellationToken);
+
+    return response is null
+        ? Results.Json(
+            new ApiError(errorCode ?? ErrorCodes.InvalidProfileImage,
+                "Profile image must be a JPEG, PNG, WEBP, HEIC, or HEIF file under 5 MB."),
+            statusCode: 400)
+        : Results.Ok(response);
+})
+.DisableAntiforgery()
+.WithName("UpdateMyProfileImage")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Upload current profile image",
+    "Uploads a new profile image to R2 for the current user and returns the updated profile."))
+.Accepts<IFormFile>("multipart/form-data")
+.Produces<UserProfileResponse>(200)
+.Produces<ApiError>(400)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
+app.MapGet("/api/users/{userId:guid}/avatar", async (
+    Guid userId,
+    ProfileService profileService,
+    CancellationToken cancellationToken) =>
+{
+    var avatar = await profileService.GetAvatarAsync(userId, cancellationToken);
+    if (avatar is null)
+        return Results.NotFound();
+
+    return Results.Stream(avatar.Stream, avatar.ContentType);
+})
+.WithName("GetUserAvatar")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Get user avatar",
+    "Returns the stored profile image for a user."))
+.Produces(200)
+.Produces(404)
+.AllowAnonymous();
+
 // ── Startup checks ────────────────────────────────────────────────────────────
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
 var failures = new List<string>();
@@ -323,3 +440,15 @@ startupLogger.LogInformation("[Startup] All checks passed — starting server.")
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.Run();
+
+static Guid? TryGetUserId(System.Security.Claims.ClaimsPrincipal user)
+{
+    var rawUserId =
+        user.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
+        ?? user.FindFirst("sub")?.Value
+        ?? user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+    return Guid.TryParse(rawUserId, out var userId)
+        ? userId
+        : null;
+}

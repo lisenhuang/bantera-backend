@@ -51,6 +51,25 @@ public class R2StorageService
         _logger.LogInformation("Uploaded object: {Key}", key);
     }
 
+    public async Task UploadObjectAsync(
+        string key,
+        Stream content,
+        string contentType,
+        CancellationToken ct = default)
+    {
+        await _client.PutObjectAsync(new PutObjectRequest
+        {
+            BucketName = _bucket,
+            Key = key,
+            InputStream = content,
+            ContentType = contentType,
+            AutoCloseStream = false,
+            UseChunkEncoding = false,
+        }, ct);
+
+        _logger.LogInformation("Uploaded object: {Key}", key);
+    }
+
     public async Task<string> DownloadTextAsync(string key, CancellationToken ct = default)
     {
         var response = await _client.GetObjectAsync(new GetObjectRequest
@@ -73,4 +92,21 @@ public class R2StorageService
 
         _logger.LogInformation("Deleted object: {Key}", key);
     }
+
+    public async Task<StoredObjectResult> DownloadObjectAsync(string key, CancellationToken ct = default)
+    {
+        var response = await _client.GetObjectAsync(new GetObjectRequest
+        {
+            BucketName = _bucket,
+            Key = key
+        }, ct);
+
+        return new StoredObjectResult(
+            response.ResponseStream,
+            response.Headers.ContentType ?? "application/octet-stream");
+    }
 }
+
+public sealed record StoredObjectResult(
+    Stream Stream,
+    string ContentType);

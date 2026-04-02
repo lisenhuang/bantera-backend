@@ -34,6 +34,12 @@ public static class ErrorCodes
     /// <summary>The Apple identity token audience does not match this app's configured identifier.</summary>
     public const string AppleAudienceMismatch = "apple_audience_mismatch";
 
+    /// <summary>Provided profile data failed validation.</summary>
+    public const string InvalidProfile = "invalid_profile";
+
+    /// <summary>Provided profile image failed validation.</summary>
+    public const string InvalidProfileImage = "invalid_profile_image";
+
     /// <summary>Request is missing or has an invalid Authorization header.</summary>
     public const string Unauthorized = "unauthorized";
 }

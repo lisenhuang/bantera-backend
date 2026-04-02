@@ -21,6 +21,7 @@ public static class DataSeeder
         var user = new User
         {
             Id = Guid.NewGuid(),
+            Name = "Test User",
             Status = "active",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,

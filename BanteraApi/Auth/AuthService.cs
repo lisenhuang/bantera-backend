@@ -47,6 +47,7 @@ public class AuthService(
         var now = DateTime.UtcNow;
         var user = new User
         {
+            Name = DefaultNameFromEmail(normalizedEmail),
             Status = "active",
             CreatedAt = now,
             UpdatedAt = now,
@@ -91,6 +92,10 @@ public class AuthService(
         {
             var user = new User
             {
+                Name = ResolveAppleName(
+                    request.GivenName,
+                    request.FamilyName,
+                    validation.Email ?? request.Email),
                 Status = "active",
                 CreatedAt = now,
                 UpdatedAt = now,
@@ -218,4 +223,29 @@ public class AuthService(
 
     private static string? NormalizeOptionalEmail(string? email)
         => string.IsNullOrWhiteSpace(email) ? null : NormalizeEmail(email);
+
+    private static string DefaultNameFromEmail(string email)
+    {
+        var atIndex = email.IndexOf('@');
+        if (atIndex > 0)
+            return email[..atIndex];
+
+        return email;
+    }
+
+    private static string ResolveAppleName(string? givenName, string? familyName, string? email)
+    {
+        var combinedName = string.Join(
+            " ",
+            new[] { givenName?.Trim(), familyName?.Trim() }
+                .Where(x => !string.IsNullOrWhiteSpace(x)));
+
+        if (!string.IsNullOrWhiteSpace(combinedName))
+            return combinedName;
+
+        if (!string.IsNullOrWhiteSpace(email))
+            return DefaultNameFromEmail(NormalizeEmail(email));
+
+        return "Bantera user";
+    }
 }

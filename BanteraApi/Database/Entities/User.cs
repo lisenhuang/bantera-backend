@@ -3,6 +3,9 @@ namespace BanteraApi.Database.Entities;
 public class User
 {
     public Guid Id { get; set; }
+    public string? Name { get; set; }
+    public string? AvatarObjectKey { get; set; }
+    public DateTime? AvatarUpdatedAt { get; set; }
     public string Status { get; set; } = "active";
     public DateTime? LastLoginAt { get; set; }
     public DateTime CreatedAt { get; set; }
