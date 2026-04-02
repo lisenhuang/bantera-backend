@@ -8,6 +8,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<User> Users => Set<User>();
     public DbSet<UserIdentity> UserIdentities => Set<UserIdentity>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
+    public DbSet<UserVideo> UserVideos => Set<UserVideo>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -48,6 +49,25 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.DeviceName).HasMaxLength(255);
             e.HasOne(x => x.User)
              .WithMany(x => x.Sessions)
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<UserVideo>(e =>
+        {
+            e.ToTable("user_videos");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.MediaObjectKey).HasMaxLength(255).IsRequired();
+            e.Property(x => x.MediaContentType).HasMaxLength(100).IsRequired();
+            e.Property(x => x.OriginalFileName).HasMaxLength(255).IsRequired();
+            e.Property(x => x.TranscriptLanguage).HasMaxLength(35).IsRequired();
+            e.Property(x => x.TranscriptText).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasOne(x => x.User)
+             .WithMany(x => x.Videos)
              .HasForeignKey(x => x.UserId)
              .OnDelete(DeleteBehavior.Cascade);
         });

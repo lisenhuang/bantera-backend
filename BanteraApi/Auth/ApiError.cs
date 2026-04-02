@@ -40,6 +40,9 @@ public static class ErrorCodes
     /// <summary>Provided profile image failed validation.</summary>
     public const string InvalidProfileImage = "invalid_profile_image";
 
+    /// <summary>Provided video upload data failed validation.</summary>
+    public const string InvalidVideoUpload = "invalid_video_upload";
+
     /// <summary>Request is missing or has an invalid Authorization header.</summary>
     public const string Unauthorized = "unauthorized";
 }

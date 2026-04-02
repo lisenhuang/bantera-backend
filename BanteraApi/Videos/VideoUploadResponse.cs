@@ -1,0 +1,16 @@
+namespace BanteraApi.Videos;
+
+public sealed record VideoUploadResponse(
+    Guid Id,
+    Guid UserId,
+    string OriginalFileName,
+    string TranscriptText,
+    string TranscriptLanguage,
+    bool IsPublic,
+    int DurationMs,
+    long FileSizeBytes,
+    int? VideoWidth,
+    int? VideoHeight,
+    string VideoContentType,
+    string? VideoUrl,
+    DateTime CreatedAt);

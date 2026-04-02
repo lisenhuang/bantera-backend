@@ -3,7 +3,9 @@ using BanteraApi.Auth;
 using BanteraApi.Database;
 using BanteraApi.Profile;
 using BanteraApi.Storage;
+using BanteraApi.Videos;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Swashbuckle.AspNetCore.Annotations;
@@ -23,6 +25,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.Configure<R2Settings>(builder.Configuration.GetSection(R2Settings.Section));
 builder.Services.AddSingleton<R2StorageService>();
 builder.Services.AddScoped<ProfileService>();
+builder.Services.AddScoped<VideoService>();
 
 // ── JWT Auth ──────────────────────────────────────────────────────────────────
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret is not configured.");
@@ -375,6 +378,99 @@ app.MapGet("/api/users/{userId:guid}/avatar", async (
 .WithMetadata(new SwaggerOperationAttribute(
     "Get user avatar",
     "Returns the stored profile image for a user."))
+.Produces(200)
+.Produces(404)
+.AllowAnonymous();
+
+app.MapPost("/api/me/videos", async (
+    [FromForm] UploadVideoRequest req,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            statusCode: 401);
+
+    var (response, errorCode) = await videoService.UploadVideoAsync(
+        userId.Value,
+        req,
+        httpContext,
+        cancellationToken);
+
+    return response is null
+        ? Results.Json(
+            new ApiError(
+                errorCode ?? ErrorCodes.InvalidVideoUpload,
+                "Upload a supported MP4, MOV, or M4V file under 250 MB with transcript text, a language code, and valid media metadata."),
+            statusCode: 400)
+        : Results.Ok(response);
+})
+.DisableAntiforgery()
+.WithName("UploadMyVideo")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Upload a transcribed video",
+    """
+    Uploads a prepared video file plus its transcript text for the current user.
+
+    **Video upload rules:**
+    - Supported content types: MP4, MOV, M4V
+    - Transcript text and transcript language are required
+    - Visibility defaults to private in the app, but public videos can be viewed by anyone with the video URL
+    """))
+.Accepts<UploadVideoRequest>("multipart/form-data")
+.Produces<VideoUploadResponse>(200)
+.Produces<ApiError>(400)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
+app.MapGet("/api/videos/{videoId:guid}", async (
+    Guid videoId,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var response = await videoService.GetVideoAsync(
+        videoId,
+        TryGetUserId(user),
+        httpContext,
+        cancellationToken);
+
+    return response is null
+        ? Results.NotFound()
+        : Results.Ok(response);
+})
+.WithName("GetVideoMetadata")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Get video metadata",
+    "Returns transcript and playback metadata for a video if it is public or owned by the caller."))
+.Produces<VideoUploadResponse>(200)
+.Produces(404)
+.AllowAnonymous();
+
+app.MapGet("/api/videos/{videoId:guid}/file", async (
+    Guid videoId,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var file = await videoService.GetVideoFileAsync(
+        videoId,
+        TryGetUserId(user),
+        cancellationToken);
+
+    return file is null
+        ? Results.NotFound()
+        : Results.Stream(file.Stream, file.ContentType, enableRangeProcessing: true);
+})
+.WithName("GetVideoFile")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Get uploaded video file",
+    "Streams the stored video file if it is public or owned by the caller."))
 .Produces(200)
 .Produces(404)
 .AllowAnonymous();

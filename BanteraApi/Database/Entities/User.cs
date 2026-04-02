@@ -14,4 +14,5 @@ public class User
 
     public ICollection<UserIdentity> Identities { get; set; } = [];
     public ICollection<UserSession> Sessions { get; set; } = [];
+    public ICollection<UserVideo> Videos { get; set; } = [];
 }
