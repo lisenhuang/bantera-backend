@@ -2,13 +2,6 @@
 
 .NET 10 minimal Web API — runs in Docker, exposed via Cloudflare Tunnel.
 
-## Endpoints
-
-| Method | Path       | Description |
-| ------ | ---------- | ----------- |
-| GET    | `/`        | Hello World |
-| GET    | `/swagger` | Swagger UI  |
-
 ## Run locally
 
 ```bash
@@ -40,7 +33,7 @@ Every push to `main` triggers `.github/workflows/docker-publish.yml`.
 - Does not deploy anything
 - Requires no credentials or secrets
 
-If the build fails, the commit is marked red on GitHub. That's it.
+If the build fails, the commit is marked red on GitHub.
 
 ---
 
