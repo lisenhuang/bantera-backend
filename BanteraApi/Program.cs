@@ -427,6 +427,33 @@ app.MapPost("/api/me/videos", async (
 .Produces<ApiError>(401)
 .RequireAuthorization();
 
+app.MapGet("/api/me/videos", async (
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            statusCode: 401);
+
+    var videos = await videoService.ListMyVideosAsync(
+        userId.Value,
+        httpContext,
+        cancellationToken);
+
+    return Results.Ok(videos);
+})
+.WithName("ListMyVideos")
+.WithMetadata(new SwaggerOperationAttribute(
+    "List my uploaded videos",
+    "Returns the authenticated user's uploaded videos ordered from newest to oldest."))
+.Produces<IReadOnlyList<VideoUploadResponse>>(200)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
 app.MapGet("/api/videos/{videoId:guid}", async (
     Guid videoId,
     HttpContext httpContext,

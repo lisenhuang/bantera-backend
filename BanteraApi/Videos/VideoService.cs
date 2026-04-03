@@ -114,6 +114,22 @@ public class VideoService(
         return BuildResponse(video, httpContext);
     }
 
+    public async Task<IReadOnlyList<VideoUploadResponse>> ListMyVideosAsync(
+        Guid userId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var videos = await db.UserVideos
+            .AsNoTracking()
+            .Where(v => v.UserId == userId)
+            .OrderByDescending(v => v.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        return videos
+            .Select(video => BuildResponse(video, httpContext))
+            .ToList();
+    }
+
     public async Task<StoredObjectResult?> GetVideoFileAsync(
         Guid videoId,
         Guid? requesterUserId,
