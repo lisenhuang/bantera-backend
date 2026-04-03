@@ -10,6 +10,8 @@ public class UserVideo
     public string OriginalFileName { get; set; } = string.Empty;
     public string TranscriptText { get; set; } = string.Empty;
     public string TranscriptLanguage { get; set; } = string.Empty;
+    public string TranscriptLanguageCode { get; set; } = string.Empty;
+    public string TranscriptCuesJson { get; set; } = "[]";
     public bool IsPublic { get; set; }
     public long FileSizeBytes { get; set; }
     public int DurationMs { get; set; }

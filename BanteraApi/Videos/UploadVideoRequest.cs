@@ -14,6 +14,12 @@ public sealed class UploadVideoRequest
     [FromForm(Name = "transcriptLanguage")]
     public string TranscriptLanguage { get; init; } = string.Empty;
 
+    [FromForm(Name = "transcriptLanguageCode")]
+    public string TranscriptLanguageCode { get; init; } = string.Empty;
+
+    [FromForm(Name = "transcriptCuesJson")]
+    public string TranscriptCuesJson { get; init; } = string.Empty;
+
     [FromForm(Name = "isPublic")]
     public bool IsPublic { get; init; }
 

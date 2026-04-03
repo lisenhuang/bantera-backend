@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using BanteraApi.Auth;
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
@@ -13,6 +14,8 @@ public class VideoService(
     R2StorageService r2StorageService,
     LinkGenerator linkGenerator)
 {
+    private static readonly JsonSerializerOptions TranscriptJsonOptions = new(JsonSerializerDefaults.Web);
+
     private static readonly HashSet<string> SupportedVideoContentTypes =
     [
         "video/mp4",
@@ -22,7 +25,9 @@ public class VideoService(
 
     private const long MaxVideoBytes = 250L * 1024 * 1024;
     private const int MaxTranscriptLength = 100_000;
+    private const int MaxTranscriptLanguageCodeLength = 16;
     private const int MaxDurationMs = 6 * 60 * 60 * 1000;
+    private const int MaxCueCount = 5_000;
 
     public async Task<(VideoUploadResponse? Response, string? ErrorCode)> UploadVideoAsync(
         Guid userId,
@@ -33,14 +38,21 @@ public class VideoService(
         if (request.File is null || request.File.Length <= 0 || request.File.Length > MaxVideoBytes)
             return (null, ErrorCodes.InvalidVideoUpload);
 
-        var transcriptText = NormalizeTranscript(request.TranscriptText);
         var transcriptLanguage = NormalizeTranscriptLanguage(request.TranscriptLanguage);
+        var transcriptLanguageCode = NormalizeTranscriptLanguageCode(
+            request.TranscriptLanguageCode,
+            transcriptLanguage);
+        var transcriptCues = ParseTranscriptCues(request.TranscriptCuesJson);
+        var transcriptText = BuildTranscriptText(transcriptCues, request.TranscriptText);
         var contentType = NormalizeContentType(request.File.ContentType, request.File.FileName);
         var originalFileName = NormalizeFileName(request.File.FileName);
 
         if (string.IsNullOrWhiteSpace(transcriptText)
             || transcriptText.Length > MaxTranscriptLength
             || string.IsNullOrWhiteSpace(transcriptLanguage)
+            || string.IsNullOrWhiteSpace(transcriptLanguageCode)
+            || transcriptLanguageCode.Length > MaxTranscriptLanguageCodeLength
+            || transcriptCues.Count == 0
             || contentType is null
             || request.DurationMs <= 0
             || request.DurationMs > MaxDurationMs
@@ -62,6 +74,8 @@ public class VideoService(
             OriginalFileName = originalFileName,
             TranscriptText = transcriptText,
             TranscriptLanguage = transcriptLanguage,
+            TranscriptLanguageCode = transcriptLanguageCode,
+            TranscriptCuesJson = JsonSerializer.Serialize(transcriptCues, TranscriptJsonOptions),
             IsPublic = request.IsPublic,
             FileSizeBytes = request.File.Length,
             DurationMs = request.DurationMs,
@@ -123,6 +137,8 @@ public class VideoService(
             video.OriginalFileName,
             video.TranscriptText,
             video.TranscriptLanguage,
+            video.TranscriptLanguageCode,
+            ParseStoredTranscriptCues(video.TranscriptCuesJson),
             video.IsPublic,
             video.DurationMs,
             video.FileSizeBytes,
@@ -160,21 +176,108 @@ public class VideoService(
         };
     }
 
-    private static string NormalizeTranscript(string transcriptText)
+    private static string NormalizeTranscript(string? transcriptText)
     {
-        var normalized = transcriptText.Replace("\r\n", "\n").Trim();
+        var normalized = (transcriptText ?? string.Empty)
+            .Replace("\r\n", "\n")
+            .Trim();
         return normalized;
     }
 
-    private static string NormalizeTranscriptLanguage(string transcriptLanguage)
+    private static string BuildTranscriptText(
+        IReadOnlyList<VideoTranscriptCue> transcriptCues,
+        string? transcriptText)
     {
-        var normalized = transcriptLanguage
+        if (transcriptCues.Count > 0)
+        {
+            var joined = string.Join(
+                "\n",
+                transcriptCues
+                    .Select(cue => cue.Text)
+                    .Where(text => !string.IsNullOrWhiteSpace(text)));
+            return NormalizeTranscript(joined);
+        }
+
+        return NormalizeTranscript(transcriptText);
+    }
+
+    private static string NormalizeTranscriptLanguage(string? transcriptLanguage)
+    {
+        var normalized = (transcriptLanguage ?? string.Empty)
             .Trim()
             .Replace('_', '-');
 
         return normalized.Length > 35
             ? normalized[..35]
             : normalized;
+    }
+
+    private static string NormalizeTranscriptLanguageCode(
+        string? transcriptLanguageCode,
+        string transcriptLanguage)
+    {
+        var normalized = (transcriptLanguageCode ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+            normalized = transcriptLanguage.Split('-', StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault()?
+                .Trim()
+                .ToLowerInvariant()
+                ?? string.Empty;
+
+        return normalized.Length > MaxTranscriptLanguageCodeLength
+            ? normalized[..MaxTranscriptLanguageCodeLength]
+            : normalized;
+    }
+
+    private static IReadOnlyList<VideoTranscriptCue> ParseTranscriptCues(string? transcriptCuesJson)
+    {
+        if (string.IsNullOrWhiteSpace(transcriptCuesJson))
+            return [];
+
+        try
+        {
+            var cues = JsonSerializer.Deserialize<List<VideoTranscriptCue>>(
+                    transcriptCuesJson,
+                    TranscriptJsonOptions)
+                ?? [];
+
+            if (cues.Count == 0 || cues.Count > MaxCueCount)
+                return [];
+
+            var normalized = new List<VideoTranscriptCue>(cues.Count);
+            var previousStartMs = -1;
+            for (var index = 0; index < cues.Count; index++)
+            {
+                var cue = cues[index];
+                var text = NormalizeTranscript(cue.Text);
+                if (string.IsNullOrWhiteSpace(text))
+                    return [];
+
+                if (cue.StartMs < 0 || cue.EndMs <= cue.StartMs)
+                    return [];
+
+                if (previousStartMs > cue.StartMs)
+                    return [];
+
+                normalized.Add(new VideoTranscriptCue(
+                    index,
+                    cue.StartMs,
+                    cue.EndMs,
+                    text));
+                previousStartMs = cue.StartMs;
+            }
+
+            return normalized;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<VideoTranscriptCue> ParseStoredTranscriptCues(string transcriptCuesJson)
+    {
+        return ParseTranscriptCues(transcriptCuesJson);
     }
 
     private static string NormalizeFileName(string? fileName)

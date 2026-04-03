@@ -6,6 +6,8 @@ public sealed record VideoUploadResponse(
     string OriginalFileName,
     string TranscriptText,
     string TranscriptLanguage,
+    string TranscriptLanguageCode,
+    IReadOnlyList<VideoTranscriptCue> TranscriptCues,
     bool IsPublic,
     int DurationMs,
     long FileSizeBytes,

@@ -62,7 +62,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.MediaContentType).HasMaxLength(100).IsRequired();
             e.Property(x => x.OriginalFileName).HasMaxLength(255).IsRequired();
             e.Property(x => x.TranscriptLanguage).HasMaxLength(35).IsRequired();
+            e.Property(x => x.TranscriptLanguageCode).HasMaxLength(16).IsRequired();
             e.Property(x => x.TranscriptText).IsRequired();
+            e.Property(x => x.TranscriptCuesJson).HasColumnType("jsonb").IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
