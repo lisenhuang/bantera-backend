@@ -305,22 +305,25 @@ app.MapPut("/api/me/profile", async (
             new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
             statusCode: 401);
 
-    var (response, errorCode) = await profileService.UpdateNameAsync(
+    var (response, errorCode) = await profileService.UpdateProfileAsync(
         userId.Value,
         req.Name,
+        req.TranslationLanguage,
         httpContext,
         cancellationToken);
 
     return response is null
         ? Results.Json(
-            new ApiError(errorCode ?? ErrorCodes.InvalidProfile, "Name must be between 1 and 80 characters."),
+            new ApiError(
+                errorCode ?? ErrorCodes.InvalidProfile,
+                "Profile updates must include a valid name and/or translation language."),
             statusCode: 400)
         : Results.Ok(response);
 })
 .WithName("UpdateMyProfile")
 .WithMetadata(new SwaggerOperationAttribute(
     "Update current profile",
-    "Updates the current user's display name."))
+    "Updates the current user's editable profile fields such as name and translation language."))
 .Produces<UserProfileResponse>(200)
 .Produces<ApiError>(400)
 .Produces<ApiError>(401)

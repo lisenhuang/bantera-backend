@@ -55,6 +55,41 @@ public class ProfileService(
         return (BuildResponse(user, httpContext), null);
     }
 
+    public async Task<(UserProfileResponse? Response, string? ErrorCode)> UpdateProfileAsync(
+        Guid userId,
+        string? name,
+        string? translationLanguage,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var hasName = name is not null;
+        var hasTranslationLanguage = translationLanguage is not null;
+        if (!hasName && !hasTranslationLanguage)
+            return (null, ErrorCodes.InvalidProfile);
+
+        var normalizedName = name?.Trim();
+        if (hasName && (string.IsNullOrWhiteSpace(normalizedName) || normalizedName.Length > 80))
+            return (null, ErrorCodes.InvalidProfile);
+
+        var normalizedTranslationLanguage = NormalizeTranslationLanguage(translationLanguage);
+        if (hasTranslationLanguage && normalizedTranslationLanguage is null)
+            return (null, ErrorCodes.InvalidProfile);
+
+        var user = await LoadUserAsync(userId, cancellationToken);
+        if (user is null)
+            return (null, ErrorCodes.Unauthorized);
+
+        if (hasName)
+            user.Name = normalizedName;
+        if (hasTranslationLanguage)
+            user.TranslationLanguage = normalizedTranslationLanguage;
+
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+
+        return (BuildResponse(user, httpContext), null);
+    }
+
     public async Task<(UserProfileResponse? Response, string? ErrorCode)> UpdateAvatarAsync(
         Guid userId,
         IFormFile file,
@@ -125,7 +160,8 @@ public class ProfileService(
         return new UserProfileResponse(
             user.Id,
             ResolveName(user),
-            BuildAvatarUrl(user, httpContext));
+            BuildAvatarUrl(user, httpContext),
+            user.TranslationLanguage);
     }
 
     private string ResolveName(User user)
@@ -172,6 +208,24 @@ public class ProfileService(
         return SupportedImageContentTypes.Contains(normalized)
             ? normalized
             : null;
+    }
+
+    private static string? NormalizeTranslationLanguage(string? translationLanguage)
+    {
+        if (translationLanguage is null)
+            return null;
+
+        var normalized = translationLanguage.Trim().Replace('_', '-');
+        if (string.IsNullOrWhiteSpace(normalized) || normalized.Length > 35)
+            return null;
+
+        foreach (var segment in normalized.Split('-', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment.Length > 8 || segment.Any(ch => !char.IsLetterOrDigit(ch)))
+                return null;
+        }
+
+        return normalized;
     }
 
     private static string BuildAvatarObjectKey(Guid userId, string contentType)
