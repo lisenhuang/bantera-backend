@@ -1,6 +1,7 @@
 using System.Text;
 using BanteraApi.Auth;
 using BanteraApi.Database;
+using BanteraApi.Gemini;
 using BanteraApi.Profile;
 using BanteraApi.Storage;
 using BanteraApi.Videos;
@@ -26,6 +27,14 @@ builder.Services.Configure<R2Settings>(builder.Configuration.GetSection(R2Settin
 builder.Services.AddSingleton<R2StorageService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<VideoService>();
+
+builder.Services.Configure<GeminiSettings>(builder.Configuration.GetSection("Gemini"));
+builder.Services.AddHttpClient("gemini", c =>
+{
+    c.BaseAddress = new Uri("https://generativelanguage.googleapis.com");
+    c.Timeout = TimeSpan.FromSeconds(180);
+});
+builder.Services.AddScoped<GeminiService>();
 
 // ── JWT Auth ──────────────────────────────────────────────────────────────────
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret is not configured.");
@@ -454,6 +463,48 @@ app.MapGet("/api/me/videos", async (
     "List my uploaded videos",
     "Returns the authenticated user's uploaded videos ordered from newest to oldest."))
 .Produces<IReadOnlyList<VideoUploadResponse>>(200)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
+app.MapPost("/api/me/audio/generate", async (
+    GenerateAudioRequest req,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    GeminiService geminiService,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            statusCode: 401);
+
+    var dialogue = await geminiService.GenerateDialogueAsync(
+        req.LanguageCode, req.Scenario, req.DurationSeconds, cancellationToken);
+
+    var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, cancellationToken);
+
+    var cues = geminiService.EstimateCues(dialogue.Lines, durationMs);
+
+    var response = await videoService.SaveAiAudioAsync(
+        userId.Value,
+        dialogue.Title,
+        wavBytes,
+        req.Language,
+        req.LanguageCode,
+        cues,
+        durationMs,
+        httpContext,
+        cancellationToken);
+
+    return Results.Ok(response);
+})
+.WithName("GenerateAiAudio")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Generate AI dialogue + audio",
+    "Uses Gemini to generate a two-speaker dialogue and synthesise it as a WAV audio file. The result is stored publicly and returned as a video record with isAiGenerated=true."))
+.Produces<VideoUploadResponse>(200)
 .Produces<ApiError>(401)
 .RequireAuthorization();
 

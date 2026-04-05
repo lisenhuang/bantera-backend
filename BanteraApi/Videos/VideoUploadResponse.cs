@@ -15,4 +15,5 @@ public sealed record VideoUploadResponse(
     int? VideoHeight,
     string VideoContentType,
     string? VideoUrl,
+    bool IsAiGenerated,
     DateTime CreatedAt);

@@ -165,6 +165,7 @@ public class VideoService(
                 httpContext,
                 "GetVideoFile",
                 values: new { videoId = video.Id }),
+            video.IsAiGenerated,
             video.CreatedAt);
     }
 
@@ -310,6 +311,50 @@ public class VideoService(
     private static bool IsValidDimension(int? value)
     {
         return value is null || (value.Value > 0 && value.Value <= 10_000);
+    }
+
+    public async Task<VideoUploadResponse> SaveAiAudioAsync(
+        Guid userId,
+        string title,
+        byte[] wavBytes,
+        string transcriptLanguage,
+        string transcriptLanguageCode,
+        IReadOnlyList<Gemini.VideoTranscriptCueRecord> cues,
+        int durationMs,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var objectKey = $"videos/{userId}/{Guid.NewGuid():N}.wav";
+        await r2StorageService.UploadObjectAsync(objectKey, new MemoryStream(wavBytes), "audio/wav", cancellationToken);
+
+        var transcriptText = string.Join("\n", cues.Select(c => c.Text));
+        var cuesJson = JsonSerializer.Serialize(
+            cues.Select(c => new VideoTranscriptCue(c.Index, c.StartMs, c.EndMs, c.Text)).ToList(),
+            TranscriptJsonOptions);
+
+        var video = new Database.Entities.UserVideo
+        {
+            UserId = userId,
+            MediaObjectKey = objectKey,
+            MediaContentType = "audio/wav",
+            OriginalFileName = $"{title}.wav",
+            TranscriptText = transcriptText,
+            TranscriptLanguage = NormalizeTranscriptLanguage(transcriptLanguage),
+            TranscriptLanguageCode = NormalizeTranscriptLanguageCode(transcriptLanguageCode, transcriptLanguage),
+            TranscriptCuesJson = cuesJson,
+            IsPublic = true,
+            IsAiGenerated = true,
+            FileSizeBytes = wavBytes.Length,
+            DurationMs = durationMs,
+            VideoWidth = null,
+            VideoHeight = null,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.UserVideos.Add(video);
+        await db.SaveChangesAsync(cancellationToken);
+        return BuildResponse(video, httpContext);
     }
 
     private static string BuildVideoObjectKey(Guid userId, string contentType)

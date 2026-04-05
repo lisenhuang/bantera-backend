@@ -13,6 +13,7 @@ public class UserVideo
     public string TranscriptLanguageCode { get; set; } = string.Empty;
     public string TranscriptCuesJson { get; set; } = "[]";
     public bool IsPublic { get; set; }
+    public bool IsAiGenerated { get; set; } = false;
     public long FileSizeBytes { get; set; }
     public int DurationMs { get; set; }
     public int? VideoWidth { get; set; }
