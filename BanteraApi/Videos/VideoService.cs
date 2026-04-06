@@ -359,6 +359,23 @@ public class VideoService(
         return BuildResponse(video, httpContext);
     }
 
+    public async Task<bool> DeleteVideoAsync(
+        Guid videoId,
+        Guid requesterId,
+        CancellationToken cancellationToken = default)
+    {
+        var video = await db.UserVideos
+            .FirstOrDefaultAsync(v => v.Id == videoId, cancellationToken);
+
+        if (video is null || video.UserId != requesterId)
+            return false;
+
+        await r2StorageService.DeleteObjectAsync(video.MediaObjectKey, cancellationToken);
+        db.UserVideos.Remove(video);
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     public async Task<VideoUploadResponse?> UpdateTranscriptAsync(
         Guid videoId,
         Guid requesterId,

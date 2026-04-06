@@ -563,6 +563,25 @@ app.MapPatch("/api/me/videos/{videoId:guid}/transcript", async (
 .Produces(404)
 .RequireAuthorization();
 
+app.MapDelete("/api/me/videos/{videoId:guid}", async (
+    Guid videoId,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), statusCode: 401);
+
+    var deleted = await videoService.DeleteVideoAsync(videoId, userId.Value, cancellationToken);
+    return deleted ? Results.NoContent() : Results.NotFound();
+})
+.WithName("DeleteMyVideo")
+.Produces(204)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
 app.MapGet("/api/videos/{videoId:guid}", async (
     Guid videoId,
     HttpContext httpContext,
