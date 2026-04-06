@@ -18,6 +18,7 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         ["en-AU"] = "Write the dialogue STRICTLY in Australian English. The speakers MUST sound authentically Australian — use Australian vocabulary and idioms (e.g. 'arvo', 'brekkie', 'no worries', 'mate', 'servo', 'bottle-o'). Do NOT use New Zealand, British, or American English.",
         ["en-CA"] = "Write the dialogue STRICTLY in Canadian English. The speakers MUST sound authentically Canadian — use Canadian vocabulary and idioms (e.g. 'toque', 'loonie', 'double-double', 'eh', 'hydro'). Do NOT use American or British English.",
         ["en-IE"] = "Write the dialogue STRICTLY in Irish English. The speakers MUST sound authentically Irish — use Irish vocabulary and idioms (e.g. 'grand', 'craic', 'gas', 'your man', 'deadly'). Do NOT use British or American English.",
+        ["en-IN"] = "Write the dialogue STRICTLY in Indian English. The speakers MUST sound authentically Indian — use Indian English vocabulary, phrasing and idioms natural to India (e.g. 'prepone', 'do the needful', 'out of station', 'revert back', 'itself'). Sentence rhythm should reflect Indian English patterns. Do NOT use British, American, or Australian English.",
         ["zh"]    = "Write the dialogue entirely in Mandarin Chinese (简体中文). Keep it natural and conversational.",
         ["ja"]    = "Write the dialogue entirely in Japanese (日本語). Keep it natural and conversational.",
         ["ko"]    = "Write the dialogue entirely in Korean (한국어). Keep it natural and conversational.",
@@ -41,6 +42,7 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         ["en-AU"] = "Both speakers must use a natural, authentic Australian accent throughout. Do not use New Zealand, British, or American accents.",
         ["en-CA"] = "Both speakers must use a natural, authentic Canadian English accent throughout.",
         ["en-IE"] = "Both speakers must use a natural, authentic Irish English accent throughout.",
+        ["en-IN"] = "Both speakers must use a natural, authentic Indian English accent throughout — the distinctive rhythm, intonation and stress patterns of Indian English speakers. Do not use British, American, or Australian accents.",
     };
 
     // Voice library — each voice tagged by gender and style keywords.
