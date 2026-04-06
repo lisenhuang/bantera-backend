@@ -43,14 +43,71 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         ["en-IE"] = "Both speakers must use a natural, authentic Irish English accent throughout.",
     };
 
-    private static readonly HashSet<string> ValidVoiceNames =
+    // Voice library — each voice tagged by gender and style keywords.
+    // The text model describes character style; backend scores and picks the best match.
+    private record VoiceProfile(string Name, string Gender, string[] Styles);
+
+    private static readonly VoiceProfile[] VoiceLibrary =
     [
-        "Kore", "Puck", "Aoede", "Charon", "Fenrir", "Leda", "Orus", "Zephyr",
-        "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
-        "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
-        "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
-        "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+        // Female voices
+        new("Kore",         "female", ["warm", "gentle"]),
+        new("Aoede",        "female", ["friendly", "bright", "youthful"]),
+        new("Leda",         "female", ["warm", "conversational"]),
+        new("Callirrhoe",   "female", ["gentle", "sincere"]),
+        new("Autonoe",      "female", ["energetic", "playful", "expressive"]),
+        new("Despina",      "female", ["cheerful", "youthful", "playful"]),
+        new("Erinome",      "female", ["calm", "gentle", "refined"]),
+        new("Laomedeia",    "female", ["professional", "authoritative", "articulate"]),
+        new("Pulcherrima",  "female", ["playful", "charming", "expressive"]),
+        new("Vindemiatrix", "female", ["professional", "authoritative", "crisp"]),
+        new("Sulafat",      "female", ["warm", "expressive", "melodic"]),
+        // Male voices
+        new("Puck",          "male", ["playful", "witty", "youthful"]),
+        new("Charon",        "male", ["authoritative", "calm", "mature"]),
+        new("Fenrir",        "male", ["authoritative", "intense", "confident"]),
+        new("Orus",          "male", ["professional", "steady", "calm"]),
+        new("Zephyr",        "male", ["playful", "friendly", "youthful"]),
+        new("Enceladus",     "male", ["authoritative", "serious", "mature"]),
+        new("Iapetus",       "male", ["professional", "neutral", "calm"]),
+        new("Umbriel",       "male", ["gentle", "calm", "reflective"]),
+        new("Algieba",       "male", ["confident", "expressive", "smooth"]),
+        new("Algenib",       "male", ["energetic", "crisp", "youthful"]),
+        new("Rasalgethi",    "male", ["warm", "mature", "sincere"]),
+        new("Achernar",      "male", ["youthful", "energetic", "playful"]),
+        new("Alnilam",       "male", ["professional", "neutral", "steady"]),
+        new("Schedar",       "male", ["warm", "friendly", "sincere"]),
+        new("Gacrux",        "male", ["authoritative", "commanding", "mature"]),
+        new("Achird",        "male", ["friendly", "warm", "casual"]),
+        new("Zubenelgenubi", "male", ["calm", "gentle", "thoughtful"]),
+        new("Sadachbia",     "male", ["professional", "composed", "neutral"]),
+        new("Sadaltager",    "male", ["expressive", "smooth", "confident"]),
     ];
+
+    // Pick the voice that best matches gender + style. Excludes `exclude` to avoid duplicates.
+    private static string PickVoice(string gender, string[] styles, string? exclude = null)
+    {
+        var candidates = VoiceLibrary
+            .Where(v => v.Gender == gender && v.Name != exclude)
+            .ToArray();
+
+        // Fall back to opposite gender if the pool is somehow empty.
+        if (candidates.Length == 0)
+            candidates = VoiceLibrary.Where(v => v.Name != exclude).ToArray();
+
+        // Score by how many requested styles each voice has, with a random tiebreak.
+        return candidates
+            .Select(v => (v.Name, Score: styles.Count(s => v.Styles.Contains(s, StringComparer.OrdinalIgnoreCase))))
+            .OrderByDescending(x => x.Score)
+            .ThenBy(_ => Random.Shared.Next())
+            .First().Name;
+    }
+
+    private static (string Voice1, string Voice2) PickVoices(string gender1, string[] styles1, string gender2, string[] styles2)
+    {
+        var v1 = PickVoice(gender1, styles1);
+        var v2 = PickVoice(gender2, styles2, exclude: v1);
+        return (v1, v2);
+    }
 
     private GeminiSettings Settings => options.Value;
 
@@ -73,8 +130,6 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
             ? "Choose a random, interesting everyday scenario (e.g. ordering coffee, catching up after a holiday, a job interview, grocery shopping, getting lost on holiday)."
             : $"The scenario is: {scenario}";
 
-        var voiceList = string.Join(" | ", ValidVoiceNames);
-
         var prompt = $$"""
 You are a dialogue writer for conversational language learning.
 
@@ -92,14 +147,17 @@ Generate a natural, realistic spoken dialogue between exactly TWO people.
 - Do NOT include stage directions or any text outside the dialogue.
 - Also write a short, catchy title for this dialogue (max 8 words).
 
-Choose a voice for each speaker from the following list. Pick voices that suit each character's likely personality, age, and role in the scenario. Prefer different genders unless the scenario clearly involves two people of the same gender. Use the exact name as shown.
-Available voices: {{voiceList}}
+For each speaker, determine:
+  • gender — RULES: if the scenario explicitly states a character's gender (e.g. "girl", "boy", "woman", "man", "he", "she"), you MUST use that gender. Otherwise infer from context. Output only "male" or "female".
+  • styles — choose 1–3 that best describe the character's personality and the emotional tone they bring to the scene. Pick ONLY from this list: warm, friendly, playful, youthful, energetic, gentle, calm, sincere, expressive, professional, authoritative, confident, mature, intense, smooth, casual
 
 Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
 {
   "title": "...",
-  "voice1": "VoiceNameHere",
-  "voice2": "VoiceNameHere",
+  "speaker1_gender": "female",
+  "speaker1_styles": ["warm", "playful"],
+  "speaker2_gender": "male",
+  "speaker2_styles": ["authoritative", "mature"],
   "lines": [
     { "speaker": "Speaker1", "text": "..." },
     { "speaker": "Speaker2", "text": "..." }
@@ -150,8 +208,11 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
 
             if (parsed is null) throw new InvalidOperationException("Gemini returned null dialogue.");
 
-            var voice1 = ValidVoiceNames.Contains(parsed.Voice1 ?? "") ? parsed.Voice1! : "Kore";
-            var voice2 = ValidVoiceNames.Contains(parsed.Voice2 ?? "") ? parsed.Voice2! : "Puck";
+            var gender1 = parsed.Speaker1Gender?.Trim().ToLowerInvariant() == "female" ? "female" : "male";
+            var gender2 = parsed.Speaker2Gender?.Trim().ToLowerInvariant() == "female" ? "female" : "male";
+            var styles1 = parsed.Speaker1Styles ?? [];
+            string[] styles2 = parsed.Speaker2Styles ?? [];
+            var (voice1, voice2) = PickVoices(gender1, styles1, gender2, styles2);
 
             return new GeneratedDialogue(
                 Title: parsed.Title ?? "Dialogue",
@@ -314,10 +375,12 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
     // ── Internal deserialization types ───────────────────────────────
 
     private record RawDialogue(
-        [property: JsonPropertyName("title")]  string? Title,
-        [property: JsonPropertyName("voice1")] string? Voice1,
-        [property: JsonPropertyName("voice2")] string? Voice2,
-        [property: JsonPropertyName("lines")]  RawLine[]? Lines);
+        [property: JsonPropertyName("title")]           string?   Title,
+        [property: JsonPropertyName("speaker1_gender")] string?   Speaker1Gender,
+        [property: JsonPropertyName("speaker1_styles")] string[]? Speaker1Styles,
+        [property: JsonPropertyName("speaker2_gender")] string?   Speaker2Gender,
+        [property: JsonPropertyName("speaker2_styles")] string[]? Speaker2Styles,
+        [property: JsonPropertyName("lines")]           RawLine[]? Lines);
 
     private record RawLine(
         [property: JsonPropertyName("speaker")] string? Speaker,
