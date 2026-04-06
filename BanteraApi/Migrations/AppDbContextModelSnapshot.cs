@@ -29,6 +29,9 @@ namespace BanteraApi.Migrations
                         .HasColumnType("uuid")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<int?>("AiAudioDailyLimit")
+                        .HasColumnType("integer");
+
                     b.Property<string>("AvatarObjectKey")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");

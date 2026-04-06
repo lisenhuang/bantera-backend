@@ -45,4 +45,7 @@ public static class ErrorCodes
 
     /// <summary>Request is missing or has an invalid Authorization header.</summary>
     public const string Unauthorized = "unauthorized";
+
+    /// <summary>User has reached their daily AI audio generation limit.</summary>
+    public const string DailyLimitReached = "daily_limit_reached";
 }

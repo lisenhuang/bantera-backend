@@ -472,6 +472,7 @@ app.MapPost("/api/me/audio/generate", async (
     System.Security.Claims.ClaimsPrincipal user,
     GeminiService geminiService,
     VideoService videoService,
+    AppDbContext db,
     CancellationToken cancellationToken) =>
 {
     var userId = TryGetUserId(user);
@@ -479,6 +480,21 @@ app.MapPost("/api/me/audio/generate", async (
         return Results.Json(
             new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
             statusCode: 401);
+
+    const int defaultDailyLimit = 5;
+    var todayUtc = DateTime.UtcNow.Date;
+    var todayCount = await db.UserVideos
+        .CountAsync(v => v.UserId == userId.Value && v.IsAiGenerated && v.CreatedAt >= todayUtc, cancellationToken);
+    var customLimit = await db.Users
+        .Where(u => u.Id == userId.Value)
+        .Select(u => u.AiAudioDailyLimit)
+        .FirstOrDefaultAsync(cancellationToken);
+    var dailyLimit = customLimit ?? defaultDailyLimit;
+    if (todayCount >= dailyLimit)
+        return Results.Json(
+            new ApiError(ErrorCodes.DailyLimitReached,
+                $"You've reached your daily limit of {dailyLimit} AI audio generation{(dailyLimit == 1 ? "" : "s")}. Try again tomorrow."),
+            statusCode: 429);
 
     var dialogue = await geminiService.GenerateDialogueAsync(
         req.LanguageCode, req.Scenario, req.DurationSeconds, cancellationToken);
