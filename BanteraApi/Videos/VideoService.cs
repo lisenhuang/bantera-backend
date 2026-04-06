@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using BanteraApi.Auth;
+using BanteraApi.Cloudflare;
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
 using BanteraApi.Storage;
@@ -12,7 +13,8 @@ namespace BanteraApi.Videos;
 public class VideoService(
     AppDbContext db,
     R2StorageService r2StorageService,
-    LinkGenerator linkGenerator)
+    LinkGenerator linkGenerator,
+    CloudflareImageService cloudflareImageService)
 {
     private static readonly JsonSerializerOptions TranscriptJsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -165,6 +167,9 @@ public class VideoService(
                 httpContext,
                 "GetVideoFile",
                 values: new { videoId = video.Id }),
+            video.CoverImageObjectKey != null
+                ? linkGenerator.GetUriByName(httpContext, "GetVideoCoverImage", values: new { videoId = video.Id })
+                : null,
             video.IsAiGenerated,
             video.IsTranscriptionEstimated,
             video.CreatedAt);
@@ -328,6 +333,20 @@ public class VideoService(
         var objectKey = $"videos/{userId}/{Guid.NewGuid():N}.wav";
         await r2StorageService.UploadObjectAsync(objectKey, new MemoryStream(wavBytes), "audio/wav", cancellationToken);
 
+        // Generate cover image via Cloudflare Workers AI (best-effort — failure does not block audio creation).
+        string? coverKey = null;
+        try
+        {
+            var imagePrompt = $"A vibrant, artistic illustration representing a conversation in {transcriptLanguage} about '{title}'. No text, no letters, clean modern art style.";
+            var coverBytes = await cloudflareImageService.GenerateImageAsync(imagePrompt, cancellationToken);
+            coverKey = $"covers/{userId}/{Guid.NewGuid():N}.png";
+            await r2StorageService.UploadObjectAsync(coverKey, new MemoryStream(coverBytes), "image/png", cancellationToken);
+        }
+        catch
+        {
+            coverKey = null;
+        }
+
         var transcriptText = string.Join("\n", cues.Select(c => c.Text));
         var cuesJson = JsonSerializer.Serialize(
             cues.Select(c => new VideoTranscriptCue(c.Index, c.StartMs, c.EndMs, c.Text)).ToList(),
@@ -346,6 +365,7 @@ public class VideoService(
             IsPublic = true,
             IsAiGenerated = true,
             IsTranscriptionEstimated = true,
+            CoverImageObjectKey = coverKey,
             FileSizeBytes = wavBytes.Length,
             DurationMs = durationMs,
             VideoWidth = null,

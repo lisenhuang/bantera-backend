@@ -15,6 +15,7 @@ public class UserVideo
     public bool IsPublic { get; set; }
     public bool IsAiGenerated { get; set; } = false;
     public bool IsTranscriptionEstimated { get; set; } = false;
+    public string? CoverImageObjectKey { get; set; }
     public long FileSizeBytes { get; set; }
     public int DurationMs { get; set; }
     public int? VideoWidth { get; set; }

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using BanteraApi.Auth;
+using BanteraApi.Cloudflare;
 using BanteraApi.Database;
 using BanteraApi.Gemini;
 using BanteraApi.Profile;
@@ -28,6 +29,14 @@ builder.Services.Configure<R2Settings>(builder.Configuration.GetSection(R2Settin
 builder.Services.AddSingleton<R2StorageService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<VideoService>();
+
+builder.Services.Configure<CloudflareSettings>(builder.Configuration.GetSection("Cloudflare"));
+builder.Services.AddHttpClient("cloudflare", c =>
+{
+    c.BaseAddress = new Uri("https://api.cloudflare.com");
+    c.Timeout = TimeSpan.FromSeconds(120);
+});
+builder.Services.AddScoped<CloudflareImageService>();
 
 builder.Services.Configure<GeminiSettings>(builder.Configuration.GetSection("Gemini"));
 builder.Services.AddHttpClient("gemini", c =>
@@ -659,6 +668,26 @@ app.MapGet("/api/videos/{videoId:guid}/file", async (
 .WithMetadata(new SwaggerOperationAttribute(
     "Get uploaded video file",
     "Streams the stored video file if it is public or owned by the caller."))
+.Produces(200)
+.Produces(404)
+.AllowAnonymous();
+
+app.MapGet("/api/videos/{videoId:guid}/cover", async (
+    Guid videoId,
+    R2StorageService r2StorageService,
+    AppDbContext db,
+    CancellationToken cancellationToken) =>
+{
+    var video = await db.UserVideos.FindAsync([videoId], cancellationToken);
+    if (video is null || video.CoverImageObjectKey is null)
+        return Results.NotFound();
+
+    var file = await r2StorageService.DownloadObjectAsync(video.CoverImageObjectKey, cancellationToken);
+    return file is null
+        ? Results.NotFound()
+        : Results.Stream(file.Stream, "image/png");
+})
+.WithName("GetVideoCoverImage")
 .Produces(200)
 .Produces(404)
 .AllowAnonymous();
