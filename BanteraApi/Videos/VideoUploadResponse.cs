@@ -16,4 +16,5 @@ public sealed record VideoUploadResponse(
     string VideoContentType,
     string? VideoUrl,
     bool IsAiGenerated,
+    bool IsTranscriptionEstimated,
     DateTime CreatedAt);

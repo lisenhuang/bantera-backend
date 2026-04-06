@@ -11,12 +11,13 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
 
     private static readonly Dictionary<string, string> AccentInstructions = new()
     {
-        ["en-US"] = "Write the dialogue in English with a US American accent — use vocabulary and idioms typical of the United States.",
-        ["en-UK"] = "Write the dialogue in English with a British accent — use vocabulary and idioms typical of the United Kingdom.",
-        ["en-NZ"] = "Write the dialogue in English with a New Zealand accent — use vocabulary and idioms typical of New Zealand.",
-        ["en-AU"] = "Write the dialogue in English with an Australian accent — use vocabulary and idioms typical of Australia.",
-        ["en-CA"] = "Write the dialogue in English with a Canadian accent — use vocabulary and idioms typical of Canada.",
-        ["en-IE"] = "Write the dialogue in English with an Irish accent — use vocabulary and idioms typical of Ireland.",
+        ["en-US"] = "Write the dialogue STRICTLY in US American English. The speakers MUST sound authentically American — use American vocabulary, spellings, and idioms (e.g. 'gotten', 'sidewalk', 'faucet', 'trash can', 'apartment'). Do NOT use British, Australian, or any other English variant.",
+        ["en-GB"] = "Write the dialogue STRICTLY in British English. The speakers MUST sound authentically British — use British vocabulary, spellings, and idioms (e.g. 'brilliant', 'cheers', 'biscuit', 'flat', 'rubbish', 'queue'). Do NOT use American or Australian English.",
+        ["en-UK"] = "Write the dialogue STRICTLY in British English. The speakers MUST sound authentically British — use British vocabulary, spellings, and idioms (e.g. 'brilliant', 'cheers', 'biscuit', 'flat', 'rubbish', 'queue'). Do NOT use American or Australian English.",
+        ["en-NZ"] = "Write the dialogue STRICTLY in New Zealand English. The speakers MUST sound authentically Kiwi — use New Zealand vocabulary and idioms (e.g. 'sweet as', 'chur', 'bach', 'dairy', 'togs', 'jandals', 'kia ora', 'choice'). This is NOT Australian English. Do NOT use Australian slang or idioms.",
+        ["en-AU"] = "Write the dialogue STRICTLY in Australian English. The speakers MUST sound authentically Australian — use Australian vocabulary and idioms (e.g. 'arvo', 'brekkie', 'no worries', 'mate', 'servo', 'bottle-o'). Do NOT use New Zealand, British, or American English.",
+        ["en-CA"] = "Write the dialogue STRICTLY in Canadian English. The speakers MUST sound authentically Canadian — use Canadian vocabulary and idioms (e.g. 'toque', 'loonie', 'double-double', 'eh', 'hydro'). Do NOT use American or British English.",
+        ["en-IE"] = "Write the dialogue STRICTLY in Irish English. The speakers MUST sound authentically Irish — use Irish vocabulary and idioms (e.g. 'grand', 'craic', 'gas', 'your man', 'deadly'). Do NOT use British or American English.",
         ["zh"]    = "Write the dialogue entirely in Mandarin Chinese (简体中文). Keep it natural and conversational.",
         ["ja"]    = "Write the dialogue entirely in Japanese (日本語). Keep it natural and conversational.",
         ["ko"]    = "Write the dialogue entirely in Korean (한국어). Keep it natural and conversational.",
@@ -28,6 +29,18 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         ["ar"]    = "Write the dialogue entirely in Arabic (العربية). Keep it natural and conversational.",
         ["it"]    = "Write the dialogue entirely in Italian (Italiano). Keep it natural and conversational.",
         ["si"]    = "Write the dialogue entirely in Sinhala (සිංහල). Keep it natural and conversational.",
+    };
+
+    // Accent instructions injected into the TTS content so Gemini speaks the right accent.
+    private static readonly Dictionary<string, string> TtsAccentInstructions = new()
+    {
+        ["en-US"] = "Both speakers must use a natural, authentic US American accent throughout. Do not use Australian, British, or New Zealand accents.",
+        ["en-GB"] = "Both speakers must use a natural, authentic British English accent throughout. Do not use Australian, American, or New Zealand accents.",
+        ["en-UK"] = "Both speakers must use a natural, authentic British English accent throughout. Do not use Australian, American, or New Zealand accents.",
+        ["en-NZ"] = "Both speakers must use a natural, authentic New Zealand English (Kiwi) accent throughout. This is NOT an Australian accent — New Zealand English has a distinctly higher, flatter vowel sound. Do not use Australian accents.",
+        ["en-AU"] = "Both speakers must use a natural, authentic Australian accent throughout. Do not use New Zealand, British, or American accents.",
+        ["en-CA"] = "Both speakers must use a natural, authentic Canadian English accent throughout.",
+        ["en-IE"] = "Both speakers must use a natural, authentic Irish English accent throughout.",
     };
 
     private static readonly HashSet<string> ValidVoiceNames =
@@ -152,10 +165,15 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
 
     public async Task<(byte[] WavBytes, int DurationMs)> GenerateAudioAsync(
         GeneratedDialogue dialogue,
+        string languageCode,
         CancellationToken cancellationToken = default)
     {
-        var transcript = string.Join("\n",
+        var ttsAccent = TtsAccentInstructions.GetValueOrDefault(languageCode);
+        var dialogueText = string.Join("\n",
             dialogue.Lines.Select(l => $"{l.Speaker}: {l.Text}"));
+        var transcript = ttsAccent != null
+            ? $"[Accent instruction: {ttsAccent}]\n\n{dialogueText}"
+            : dialogueText;
 
         return await WithGeminiKeyAsync(async key =>
         {

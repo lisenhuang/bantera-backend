@@ -166,6 +166,7 @@ public class VideoService(
                 "GetVideoFile",
                 values: new { videoId = video.Id }),
             video.IsAiGenerated,
+            video.IsTranscriptionEstimated,
             video.CreatedAt);
     }
 
@@ -344,6 +345,7 @@ public class VideoService(
             TranscriptCuesJson = cuesJson,
             IsPublic = true,
             IsAiGenerated = true,
+            IsTranscriptionEstimated = true,
             FileSizeBytes = wavBytes.Length,
             DurationMs = durationMs,
             VideoWidth = null,
@@ -353,6 +355,29 @@ public class VideoService(
         };
 
         db.UserVideos.Add(video);
+        await db.SaveChangesAsync(cancellationToken);
+        return BuildResponse(video, httpContext);
+    }
+
+    public async Task<VideoUploadResponse?> UpdateTranscriptAsync(
+        Guid videoId,
+        Guid requesterId,
+        string transcriptText,
+        IReadOnlyList<VideoTranscriptCue> cues,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var video = await db.UserVideos
+            .FirstOrDefaultAsync(v => v.Id == videoId, cancellationToken);
+
+        if (video is null || video.UserId != requesterId)
+            return null;
+
+        video.TranscriptText = transcriptText;
+        video.TranscriptCuesJson = JsonSerializer.Serialize(cues, TranscriptJsonOptions);
+        video.IsTranscriptionEstimated = false;
+        video.UpdatedAt = DateTime.UtcNow;
+
         await db.SaveChangesAsync(cancellationToken);
         return BuildResponse(video, httpContext);
     }

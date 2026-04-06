@@ -170,6 +170,9 @@ namespace BanteraApi.Migrations
                     b.Property<bool>("IsAiGenerated")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsTranscriptionEstimated")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsPublic")
                         .HasColumnType("boolean");
 

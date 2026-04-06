@@ -466,6 +466,62 @@ app.MapGet("/api/me/videos", async (
 .Produces<ApiError>(401)
 .RequireAuthorization();
 
+// Step-by-step endpoints (used by the app to show real progress)
+app.MapPost("/api/me/audio/dialogue", async (
+    GenerateAudioRequest req,
+    System.Security.Claims.ClaimsPrincipal user,
+    GeminiService geminiService,
+    AppDbContext db,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), statusCode: 401);
+
+    const int defaultDailyLimit = 5;
+    var todayUtc = DateTime.UtcNow.Date;
+    var todayCount = await db.UserVideos
+        .CountAsync(v => v.UserId == userId.Value && v.IsAiGenerated && v.CreatedAt >= todayUtc, cancellationToken);
+    var customLimit = await db.Users.Where(u => u.Id == userId.Value).Select(u => u.AiAudioDailyLimit).FirstOrDefaultAsync(cancellationToken);
+    var dailyLimit = customLimit ?? defaultDailyLimit;
+    if (todayCount >= dailyLimit)
+        return Results.Json(
+            new ApiError(ErrorCodes.DailyLimitReached,
+                $"You've reached your daily limit of {dailyLimit} AI audio generation{(dailyLimit == 1 ? "" : "s")}. Try again tomorrow."),
+            statusCode: 429);
+
+    var dialogue = await geminiService.GenerateDialogueAsync(req.LanguageCode, req.Scenario, req.DurationSeconds, cancellationToken);
+    return Results.Ok(new GeneratedDialogueResponse(dialogue.Title, dialogue.Voice1, dialogue.Voice2, dialogue.Lines, req.Language, req.LanguageCode));
+})
+.WithName("GenerateAiDialogue")
+.Produces<GeneratedDialogueResponse>(200)
+.Produces<ApiError>(401)
+.Produces<ApiError>(429)
+.RequireAuthorization();
+
+app.MapPost("/api/me/audio/synthesise", async (
+    SynthesiseAudioRequest req,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    GeminiService geminiService,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), statusCode: 401);
+
+    var dialogue = new GeneratedDialogue(req.Title, req.Voice1, req.Voice2, req.Lines);
+    var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
+    var cues = geminiService.EstimateCues(dialogue.Lines, durationMs);
+    var response = await videoService.SaveAiAudioAsync(userId.Value, dialogue.Title, wavBytes, req.Language, req.LanguageCode, cues, durationMs, httpContext, cancellationToken);
+    return Results.Ok(response);
+})
+.WithName("SynthesiseAiAudio")
+.Produces<VideoUploadResponse>(200)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
 app.MapPost("/api/me/audio/generate", async (
     GenerateAudioRequest req,
     HttpContext httpContext,
@@ -499,7 +555,7 @@ app.MapPost("/api/me/audio/generate", async (
     var dialogue = await geminiService.GenerateDialogueAsync(
         req.LanguageCode, req.Scenario, req.DurationSeconds, cancellationToken);
 
-    var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, cancellationToken);
+    var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
 
     var cues = geminiService.EstimateCues(dialogue.Lines, durationMs);
 
@@ -522,6 +578,33 @@ app.MapPost("/api/me/audio/generate", async (
     "Uses Gemini to generate a two-speaker dialogue and synthesise it as a WAV audio file. The result is stored publicly and returned as a video record with isAiGenerated=true."))
 .Produces<VideoUploadResponse>(200)
 .Produces<ApiError>(401)
+.RequireAuthorization();
+
+app.MapPatch("/api/me/videos/{videoId:guid}/transcript", async (
+    Guid videoId,
+    UpdateTranscriptRequest req,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            statusCode: 401);
+
+    var response = await videoService.UpdateTranscriptAsync(
+        videoId, userId.Value, req.TranscriptText, req.TranscriptCues, httpContext, cancellationToken);
+
+    return response is null
+        ? Results.NotFound()
+        : Results.Ok(response);
+})
+.WithName("UpdateVideoTranscript")
+.Produces<VideoUploadResponse>(200)
+.Produces<ApiError>(401)
+.Produces(404)
 .RequireAuthorization();
 
 app.MapGet("/api/videos/{videoId:guid}", async (
