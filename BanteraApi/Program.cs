@@ -172,30 +172,17 @@ app.MapPost("/api/auth/login", async (LoginRequest req, AuthService auth) =>
 .Produces<ApiError>(401)
 .AllowAnonymous();
 
-app.MapPost("/api/auth/register", async (RegisterRequest req, AuthService auth) =>
-{
-    var (response, errorCode) = await auth.RegisterAsync(req.Email, req.Password);
-    if (response is null)
-        return Results.Json(
-            new ApiError(errorCode ?? ErrorCodes.EmailAlreadyRegistered, "That email is already registered."),
-            statusCode: 409);
-
-    return Results.Ok(response);
-})
+// Email registration is temporarily disabled — new accounts must use Apple Sign-In.
+// To re-enable, restore the full handler and remove this stub.
+app.MapPost("/api/auth/register", () =>
+    Results.Json(
+        new ApiError("registration_disabled", "Email registration is currently disabled. Please sign in with Apple."),
+        statusCode: 403))
 .WithName("Register")
 .WithMetadata(new SwaggerOperationAttribute(
-    "Register with email + password",
-    """
-    Creates a new Bantera account using an email address and password, then immediately returns
-    an access token + refresh token pair.
-
-    **Current behavior:**
-    - Email verification / OTP is not required yet
-    - Duplicate email/password accounts are rejected
-    - Apple identities are not auto-linked by matching email
-    """))
-.Produces<LoginResponse>(200)
-.Produces<ApiError>(409)
+    "Register with email + password (disabled)",
+    "Email registration is temporarily disabled. Use POST /api/auth/apple instead."))
+.Produces<ApiError>(403)
 .AllowAnonymous();
 
 app.MapPost("/api/auth/apple", async (AppleLoginRequest req, AuthService auth, CancellationToken cancellationToken) =>
