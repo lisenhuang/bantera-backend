@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using BanteraApi.Auth;
 using BanteraApi.Database;
 using BanteraApi.Gemini;
@@ -466,62 +467,9 @@ app.MapGet("/api/me/videos", async (
 .Produces<ApiError>(401)
 .RequireAuthorization();
 
-// Step-by-step endpoints (used by the app to show real progress)
-app.MapPost("/api/me/audio/dialogue", async (
-    GenerateAudioRequest req,
-    System.Security.Claims.ClaimsPrincipal user,
-    GeminiService geminiService,
-    AppDbContext db,
-    CancellationToken cancellationToken) =>
-{
-    var userId = TryGetUserId(user);
-    if (userId is null)
-        return Results.Json(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), statusCode: 401);
-
-    const int defaultDailyLimit = 5;
-    var todayUtc = DateTime.UtcNow.Date;
-    var todayCount = await db.UserVideos
-        .CountAsync(v => v.UserId == userId.Value && v.IsAiGenerated && v.CreatedAt >= todayUtc, cancellationToken);
-    var customLimit = await db.Users.Where(u => u.Id == userId.Value).Select(u => u.AiAudioDailyLimit).FirstOrDefaultAsync(cancellationToken);
-    var dailyLimit = customLimit ?? defaultDailyLimit;
-    if (todayCount >= dailyLimit)
-        return Results.Json(
-            new ApiError(ErrorCodes.DailyLimitReached,
-                $"You've reached your daily limit of {dailyLimit} AI audio generation{(dailyLimit == 1 ? "" : "s")}. Try again tomorrow."),
-            statusCode: 429);
-
-    var dialogue = await geminiService.GenerateDialogueAsync(req.LanguageCode, req.Scenario, req.DurationSeconds, cancellationToken);
-    return Results.Ok(new GeneratedDialogueResponse(dialogue.Title, dialogue.Voice1, dialogue.Voice2, dialogue.Lines, req.Language, req.LanguageCode));
-})
-.WithName("GenerateAiDialogue")
-.Produces<GeneratedDialogueResponse>(200)
-.Produces<ApiError>(401)
-.Produces<ApiError>(429)
-.RequireAuthorization();
-
-app.MapPost("/api/me/audio/synthesise", async (
-    SynthesiseAudioRequest req,
-    HttpContext httpContext,
-    System.Security.Claims.ClaimsPrincipal user,
-    GeminiService geminiService,
-    VideoService videoService,
-    CancellationToken cancellationToken) =>
-{
-    var userId = TryGetUserId(user);
-    if (userId is null)
-        return Results.Json(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), statusCode: 401);
-
-    var dialogue = new GeneratedDialogue(req.Title, req.Voice1, req.Voice2, req.Lines);
-    var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
-    var cues = geminiService.EstimateCues(dialogue.Lines, durationMs);
-    var response = await videoService.SaveAiAudioAsync(userId.Value, dialogue.Title, wavBytes, req.Language, req.LanguageCode, cues, durationMs, httpContext, cancellationToken);
-    return Results.Ok(response);
-})
-.WithName("SynthesiseAiAudio")
-.Produces<VideoUploadResponse>(200)
-.Produces<ApiError>(401)
-.RequireAuthorization();
-
+// Single streaming endpoint — emits SSE events as each step completes.
+// Events: {"step":"dialogue"} → {"step":"done","video":{...}}
+// Pre-stream errors (401, 429) are returned as plain JSON with the matching status code.
 app.MapPost("/api/me/audio/generate", async (
     GenerateAudioRequest req,
     HttpContext httpContext,
@@ -533,9 +481,11 @@ app.MapPost("/api/me/audio/generate", async (
 {
     var userId = TryGetUserId(user);
     if (userId is null)
-        return Results.Json(
-            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
-            statusCode: 401);
+    {
+        httpContext.Response.StatusCode = 401;
+        await httpContext.Response.WriteAsJsonAsync(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), cancellationToken);
+        return;
+    }
 
     const int defaultDailyLimit = 5;
     var todayUtc = DateTime.UtcNow.Date;
@@ -547,37 +497,43 @@ app.MapPost("/api/me/audio/generate", async (
         .FirstOrDefaultAsync(cancellationToken);
     var dailyLimit = customLimit ?? defaultDailyLimit;
     if (todayCount >= dailyLimit)
-        return Results.Json(
+    {
+        httpContext.Response.StatusCode = 429;
+        await httpContext.Response.WriteAsJsonAsync(
             new ApiError(ErrorCodes.DailyLimitReached,
                 $"You've reached your daily limit of {dailyLimit} AI audio generation{(dailyLimit == 1 ? "" : "s")}. Try again tomorrow."),
-            statusCode: 429);
+            cancellationToken);
+        return;
+    }
 
-    var dialogue = await geminiService.GenerateDialogueAsync(
-        req.LanguageCode, req.Scenario, req.DurationSeconds, cancellationToken);
+    httpContext.Response.ContentType = "text/event-stream";
+    httpContext.Response.Headers["Cache-Control"] = "no-cache";
+    httpContext.Response.Headers["X-Accel-Buffering"] = "no";
 
-    var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
+    var sseOpts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+    async Task SendAsync(object payload)
+    {
+        var json = JsonSerializer.Serialize(payload, sseOpts);
+        await httpContext.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
+        await httpContext.Response.Body.FlushAsync(cancellationToken);
+    }
 
-    var cues = geminiService.EstimateCues(dialogue.Lines, durationMs);
+    try
+    {
+        var dialogue = await geminiService.GenerateDialogueAsync(req.LanguageCode, req.Scenario, req.DurationSeconds, cancellationToken);
+        await SendAsync(new { step = "dialogue" });
 
-    var response = await videoService.SaveAiAudioAsync(
-        userId.Value,
-        dialogue.Title,
-        wavBytes,
-        req.Language,
-        req.LanguageCode,
-        cues,
-        durationMs,
-        httpContext,
-        cancellationToken);
-
-    return Results.Ok(response);
+        var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
+        var cues = geminiService.EstimateCues(dialogue.Lines, durationMs);
+        var videoResponse = await videoService.SaveAiAudioAsync(userId.Value, dialogue.Title, wavBytes, req.Language, req.LanguageCode, cues, durationMs, httpContext, cancellationToken);
+        await SendAsync(new { step = "done", video = videoResponse });
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+        await SendAsync(new { step = "error", message = ex.Message });
+    }
 })
 .WithName("GenerateAiAudio")
-.WithMetadata(new SwaggerOperationAttribute(
-    "Generate AI dialogue + audio",
-    "Uses Gemini to generate a two-speaker dialogue and synthesise it as a WAV audio file. The result is stored publicly and returned as a video record with isAiGenerated=true."))
-.Produces<VideoUploadResponse>(200)
-.Produces<ApiError>(401)
 .RequireAuthorization();
 
 app.MapPatch("/api/me/videos/{videoId:guid}/transcript", async (
