@@ -299,6 +299,71 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
         }, cancellationToken);
     }
 
+    /// Corrects the text of phone-transcribed cues using the original dialogue as
+    /// ground truth. Preserves every cue's start/end timestamps exactly.
+    public async Task<IReadOnlyList<VideoTranscriptCueRecord>> CorrectTranscriptAsync(
+        string[] originalLines,
+        IReadOnlyList<VideoTranscriptCueRecord> transcribedCues,
+        CancellationToken cancellationToken = default)
+    {
+        if (transcribedCues.Count == 0) return transcribedCues;
+
+        var originalScript = string.Join("\n", originalLines.Select((l, i) => $"{i + 1}. {l}"));
+        var cueList = string.Join("\n", transcribedCues.Select((c, i) => $"{i + 1}. {c.Text}"));
+
+        var prompt = $"""
+You are a transcript corrector.
+
+Below is the ORIGINAL script (ground truth) for an AI-generated audio dialogue:
+{originalScript}
+
+Below is a phone-transcribed version of the same audio, split into {transcribedCues.Count} timed cues.
+The transcription may contain errors (wrong words, missing words, phonetic mistakes) because speech recognition is imperfect.
+
+{cueList}
+
+Your task:
+- Correct the text of each cue to match the original script as closely as possible.
+- The cue boundaries and count must stay EXACTLY the same — do not merge or split cues.
+- Each corrected cue should contain the portion of the original script that best matches that time segment.
+- Return ONLY a JSON array of corrected strings, one per cue, in the same order. No extra keys, no markdown fences.
+
+Example output for 3 cues:
+["corrected text 1","corrected text 2","corrected text 3"]
+""".Trim();
+
+        return await WithGeminiKeyAsync(async key =>
+        {
+            var client = httpClientFactory.CreateClient("gemini");
+            var url = $"/v1beta/models/{Settings.TextModel}:generateContent?key={key}";
+            var body = new { contents = new[] { new { parts = new[] { new { text = prompt } } } } };
+
+            using var response = await client.PostAsync(
+                url,
+                new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
+                cancellationToken);
+
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            var root = JsonDocument.Parse(json).RootElement;
+            var raw = root.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
+            var cleaned = raw.Replace("```json", "").Replace("```", "").Trim();
+
+            string[]? corrected;
+            try { corrected = JsonSerializer.Deserialize<string[]>(cleaned, JsonOpts); }
+            catch
+            {
+                var s = cleaned.IndexOf('['); var e = cleaned.LastIndexOf(']');
+                corrected = s >= 0 && e > s ? JsonSerializer.Deserialize<string[]>(cleaned[s..(e + 1)], JsonOpts) : null;
+            }
+
+            if (corrected == null || corrected.Length != transcribedCues.Count)
+                return transcribedCues; // fallback: return original transcribed cues unchanged
+
+            return transcribedCues.Select((c, i) => c with { Text = corrected[i].Trim() }).ToList();
+        }, cancellationToken);
+    }
+
     public IReadOnlyList<VideoTranscriptCueRecord> EstimateCues(DialogueLine[] lines, int durationMs)
     {
         if (lines.Length == 0) return [];

@@ -521,7 +521,7 @@ app.MapPost("/api/me/audio/generate", async (
     try
     {
         var dialogue = await geminiService.GenerateDialogueAsync(req.LanguageCode, req.Scenario, req.DurationSeconds, cancellationToken);
-        await SendAsync(new { step = "dialogue" });
+        await SendAsync(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
 
         var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
         var cues = geminiService.EstimateCues(dialogue.Lines, durationMs);
@@ -534,6 +534,39 @@ app.MapPost("/api/me/audio/generate", async (
     }
 })
 .WithName("GenerateAiAudio")
+.RequireAuthorization();
+
+// Corrects phone-transcribed cues using the original dialogue as ground truth.
+// Returns corrected cues with identical timestamps.
+app.MapPost("/api/me/videos/{videoId:guid}/transcript/correct", async (
+    Guid videoId,
+    CorrectTranscriptRequest req,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    GeminiService geminiService,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), statusCode: 401);
+
+    var transcribedCues = req.TranscribedCues
+        .Select(c => new VideoTranscriptCueRecord(c.Index, c.StartMs, c.EndMs, c.Text))
+        .ToList();
+
+    var corrected = await geminiService.CorrectTranscriptAsync(req.OriginalLines, transcribedCues, cancellationToken);
+
+    var transcriptText = string.Join("\n", corrected.Select(c => c.Text));
+    var videoTranscriptCues = corrected.Select(c => new VideoTranscriptCue(c.Index, c.StartMs, c.EndMs, c.Text)).ToList();
+
+    var response = await videoService.UpdateTranscriptAsync(videoId, userId.Value, transcriptText, videoTranscriptCues, httpContext, cancellationToken);
+    return response is null ? Results.NotFound() : Results.Ok(response);
+})
+.WithName("CorrectVideoTranscript")
+.Produces<VideoUploadResponse>(200)
+.Produces<ApiError>(401)
+.Produces(404)
 .RequireAuthorization();
 
 app.MapPatch("/api/me/videos/{videoId:guid}/transcript", async (
