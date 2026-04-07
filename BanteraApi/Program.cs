@@ -651,6 +651,78 @@ app.MapGet("/api/videos/public", async (
 .Produces<IReadOnlyList<VideoUploadResponse>>(200)
 .AllowAnonymous();
 
+// ── Saved videos ──────────────────────────────────────────────────────────────
+
+app.MapPost("/api/me/saved/{videoId:guid}", async (
+    Guid videoId,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return Results.Unauthorized();
+    var ok = await videoService.SaveVideoAsync(userId.Value, videoId, cancellationToken);
+    return ok ? Results.NoContent() : Results.NotFound();
+})
+.WithName("SaveVideo")
+.RequireAuthorization();
+
+app.MapDelete("/api/me/saved/{videoId:guid}", async (
+    Guid videoId,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return Results.Unauthorized();
+    await videoService.UnsaveVideoAsync(userId.Value, videoId, cancellationToken);
+    return Results.NoContent();
+})
+.WithName("UnsaveVideo")
+.RequireAuthorization();
+
+app.MapGet("/api/me/saved/{videoId:guid}", async (
+    Guid videoId,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return Results.Unauthorized();
+    var isSaved = await videoService.IsVideoSavedAsync(userId.Value, videoId, cancellationToken);
+    return Results.Ok(new { isSaved });
+})
+.WithName("CheckVideoSaved")
+.RequireAuthorization();
+
+app.MapGet("/api/me/saved", async (
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return Results.Unauthorized();
+    var videos = await videoService.ListSavedVideosAsync(userId.Value, httpContext, cancellationToken);
+    return Results.Ok(videos);
+})
+.WithName("ListSavedVideos")
+.RequireAuthorization();
+
+app.MapGet("/api/me/stats", async (
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return Results.Unauthorized();
+    var uploadCount = await videoService.GetUploadCountAsync(userId.Value, cancellationToken);
+    var savedCount = await videoService.GetSavedCountAsync(userId.Value, cancellationToken);
+    return Results.Ok(new { uploadCount, savedCount });
+})
+.WithName("GetMyStats")
+.RequireAuthorization();
+
 app.MapGet("/api/videos/{videoId:guid}", async (
     Guid videoId,
     HttpContext httpContext,

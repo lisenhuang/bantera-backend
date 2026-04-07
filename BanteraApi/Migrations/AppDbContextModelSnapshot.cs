@@ -240,6 +240,33 @@ namespace BanteraApi.Migrations
                     b.ToTable("user_videos", (string)null);
                 });
 
+            modelBuilder.Entity("BanteraApi.Database.Entities.UserSavedVideo", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime>("SavedAt")
+                        .IsRequired()
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VideoId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VideoId");
+
+                    b.HasIndex("UserId", "VideoId")
+                        .IsUnique();
+
+                    b.ToTable("user_saved_videos", (string)null);
+                });
+
             modelBuilder.Entity("BanteraApi.Database.Entities.UserIdentity", b =>
                 {
                     b.HasOne("BanteraApi.Database.Entities.User", "User")
@@ -271,6 +298,24 @@ namespace BanteraApi.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.UserSavedVideo", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BanteraApi.Database.Entities.UserVideo", "Video")
+                        .WithMany()
+                        .HasForeignKey("VideoId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                    b.Navigation("Video");
                 });
 
             modelBuilder.Entity("BanteraApi.Database.Entities.User", b =>

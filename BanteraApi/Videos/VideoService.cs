@@ -191,14 +191,15 @@ public class VideoService(
                 v.TranscriptText.Contains(search));
         }
 
-        var videos = await query
-            .OrderByDescending(v => v.CreatedAt)
+        var result = await query
+            .Join(db.Users, v => v.UserId, u => u.Id, (v, u) => new { Video = v, CreatorName = u.Name })
+            .OrderByDescending(x => x.Video.CreatedAt)
             .Skip(offset)
             .Take(limit)
             .ToListAsync(cancellationToken);
 
-        return videos
-            .Select(v => BuildResponse(v, httpContext))
+        return result
+            .Select(x => BuildResponse(x.Video, httpContext, x.CreatorName))
             .ToList();
     }
 
@@ -217,7 +218,7 @@ public class VideoService(
         return await r2StorageService.DownloadObjectAsync(video.MediaObjectKey, cancellationToken);
     }
 
-    private VideoUploadResponse BuildResponse(UserVideo video, HttpContext httpContext)
+    private VideoUploadResponse BuildResponse(UserVideo video, HttpContext httpContext, string? creatorDisplayName = null)
     {
         return new VideoUploadResponse(
             video.Id,
@@ -242,7 +243,8 @@ public class VideoService(
                 : null,
             video.IsAiGenerated,
             video.IsTranscriptionEstimated,
-            video.CreatedAt);
+            video.CreatedAt,
+            creatorDisplayName);
     }
 
     private static bool CanAccess(UserVideo video, Guid? requesterUserId)
@@ -452,6 +454,81 @@ public class VideoService(
         db.UserVideos.Add(video);
         await db.SaveChangesAsync(cancellationToken);
         return BuildResponse(video, httpContext);
+    }
+
+    public async Task<bool> SaveVideoAsync(
+        Guid userId,
+        Guid videoId,
+        CancellationToken cancellationToken = default)
+    {
+        var alreadySaved = await db.UserSavedVideos
+            .AnyAsync(s => s.UserId == userId && s.VideoId == videoId, cancellationToken);
+        if (alreadySaved) return true;
+
+        var videoExists = await db.UserVideos
+            .AnyAsync(v => v.Id == videoId && v.IsPublic, cancellationToken);
+        if (!videoExists) return false;
+
+        db.UserSavedVideos.Add(new Database.Entities.UserSavedVideo
+        {
+            UserId = userId,
+            VideoId = videoId,
+            SavedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task UnsaveVideoAsync(
+        Guid userId,
+        Guid videoId,
+        CancellationToken cancellationToken = default)
+    {
+        var saved = await db.UserSavedVideos
+            .FirstOrDefaultAsync(s => s.UserId == userId && s.VideoId == videoId, cancellationToken);
+        if (saved is null) return;
+        db.UserSavedVideos.Remove(saved);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<bool> IsVideoSavedAsync(
+        Guid userId,
+        Guid videoId,
+        CancellationToken cancellationToken = default)
+    {
+        return await db.UserSavedVideos
+            .AnyAsync(s => s.UserId == userId && s.VideoId == videoId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<VideoUploadResponse>> ListSavedVideosAsync(
+        Guid userId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await db.UserSavedVideos
+            .Where(s => s.UserId == userId)
+            .Join(db.UserVideos, s => s.VideoId, v => v.Id, (s, v) => new { Saved = s, Video = v })
+            .Join(db.Users, x => x.Video.UserId, u => u.Id, (x, u) => new { x.Saved, x.Video, CreatorName = u.Name })
+            .OrderByDescending(x => x.Saved.SavedAt)
+            .ToListAsync(cancellationToken);
+
+        return result
+            .Select(x => BuildResponse(x.Video, httpContext, x.CreatorName))
+            .ToList();
+    }
+
+    public async Task<int> GetUploadCountAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return await db.UserVideos.CountAsync(v => v.UserId == userId, cancellationToken);
+    }
+
+    public async Task<int> GetSavedCountAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return await db.UserSavedVideos.CountAsync(s => s.UserId == userId, cancellationToken);
     }
 
     public async Task<bool> DeleteVideoAsync(

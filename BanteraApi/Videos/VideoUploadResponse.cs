@@ -18,4 +18,5 @@ public sealed record VideoUploadResponse(
     string? CoverImageUrl,
     bool IsAiGenerated,
     bool IsTranscriptionEstimated,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    string? CreatorDisplayName);
