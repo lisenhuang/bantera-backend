@@ -59,12 +59,16 @@ public class ProfileService(
         Guid userId,
         string? name,
         string? translationLanguage,
+        string? nativeLanguage,
+        string? learningLanguage,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
         var hasName = name is not null;
         var hasTranslationLanguage = translationLanguage is not null;
-        if (!hasName && !hasTranslationLanguage)
+        var hasNativeLanguage = nativeLanguage is not null;
+        var hasLearningLanguage = learningLanguage is not null;
+        if (!hasName && !hasTranslationLanguage && !hasNativeLanguage && !hasLearningLanguage)
             return (null, ErrorCodes.InvalidProfile);
 
         var normalizedName = name?.Trim();
@@ -75,6 +79,14 @@ public class ProfileService(
         if (hasTranslationLanguage && normalizedTranslationLanguage is null)
             return (null, ErrorCodes.InvalidProfile);
 
+        var normalizedNativeLanguage = NormalizeTranslationLanguage(nativeLanguage);
+        if (hasNativeLanguage && normalizedNativeLanguage is null)
+            return (null, ErrorCodes.InvalidProfile);
+
+        var normalizedLearningLanguage = NormalizeTranslationLanguage(learningLanguage);
+        if (hasLearningLanguage && normalizedLearningLanguage is null)
+            return (null, ErrorCodes.InvalidProfile);
+
         var user = await LoadUserAsync(userId, cancellationToken);
         if (user is null)
             return (null, ErrorCodes.Unauthorized);
@@ -83,6 +95,10 @@ public class ProfileService(
             user.Name = normalizedName;
         if (hasTranslationLanguage)
             user.TranslationLanguage = normalizedTranslationLanguage;
+        if (hasNativeLanguage)
+            user.NativeLanguage = normalizedNativeLanguage;
+        if (hasLearningLanguage)
+            user.LearningLanguage = normalizedLearningLanguage;
 
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
@@ -161,7 +177,9 @@ public class ProfileService(
             user.Id,
             ResolveName(user),
             BuildAvatarUrl(user, httpContext),
-            user.TranslationLanguage);
+            user.TranslationLanguage,
+            user.NativeLanguage,
+            user.LearningLanguage);
     }
 
     private string ResolveName(User user)

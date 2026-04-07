@@ -19,6 +19,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
             e.Property(x => x.Name).HasMaxLength(80);
             e.Property(x => x.TranslationLanguage).HasMaxLength(35);
+            e.Property(x => x.NativeLanguage).HasMaxLength(35);
+            e.Property(x => x.LearningLanguage).HasMaxLength(35);
             e.Property(x => x.AvatarObjectKey).HasMaxLength(255);
             e.Property(x => x.Status).HasMaxLength(50).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();

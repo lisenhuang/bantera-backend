@@ -318,6 +318,8 @@ app.MapPut("/api/me/profile", async (
         userId.Value,
         req.Name,
         req.TranslationLanguage,
+        req.NativeLanguage,
+        req.LearningLanguage,
         httpContext,
         cancellationToken);
 
@@ -325,7 +327,7 @@ app.MapPut("/api/me/profile", async (
         ? Results.Json(
             new ApiError(
                 errorCode ?? ErrorCodes.InvalidProfile,
-                "Profile updates must include a valid name and/or translation language."),
+                "Profile updates must include at least one valid field."),
             statusCode: 400)
         : Results.Ok(response);
 })
