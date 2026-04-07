@@ -621,6 +621,7 @@ app.MapGet("/api/videos/public", async (
     [FromQuery] int limit,
     [FromQuery] int offset,
     [FromQuery] string? search,
+    [FromQuery] string? mediaType,
     HttpContext httpContext,
     System.Security.Claims.ClaimsPrincipal user,
     VideoService videoService,
@@ -635,6 +636,7 @@ app.MapGet("/api/videos/public", async (
         safeLimit,
         safeOffset,
         search,
+        mediaType,
         httpContext,
         cancellationToken);
 

@@ -147,6 +147,7 @@ public class VideoService(
         int limit,
         int offset,
         string? searchQuery,
+        string? mediaType,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
@@ -162,6 +163,10 @@ public class VideoService(
         var query = db.UserVideos
             .AsNoTracking()
             .Where(v => v.IsPublic);
+
+        var mt = mediaType?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(mt))
+            query = query.Where(v => v.MediaContentType.ToLower().StartsWith(mt + "/"));
 
         if (!string.IsNullOrWhiteSpace(normalizedCode))
         {
