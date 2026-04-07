@@ -616,6 +616,35 @@ app.MapDelete("/api/me/videos/{videoId:guid}", async (
 .Produces(404)
 .RequireAuthorization();
 
+app.MapGet("/api/videos/public", async (
+    [FromQuery] string? languageCode,
+    [FromQuery] int limit,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var safeLimit = Math.Clamp(limit <= 0 ? 5 : limit, 1, 20);
+    var excludeUserId = TryGetUserId(user);
+    var videos = await videoService.ListPublicVideosAsync(
+        languageCode,
+        excludeUserId,
+        safeLimit,
+        httpContext,
+        cancellationToken);
+
+    return Results.Ok(videos);
+})
+.WithName("ListPublicVideos")
+.WithMetadata(new SwaggerOperationAttribute(
+    "List public videos",
+    """
+    Returns the most recent public videos, optionally filtered by transcript language code.
+    When authenticated, videos owned by the caller are excluded.
+    """))
+.Produces<IReadOnlyList<VideoUploadResponse>>(200)
+.AllowAnonymous();
+
 app.MapGet("/api/videos/{videoId:guid}", async (
     Guid videoId,
     HttpContext httpContext,

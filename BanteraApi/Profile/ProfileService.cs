@@ -79,12 +79,13 @@ public class ProfileService(
         if (hasTranslationLanguage && normalizedTranslationLanguage is null)
             return (null, ErrorCodes.InvalidProfile);
 
-        var normalizedNativeLanguage = NormalizeTranslationLanguage(nativeLanguage);
-        if (hasNativeLanguage && normalizedNativeLanguage is null)
+        // For native/learning language an empty string means "clear the field".
+        var normalizedNativeLanguage = NormalizeLanguageOrClear(nativeLanguage, out var nativeIsInvalid);
+        if (hasNativeLanguage && nativeIsInvalid)
             return (null, ErrorCodes.InvalidProfile);
 
-        var normalizedLearningLanguage = NormalizeTranslationLanguage(learningLanguage);
-        if (hasLearningLanguage && normalizedLearningLanguage is null)
+        var normalizedLearningLanguage = NormalizeLanguageOrClear(learningLanguage, out var learningIsInvalid);
+        if (hasLearningLanguage && learningIsInvalid)
             return (null, ErrorCodes.InvalidProfile);
 
         var user = await LoadUserAsync(userId, cancellationToken);
@@ -226,6 +227,20 @@ public class ProfileService(
         return SupportedImageContentTypes.Contains(normalized)
             ? normalized
             : null;
+    }
+
+    /// Returns null (clear) when value is empty, the normalized BCP-47 string
+    /// when valid, or sets <paramref name="isInvalid"/> = true when the value
+    /// is non-empty but malformed.
+    private static string? NormalizeLanguageOrClear(string? value, out bool isInvalid)
+    {
+        isInvalid = false;
+        if (value is null) return null;        // null → not provided
+        var trimmed = value.Trim();
+        if (trimmed.Length == 0) return null;  // empty → clear (null in DB)
+        var normalized = NormalizeTranslationLanguage(value);
+        if (normalized is null) { isInvalid = true; return null; }
+        return normalized;
     }
 
     private static string? NormalizeTranslationLanguage(string? translationLanguage)

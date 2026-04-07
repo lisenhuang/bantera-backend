@@ -134,6 +134,70 @@ public class VideoService(
             .ToList();
     }
 
+    /// <summary>
+    /// Returns the most recent public videos whose transcript language code
+    /// matches <paramref name="languageCode"/>, excluding videos owned by
+    /// <paramref name="excludeUserId"/> when provided.
+    /// </summary>
+    public async Task<IReadOnlyList<VideoUploadResponse>> ListPublicVideosAsync(
+        string? languageCode,
+        Guid? excludeUserId,
+        int limit,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedCode = languageCode?.Trim().ToLowerInvariant();
+
+        // Extract the primary language subtag (e.g. "en" from "en-US").
+        // Used to also match generic/region-less entries (e.g. a video stored
+        // as "en" should appear for both "en-US" and "en-AU" learners), while
+        // still keeping regional variants separate from each other.
+        var primaryCode = string.IsNullOrWhiteSpace(normalizedCode)
+            ? null
+            : normalizedCode.Contains('-')
+                ? normalizedCode[..normalizedCode.IndexOf('-')]
+                : null; // already a primary-only code; no separate primaryCode needed
+
+        var query = db.UserVideos
+            .AsNoTracking()
+            .Where(v => v.IsPublic);
+
+        if (!string.IsNullOrWhiteSpace(normalizedCode))
+        {
+            if (primaryCode is not null)
+            {
+                // Query has a region (e.g. "en-US"):
+                //   match exact locale  → "en-US"
+                //   match generic entry → "en"   (no region, language-only)
+                //   do NOT match other  → "en-AU", "en-GB", etc.
+                query = query.Where(v =>
+                    v.TranscriptLanguageCode.ToLower() == normalizedCode ||
+                    v.TranscriptLanguageCode.ToLower() == primaryCode);
+            }
+            else
+            {
+                // Query is already primary-only (e.g. "en"):
+                //   match exact         → "en"
+                //   match any variant   → "en-US", "en-AU", etc.
+                query = query.Where(v =>
+                    v.TranscriptLanguageCode.ToLower() == normalizedCode ||
+                    v.TranscriptLanguageCode.ToLower().StartsWith(normalizedCode + "-"));
+            }
+        }
+
+        if (excludeUserId.HasValue)
+            query = query.Where(v => v.UserId != excludeUserId.Value);
+
+        var videos = await query
+            .OrderByDescending(v => v.CreatedAt)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        return videos
+            .Select(v => BuildResponse(v, httpContext))
+            .ToList();
+    }
+
     public async Task<StoredObjectResult?> GetVideoFileAsync(
         Guid videoId,
         Guid? requesterUserId,
