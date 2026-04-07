@@ -619,17 +619,22 @@ app.MapDelete("/api/me/videos/{videoId:guid}", async (
 app.MapGet("/api/videos/public", async (
     [FromQuery] string? languageCode,
     [FromQuery] int limit,
+    [FromQuery] int offset,
+    [FromQuery] string? search,
     HttpContext httpContext,
     System.Security.Claims.ClaimsPrincipal user,
     VideoService videoService,
     CancellationToken cancellationToken) =>
 {
-    var safeLimit = Math.Clamp(limit <= 0 ? 5 : limit, 1, 20);
+    var safeLimit = Math.Clamp(limit <= 0 ? 20 : limit, 1, 50);
+    var safeOffset = Math.Max(offset, 0);
     var excludeUserId = TryGetUserId(user);
     var videos = await videoService.ListPublicVideosAsync(
         languageCode,
         excludeUserId,
         safeLimit,
+        safeOffset,
+        search,
         httpContext,
         cancellationToken);
 
@@ -639,7 +644,8 @@ app.MapGet("/api/videos/public", async (
 .WithMetadata(new SwaggerOperationAttribute(
     "List public videos",
     """
-    Returns the most recent public videos, optionally filtered by transcript language code.
+    Returns public videos, newest first, optionally filtered by transcript language code
+    and full-text searched across file name and transcript. Supports offset-based pagination.
     When authenticated, videos owned by the caller are excluded.
     """))
 .Produces<IReadOnlyList<VideoUploadResponse>>(200)

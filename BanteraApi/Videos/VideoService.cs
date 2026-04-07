@@ -135,28 +135,29 @@ public class VideoService(
     }
 
     /// <summary>
-    /// Returns the most recent public videos whose transcript language code
-    /// matches <paramref name="languageCode"/>, excluding videos owned by
-    /// <paramref name="excludeUserId"/> when provided.
+    /// Returns public videos whose transcript language matches
+    /// <paramref name="languageCode"/>, with optional full-text
+    /// <paramref name="searchQuery"/> (matched against file name and transcript
+    /// text), keyset-paged via <paramref name="offset"/> / <paramref name="limit"/>.
+    /// Videos owned by <paramref name="excludeUserId"/> are excluded when provided.
     /// </summary>
     public async Task<IReadOnlyList<VideoUploadResponse>> ListPublicVideosAsync(
         string? languageCode,
         Guid? excludeUserId,
         int limit,
+        int offset,
+        string? searchQuery,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
         var normalizedCode = languageCode?.Trim().ToLowerInvariant();
 
         // Extract the primary language subtag (e.g. "en" from "en-US").
-        // Used to also match generic/region-less entries (e.g. a video stored
-        // as "en" should appear for both "en-US" and "en-AU" learners), while
-        // still keeping regional variants separate from each other.
         var primaryCode = string.IsNullOrWhiteSpace(normalizedCode)
             ? null
             : normalizedCode.Contains('-')
                 ? normalizedCode[..normalizedCode.IndexOf('-')]
-                : null; // already a primary-only code; no separate primaryCode needed
+                : null;
 
         var query = db.UserVideos
             .AsNoTracking()
@@ -166,19 +167,12 @@ public class VideoService(
         {
             if (primaryCode is not null)
             {
-                // Query has a region (e.g. "en-US"):
-                //   match exact locale  → "en-US"
-                //   match generic entry → "en"   (no region, language-only)
-                //   do NOT match other  → "en-AU", "en-GB", etc.
                 query = query.Where(v =>
                     v.TranscriptLanguageCode.ToLower() == normalizedCode ||
                     v.TranscriptLanguageCode.ToLower() == primaryCode);
             }
             else
             {
-                // Query is already primary-only (e.g. "en"):
-                //   match exact         → "en"
-                //   match any variant   → "en-US", "en-AU", etc.
                 query = query.Where(v =>
                     v.TranscriptLanguageCode.ToLower() == normalizedCode ||
                     v.TranscriptLanguageCode.ToLower().StartsWith(normalizedCode + "-"));
@@ -188,8 +182,18 @@ public class VideoService(
         if (excludeUserId.HasValue)
             query = query.Where(v => v.UserId != excludeUserId.Value);
 
+        // Full-text search across file name and transcript text.
+        var search = searchQuery?.Trim();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(v =>
+                v.OriginalFileName.Contains(search) ||
+                v.TranscriptText.Contains(search));
+        }
+
         var videos = await query
             .OrderByDescending(v => v.CreatedAt)
+            .Skip(offset)
             .Take(limit)
             .ToListAsync(cancellationToken);
 
