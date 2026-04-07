@@ -7,6 +7,8 @@ using BanteraApi.Database.Entities;
 using BanteraApi.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
 
 namespace BanteraApi.Videos;
 
@@ -338,9 +340,14 @@ public class VideoService(
         try
         {
             var imagePrompt = $"A vibrant, artistic illustration representing a conversation in {transcriptLanguage} about '{title}'. No text, no letters, clean modern art style.";
-            var coverBytes = await cloudflareImageService.GenerateImageAsync(imagePrompt, cancellationToken);
-            coverKey = $"covers/{userId}/{Guid.NewGuid():N}.png";
-            await r2StorageService.UploadObjectAsync(coverKey, new MemoryStream(coverBytes), "image/png", cancellationToken);
+            var pngBytes = await cloudflareImageService.GenerateImageAsync(imagePrompt, cancellationToken);
+            // Convert PNG → JPEG at quality 85 to reduce storage and transfer size.
+            using var img = Image.Load(pngBytes);
+            using var jpegMs = new MemoryStream();
+            await img.SaveAsJpegAsync(jpegMs, new JpegEncoder { Quality = 85 }, cancellationToken);
+            var coverBytes = jpegMs.ToArray();
+            coverKey = $"covers/{userId}/{Guid.NewGuid():N}.jpg";
+            await r2StorageService.UploadObjectAsync(coverKey, new MemoryStream(coverBytes), "image/jpeg", cancellationToken);
         }
         catch
         {

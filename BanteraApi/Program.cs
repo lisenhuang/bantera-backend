@@ -675,7 +675,7 @@ app.MapGet("/api/videos/{videoId:guid}/cover", async (
     var file = await r2StorageService.DownloadObjectAsync(video.CoverImageObjectKey, cancellationToken);
     return file is null
         ? Results.NotFound()
-        : Results.Stream(file.Stream, "image/png");
+        : Results.Stream(file.Stream, video.CoverImageObjectKey!.EndsWith(".jpg") ? "image/jpeg" : "image/png");
 })
 .WithName("GetVideoCoverImage")
 .Produces(200)
