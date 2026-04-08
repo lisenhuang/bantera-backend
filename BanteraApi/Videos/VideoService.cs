@@ -7,8 +7,10 @@ using BanteraApi.Database.Entities;
 using BanteraApi.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace BanteraApi.Videos;
 
@@ -16,9 +18,13 @@ public class VideoService(
     AppDbContext db,
     R2StorageService r2StorageService,
     LinkGenerator linkGenerator,
-    CloudflareImageService cloudflareImageService)
+    CloudflareImageService cloudflareImageService,
+    ILogger<VideoService> logger)
 {
     private static readonly JsonSerializerOptions TranscriptJsonOptions = new(JsonSerializerDefaults.Web);
+    private const string HighlightStart = "\u001b[30;103m";
+    private const string HighlightEnd = "\u001b[0m";
+    private const int FallbackCoverSize = 512;
 
     private static readonly HashSet<string> SupportedVideoContentTypes =
     [
@@ -109,12 +115,12 @@ public class VideoService(
         CancellationToken cancellationToken = default)
     {
         var video = await db.UserVideos
-            .AsNoTracking()
             .FirstOrDefaultAsync(v => v.Id == videoId, cancellationToken);
 
         if (video is null || !CanAccess(video, requesterUserId))
             return null;
 
+        await EnsureAiAudioCoverAsync(video, cancellationToken);
         return BuildResponse(video, httpContext);
     }
 
@@ -410,24 +416,11 @@ public class VideoService(
         var objectKey = $"videos/{userId}/{Guid.NewGuid():N}.wav";
         await r2StorageService.UploadObjectAsync(objectKey, new MemoryStream(wavBytes), "audio/wav", cancellationToken);
 
-        // Generate cover image via Cloudflare Workers AI (best-effort — failure does not block audio creation).
-        string? coverKey = null;
-        try
-        {
-            var imagePrompt = $"A vibrant, artistic illustration representing a conversation in {transcriptLanguage} about '{title}'. No text, no letters, clean modern art style.";
-            var pngBytes = await cloudflareImageService.GenerateImageAsync(imagePrompt, cancellationToken);
-            // Convert PNG → JPEG at quality 85 to reduce storage and transfer size.
-            using var img = Image.Load(pngBytes);
-            using var jpegMs = new MemoryStream();
-            await img.SaveAsJpegAsync(jpegMs, new JpegEncoder { Quality = 85 }, cancellationToken);
-            var coverBytes = jpegMs.ToArray();
-            coverKey = $"covers/{userId}/{Guid.NewGuid():N}.jpg";
-            await r2StorageService.UploadObjectAsync(coverKey, new MemoryStream(coverBytes), "image/jpeg", cancellationToken);
-        }
-        catch
-        {
-            coverKey = null;
-        }
+        var coverKey = await TryGenerateAiAudioCoverAsync(
+            userId,
+            title,
+            transcriptLanguage,
+            cancellationToken);
 
         var transcriptText = string.Join("\n", cues.Select(c => c.Text));
         var cuesJson = JsonSerializer.Serialize(
@@ -459,6 +452,233 @@ public class VideoService(
         db.UserVideos.Add(video);
         await db.SaveChangesAsync(cancellationToken);
         return BuildResponse(video, httpContext);
+    }
+
+    private async Task EnsureAiAudioCoverAsync(
+        UserVideo video,
+        CancellationToken cancellationToken)
+    {
+        if (!ShouldGenerateAiAudioCover(video))
+            return;
+
+        var title = GetAiAudioTitle(video);
+        var generatedCoverKey = await TryGenerateAiAudioCoverAsync(
+            video.UserId,
+            title,
+            video.TranscriptLanguage,
+            cancellationToken);
+
+        if (generatedCoverKey is null)
+            return;
+
+        video.CoverImageObjectKey = generatedCoverKey;
+        video.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<string?> TryGenerateAiAudioCoverAsync(
+        Guid userId,
+        string title,
+        string transcriptLanguage,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var imagePrompt = BuildAiAudioCoverPrompt(transcriptLanguage, title);
+            var pngBytes = await cloudflareImageService.GenerateImageAsync(imagePrompt, cancellationToken);
+            using var img = Image.Load(pngBytes);
+            using var jpegMs = new MemoryStream();
+            await img.SaveAsJpegAsync(jpegMs, new JpegEncoder { Quality = 85 }, cancellationToken);
+
+            var coverBytes = jpegMs.ToArray();
+            var coverKey = $"covers/{userId}/{Guid.NewGuid():N}.jpg";
+            await r2StorageService.UploadObjectAsync(
+                coverKey,
+                new MemoryStream(coverBytes),
+                "image/jpeg",
+                cancellationToken);
+
+            return coverKey;
+        }
+        catch (Exception ex)
+        {
+            WriteHighlightedTerminalMessage(
+                $"[AI Cover] Failed to generate cover image. UserId={userId} Language={transcriptLanguage} Title={title}");
+            logger.LogError(
+                ex,
+                "{HighlightStart}[AI Cover] Failed to generate cover image. UserId={UserId} Language={TranscriptLanguage} Title={Title}{HighlightEnd}",
+                HighlightStart,
+                userId,
+                transcriptLanguage,
+                title,
+                HighlightEnd);
+
+            return await TryGenerateFallbackCoverAsync(
+                userId,
+                title,
+                transcriptLanguage,
+                cancellationToken);
+        }
+    }
+
+    private async Task<string?> TryGenerateFallbackCoverAsync(
+        Guid userId,
+        string title,
+        string transcriptLanguage,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var coverBytes = GenerateFallbackCoverBytes(title, transcriptLanguage);
+            var coverKey = $"covers/{userId}/{Guid.NewGuid():N}.jpg";
+            await r2StorageService.UploadObjectAsync(
+                coverKey,
+                new MemoryStream(coverBytes),
+                "image/jpeg",
+                cancellationToken);
+
+            logger.LogWarning(
+                "[AI Cover] Using locally generated fallback cover. UserId={UserId} Language={TranscriptLanguage} Title={Title}",
+                userId,
+                transcriptLanguage,
+                title);
+
+            return coverKey;
+        }
+        catch (Exception ex)
+        {
+            WriteHighlightedTerminalMessage(
+                $"[AI Cover] Fallback cover generation also failed. UserId={userId} Language={transcriptLanguage} Title={title}");
+            logger.LogError(
+                ex,
+                "{HighlightStart}[AI Cover] Fallback cover generation also failed. UserId={UserId} Language={TranscriptLanguage} Title={Title}{HighlightEnd}",
+                HighlightStart,
+                userId,
+                transcriptLanguage,
+                title,
+                HighlightEnd);
+            return null;
+        }
+    }
+
+    private static bool ShouldGenerateAiAudioCover(UserVideo video)
+    {
+        return video.IsAiGenerated
+            && video.CoverImageObjectKey is null
+            && video.MediaContentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetAiAudioTitle(UserVideo video)
+    {
+        var title = Path.GetFileNameWithoutExtension(video.OriginalFileName).Trim();
+        return string.IsNullOrWhiteSpace(title)
+            ? "Bantera lesson"
+            : title;
+    }
+
+    private static string BuildAiAudioCoverPrompt(string transcriptLanguage, string title)
+    {
+        return $"A vibrant, artistic illustration representing a conversation in {transcriptLanguage} about '{title}'. No text, no letters, clean modern art style.";
+    }
+
+    private static byte[] GenerateFallbackCoverBytes(string title, string transcriptLanguage)
+    {
+        var seed = HashCode.Combine(title, transcriptLanguage);
+        var topColor = BuildPaletteColor(seed, 0.78f);
+        var bottomColor = BuildPaletteColor(seed * 31, 0.52f);
+        var accentColor = BuildPaletteColor(seed * 131, 0.92f);
+
+        using var image = new Image<Rgba32>(FallbackCoverSize, FallbackCoverSize);
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < accessor.Height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                var verticalMix = (float)y / Math.Max(1, accessor.Height - 1);
+
+                for (var x = 0; x < row.Length; x++)
+                {
+                    var horizontalMix = (float)x / Math.Max(1, row.Length - 1);
+                    var blended = Lerp(topColor, bottomColor, verticalMix);
+
+                    var distanceFromCenter = MathF.Abs(horizontalMix - 0.5f);
+                    if (distanceFromCenter < 0.18f)
+                    {
+                        var accentMix = (0.18f - distanceFromCenter) / 0.18f;
+                        blended = Lerp(blended, accentColor, accentMix * 0.75f);
+                    }
+
+                    var diagonalBand = MathF.Abs((horizontalMix * 0.8f) + (verticalMix * 0.65f) - 0.72f);
+                    if (diagonalBand < 0.07f)
+                    {
+                        var bandMix = (0.07f - diagonalBand) / 0.07f;
+                        blended = Lerp(blended, accentColor, bandMix * 0.55f);
+                    }
+
+                    row[x] = blended;
+                }
+            }
+        });
+
+        using var jpegMs = new MemoryStream();
+        image.SaveAsJpeg(jpegMs, new JpegEncoder { Quality = 85 });
+        return jpegMs.ToArray();
+    }
+
+    private static Rgba32 BuildPaletteColor(int seed, float lightnessBias)
+    {
+        var normalizedSeed = Math.Abs(seed % 360);
+        var hue = normalizedSeed / 360f;
+        var saturation = 0.48f + ((Math.Abs(seed % 17) / 16f) * 0.24f);
+        var lightness = Math.Clamp(lightnessBias, 0.18f, 0.92f);
+        return HslToRgba(hue, saturation, lightness);
+    }
+
+    private static Rgba32 Lerp(Rgba32 a, Rgba32 b, float t)
+    {
+        var clamped = Math.Clamp(t, 0f, 1f);
+        return new Rgba32(
+            (byte)(a.R + ((b.R - a.R) * clamped)),
+            (byte)(a.G + ((b.G - a.G) * clamped)),
+            (byte)(a.B + ((b.B - a.B) * clamped)));
+    }
+
+    private static Rgba32 HslToRgba(float h, float s, float l)
+    {
+        if (s <= 0f)
+        {
+            var gray = (byte)Math.Clamp((int)Math.Round(l * 255f), 0, 255);
+            return new Rgba32(gray, gray, gray);
+        }
+
+        static float HueToChannel(float p, float q, float t)
+        {
+            if (t < 0f) t += 1f;
+            if (t > 1f) t -= 1f;
+            if (t < 1f / 6f) return p + ((q - p) * 6f * t);
+            if (t < 1f / 2f) return q;
+            if (t < 2f / 3f) return p + ((q - p) * ((2f / 3f) - t) * 6f);
+            return p;
+        }
+
+        var q = l < 0.5f
+            ? l * (1f + s)
+            : l + s - (l * s);
+        var p = (2f * l) - q;
+
+        var r = HueToChannel(p, q, h + (1f / 3f));
+        var g = HueToChannel(p, q, h);
+        var b = HueToChannel(p, q, h - (1f / 3f));
+
+        return new Rgba32(
+            (byte)Math.Clamp((int)Math.Round(r * 255f), 0, 255),
+            (byte)Math.Clamp((int)Math.Round(g * 255f), 0, 255),
+            (byte)Math.Clamp((int)Math.Round(b * 255f), 0, 255));
+    }
+
+    private static void WriteHighlightedTerminalMessage(string message)
+    {
+        Console.Error.WriteLine($"{HighlightStart}{message}{HighlightEnd}");
     }
 
     public async Task<bool> SaveVideoAsync(
