@@ -64,6 +64,14 @@ public class ProfileService(
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        // Whitespace-only strings are treated as "key omitted" for name and
+        // translation language so clients that echo empty fields never block
+        // a valid single-field update (e.g. learning language onboarding).
+        if (name is not null && string.IsNullOrWhiteSpace(name))
+            name = null;
+        if (translationLanguage is not null && string.IsNullOrWhiteSpace(translationLanguage))
+            translationLanguage = null;
+
         var hasName = name is not null;
         var hasTranslationLanguage = translationLanguage is not null;
         var hasNativeLanguage = nativeLanguage is not null;
@@ -252,9 +260,12 @@ public class ProfileService(
         if (string.IsNullOrWhiteSpace(normalized) || normalized.Length > 35)
             return null;
 
+        // BCP-47 variant and extension subtags are at most 8 alphanum (RFC 5646),
+        // but Apple / platform locale identifiers occasionally use slightly
+        // longer segments — keep a forgiving cap so valid iOS Speech locales pass.
         foreach (var segment in normalized.Split('-', StringSplitOptions.RemoveEmptyEntries))
         {
-            if (segment.Length > 8 || segment.Any(ch => !char.IsLetterOrDigit(ch)))
+            if (segment.Length > 16 || segment.Any(ch => !char.IsLetterOrDigit(ch)))
                 return null;
         }
 

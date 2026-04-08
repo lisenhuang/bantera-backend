@@ -323,13 +323,24 @@ app.MapPut("/api/me/profile", async (
         httpContext,
         cancellationToken);
 
-    return response is null
-        ? Results.Json(
+    if (response is null)
+    {
+        var code = errorCode ?? ErrorCodes.InvalidProfile;
+        if (code == ErrorCodes.Unauthorized)
+        {
+            return Results.Json(
+                new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+                statusCode: 401);
+        }
+
+        return Results.Json(
             new ApiError(
-                errorCode ?? ErrorCodes.InvalidProfile,
-                "Profile updates must include at least one valid field."),
-            statusCode: 400)
-        : Results.Ok(response);
+                code,
+                "Profile update failed: include at least one valid field, or fix invalid values."),
+            statusCode: 400);
+    }
+
+    return Results.Ok(response);
 })
 .WithName("UpdateMyProfile")
 .WithMetadata(new SwaggerOperationAttribute(
