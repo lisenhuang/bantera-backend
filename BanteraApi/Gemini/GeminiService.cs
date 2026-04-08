@@ -135,6 +135,14 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         var prompt = $$"""
 You are a dialogue writer for conversational language learning.
 
+CONTENT POLICY (follow strictly):
+- Output is for neutral, everyday language practice only.
+- Do NOT generate dialogue, titles, or scenarios about politics of the People's Republic of China, its government or ruling party, or political leadership past or present; do NOT include politically sensitive topics concerning China.
+- Do NOT generate content about any country's government, political leaders, elections, or politically sensitive current events when those would dominate the scene.
+- If the user's scenario OR any honest interpretation of it would require violating the above, you MUST refuse by returning ONLY this exact JSON (no markdown, no other text):
+{"rejected":true}
+- If you accept the scenario, the title and every line must stay fully clear of those topics.
+
 {{accentInstruction}}
 {{scenarioLine}}
 
@@ -195,6 +203,19 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                 .Replace("```json", "").Replace("```", "")
                 .Trim();
 
+            // Check if Gemini refused the scenario.
+            if (cleaned.Contains("\"rejected\"", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    using var rejDoc = JsonDocument.Parse(cleaned);
+                    if (rejDoc.RootElement.TryGetProperty("rejected", out var rVal) && rVal.GetBoolean())
+                        throw new ContentRejectedException("This topic cannot be used for generation. Please choose a different scenario.");
+                }
+                catch (ContentRejectedException) { throw; }
+                catch { /* not a rejection payload, continue normal parsing */ }
+            }
+
             RawDialogue? parsed;
             try
             {
@@ -216,13 +237,15 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             string[] styles2 = parsed.Speaker2Styles ?? [];
             var (voice1, voice2) = PickVoices(gender1, styles1, gender2, styles2);
 
+            var dialogueLines = (parsed.Lines ?? [])
+                .Select(l => new DialogueLine(l.Speaker ?? "Speaker1", l.Text ?? ""))
+                .ToArray();
+
             return new GeneratedDialogue(
                 Title: parsed.Title ?? "Dialogue",
                 Voice1: voice1,
                 Voice2: voice2,
-                Lines: (parsed.Lines ?? [])
-                    .Select(l => new DialogueLine(l.Speaker ?? "Speaker1", l.Text ?? ""))
-                    .ToArray());
+                Lines: dialogueLines);
         }, cancellationToken);
     }
 
@@ -461,3 +484,5 @@ public record GeneratedDialogue(string Title, string Voice1, string Voice2, Dial
 public record DialogueLine(string Speaker, string Text);
 
 public record VideoTranscriptCueRecord(int Index, int StartMs, int EndMs, string Text);
+
+public class ContentRejectedException(string message) : Exception(message);
