@@ -50,6 +50,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
             e.Property(x => x.RefreshTokenHash).HasMaxLength(255).IsRequired();
+            e.Property(x => x.RefreshTokenLookup).HasMaxLength(64);
+            e.HasIndex(x => x.RefreshTokenLookup)
+                .IsUnique()
+                .HasFilter("\"RefreshTokenLookup\" IS NOT NULL");
             e.Property(x => x.DeviceName).HasMaxLength(255);
             e.HasOne(x => x.User)
              .WithMany(x => x.Sessions)

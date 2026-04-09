@@ -144,16 +144,32 @@ public class AuthService(
     /// </summary>
     public async Task<(LoginResponse? Response, string ErrorCode)> RefreshAsync(string plainRefreshToken)
     {
-        // Load all active sessions and check the token against each hash.
-        // In production with many users, consider narrowing by userId from a
-        // non-sensitive claim, but for simplicity we check recent unexpired sessions.
-        var sessions = await db.UserSessions
-            .Include(s => s.User)
-            .Where(s => s.RevokedAt == null && s.ExpiresAt > DateTime.UtcNow)
-            .ToListAsync();
+        var now = DateTime.UtcNow;
+        var lookup = JwtService.ComputeRefreshTokenLookup(plainRefreshToken);
 
-        var session = sessions.FirstOrDefault(s =>
-            jwt.VerifyRefreshToken(plainRefreshToken, s.RefreshTokenHash));
+        var session = await db.UserSessions
+            .Include(s => s.User)
+            .FirstOrDefaultAsync(s =>
+                s.RefreshTokenLookup == lookup &&
+                s.RevokedAt == null &&
+                s.ExpiresAt > now);
+
+        if (session is not null && !jwt.VerifyRefreshToken(plainRefreshToken, session.RefreshTokenHash))
+            session = null;
+
+        if (session is null)
+        {
+            var legacySessions = await db.UserSessions
+                .Include(s => s.User)
+                .Where(s =>
+                    s.RefreshTokenLookup == null &&
+                    s.RevokedAt == null &&
+                    s.ExpiresAt > now)
+                .ToListAsync();
+
+            session = legacySessions.FirstOrDefault(s =>
+                jwt.VerifyRefreshToken(plainRefreshToken, s.RefreshTokenHash));
+        }
 
         if (session is null)
             return (null, ErrorCodes.SessionExpired);
@@ -172,6 +188,7 @@ public class AuthService(
         {
             UserId = session.UserId,
             RefreshTokenHash = jwt.HashRefreshToken(newPlainRefreshToken),
+            RefreshTokenLookup = JwtService.ComputeRefreshTokenLookup(newPlainRefreshToken),
             DeviceName = session.DeviceName,
             ExpiresAt = DateTime.UtcNow.AddDays(_settings.RefreshTokenExpiryDays),
             CreatedAt = DateTime.UtcNow,
@@ -207,6 +224,7 @@ public class AuthService(
         {
             User = user,
             RefreshTokenHash = jwt.HashRefreshToken(plainRefreshToken),
+            RefreshTokenLookup = JwtService.ComputeRefreshTokenLookup(plainRefreshToken),
             DeviceName = deviceName,
             ExpiresAt = now.AddDays(_settings.RefreshTokenExpiryDays),
             CreatedAt = now,

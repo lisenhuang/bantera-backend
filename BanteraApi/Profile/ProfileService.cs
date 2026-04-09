@@ -5,6 +5,7 @@ using BanteraApi.Database.Entities;
 using BanteraApi.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace BanteraApi.Profile;
 
@@ -12,7 +13,8 @@ public class ProfileService(
     AppDbContext db,
     R2StorageService r2StorageService,
     LinkGenerator linkGenerator,
-    ILogger<ProfileService> logger)
+    ILogger<ProfileService> logger,
+    IMemoryCache memoryCache)
 {
     private static readonly HashSet<string> SupportedImageContentTypes =
     [
@@ -143,6 +145,8 @@ public class ProfileService(
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
 
+        memoryCache.Remove(AvatarObjectKeyCacheKey(userId));
+
         if (!string.IsNullOrWhiteSpace(oldKey) && !string.Equals(oldKey, newKey, StringComparison.Ordinal))
         {
             try
@@ -162,16 +166,26 @@ public class ProfileService(
         Guid userId,
         CancellationToken cancellationToken = default)
     {
-        var avatarKey = await db.Users
-            .Where(u => u.Id == userId)
-            .Select(u => u.AvatarObjectKey)
-            .FirstOrDefaultAsync(cancellationToken);
+        // Single DB lookup per user per TTL even when many HTTP clients hit /avatar at once.
+        var avatarKey = await memoryCache.GetOrCreateAsync(
+            AvatarObjectKeyCacheKey(userId),
+            async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15);
+                var key = await db.Users
+                    .Where(u => u.Id == userId)
+                    .Select(u => u.AvatarObjectKey)
+                    .FirstOrDefaultAsync(cancellationToken);
+                return key ?? string.Empty;
+            });
 
         if (string.IsNullOrWhiteSpace(avatarKey))
             return null;
 
         return await r2StorageService.DownloadObjectAsync(avatarKey, cancellationToken);
     }
+
+    private static string AvatarObjectKeyCacheKey(Guid userId) => $"avatar:object-key:{userId:N}";
 
     private async Task<User?> LoadUserAsync(Guid userId, CancellationToken cancellationToken)
     {

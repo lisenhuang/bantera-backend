@@ -27,6 +27,7 @@ builder.Services.AddScoped<AuthService>();
 
 builder.Services.Configure<R2Settings>(builder.Configuration.GetSection(R2Settings.Section));
 builder.Services.AddSingleton<R2StorageService>();
+builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<VideoService>();
 
@@ -397,15 +398,25 @@ app.MapPost("/api/me/profile-image", async (
 .RequireAuthorization();
 
 app.MapGet("/api/users/{userId:guid}/avatar", async (
+    HttpContext httpContext,
     Guid userId,
     ProfileService profileService,
     CancellationToken cancellationToken) =>
 {
     var avatar = await profileService.GetAvatarAsync(userId, cancellationToken);
     if (avatar is null)
-        return Results.NotFound();
+    {
+        httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
 
-    return Results.Stream(avatar.Stream, avatar.ContentType);
+    // Avoid hammering Postgres on repeated avatar loads (e.g. list rebuilds).
+    httpContext.Response.Headers.CacheControl = "public, max-age=3600";
+    httpContext.Response.ContentType = avatar.ContentType;
+    await using (avatar.Stream)
+    {
+        await avatar.Stream.CopyToAsync(httpContext.Response.Body, cancellationToken);
+    }
 })
 .WithName("GetUserAvatar")
 .WithMetadata(new SwaggerOperationAttribute(

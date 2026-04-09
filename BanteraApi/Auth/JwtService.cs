@@ -45,4 +45,11 @@ public class JwtService(IOptions<JwtSettings> options)
 
     public bool VerifyRefreshToken(string plainToken, string hash)
         => BCrypt.Net.BCrypt.Verify(plainToken, hash);
+
+    /// <summary>Deterministic SHA-256 hex fingerprint of the plain refresh token for DB lookup (not secret).</summary>
+    public static string ComputeRefreshTokenLookup(string plainToken)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(plainToken));
+        return Convert.ToHexString(hash);
+    }
 }
