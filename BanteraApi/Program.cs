@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using BanteraApi.Account;
 using BanteraApi.Auth;
 using BanteraApi.Cloudflare;
 using BanteraApi.Database;
@@ -30,6 +31,7 @@ builder.Services.AddSingleton<R2StorageService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<VideoService>();
+builder.Services.AddScoped<AccountDeletionService>();
 
 builder.Services.Configure<CloudflareSettings>(builder.Configuration.GetSection("Cloudflare"));
 builder.Services.AddHttpClient("cloudflare", c =>
@@ -283,6 +285,38 @@ app.MapGet("/api/me", (System.Security.Claims.ClaimsPrincipal user) =>
     """))
 .Produces<object>(200)
 .Produces<ApiError>(401)
+.RequireAuthorization();
+
+app.MapDelete("/api/me", async (
+    System.Security.Claims.ClaimsPrincipal user,
+    AccountDeletionService accountDeletionService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            statusCode: 401);
+
+    var deleted = await accountDeletionService.DeleteAccountAsync(userId.Value, cancellationToken);
+    return deleted ? Results.NoContent() : Results.NotFound();
+})
+.WithName("DeleteMyAccount")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Delete current account",
+    """
+    Permanently deletes the authenticated user, sessions, identities, uploaded videos,
+    and saved-video links. AI-generated media blobs in object storage are not deleted.
+    Requires `Authorization: Bearer <access_token>`.
+
+    **Responses:**
+    - `204` — account deleted
+    - `401` — missing/invalid token
+    - `404` — user record not found
+    """))
+.Produces(StatusCodes.Status204NoContent)
+.Produces<ApiError>(401)
+.Produces(StatusCodes.Status404NotFound)
 .RequireAuthorization();
 
 app.MapGet("/api/me/profile", async (
