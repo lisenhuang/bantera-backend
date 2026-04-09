@@ -196,6 +196,10 @@ public class AuthService(
         user.LastLoginAt = now;
         user.UpdatedAt = now;
 
+        // New users still have default(Guid) until inserted; JWT must not use Guid.Empty as `sub`.
+        if (user.Id == Guid.Empty)
+            await db.SaveChangesAsync();
+
         var accessToken = jwt.GenerateAccessToken(user.Id);
         var plainRefreshToken = jwt.GenerateRefreshToken();
 

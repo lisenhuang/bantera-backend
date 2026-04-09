@@ -175,17 +175,25 @@ app.MapPost("/api/auth/login", async (LoginRequest req, AuthService auth) =>
 .Produces<ApiError>(401)
 .AllowAnonymous();
 
-// Email registration is temporarily disabled — new accounts must use Apple Sign-In.
-// To re-enable, restore the full handler and remove this stub.
-app.MapPost("/api/auth/register", () =>
-    Results.Json(
-        new ApiError("registration_disabled", "Email registration is currently disabled. Please sign in with Apple."),
-        statusCode: 403))
+app.MapPost("/api/auth/register", async (RegisterRequest req, AuthService auth) =>
+{
+    var (response, errorCode) = await auth.RegisterAsync(req.Email, req.Password);
+    return response is null
+        ? Results.Json(
+            new ApiError(errorCode ?? ErrorCodes.EmailAlreadyRegistered, "An account with that email already exists."),
+            statusCode: 409)
+        : Results.Ok(response);
+})
 .WithName("Register")
 .WithMetadata(new SwaggerOperationAttribute(
-    "Register with email + password (disabled)",
-    "Email registration is temporarily disabled. Use POST /api/auth/apple instead."))
-.Produces<ApiError>(403)
+    "Register with email + password",
+    """
+    Creates a new email/password account and returns an access token (15 min) and a refresh token (90 days, rolling).
+
+    Returns `409 email_already_registered` if the email already exists for the email/password provider.
+    """))
+.Produces<LoginResponse>(200)
+.Produces<ApiError>(409)
 .AllowAnonymous();
 
 app.MapPost("/api/auth/apple", async (AppleLoginRequest req, AuthService auth, CancellationToken cancellationToken) =>
@@ -873,7 +881,8 @@ static Guid? TryGetUserId(System.Security.Claims.ClaimsPrincipal user)
         ?? user.FindFirst("sub")?.Value
         ?? user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
-    return Guid.TryParse(rawUserId, out var userId)
-        ? userId
-        : null;
+    if (!Guid.TryParse(rawUserId, out var userId) || userId == Guid.Empty)
+        return null;
+
+    return userId;
 }
