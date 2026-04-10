@@ -178,27 +178,6 @@ app.MapPost("/api/auth/login", async (LoginRequest req, AuthService auth) =>
 .Produces<ApiError>(401)
 .AllowAnonymous();
 
-app.MapPost("/api/auth/register", async (RegisterRequest req, AuthService auth) =>
-{
-    var (response, errorCode) = await auth.RegisterAsync(req.Email, req.Password);
-    return response is null
-        ? Results.Json(
-            new ApiError(errorCode ?? ErrorCodes.EmailAlreadyRegistered, "An account with that email already exists."),
-            statusCode: 409)
-        : Results.Ok(response);
-})
-.WithName("Register")
-.WithMetadata(new SwaggerOperationAttribute(
-    "Register with email + password",
-    """
-    Creates a new email/password account and returns an access token (15 min) and a refresh token (90 days, rolling).
-
-    Returns `409 email_already_registered` if the email already exists for the email/password provider.
-    """))
-.Produces<LoginResponse>(200)
-.Produces<ApiError>(409)
-.AllowAnonymous();
-
 app.MapPost("/api/auth/apple", async (AppleLoginRequest req, AuthService auth, CancellationToken cancellationToken) =>
 {
     var (response, errorCode) = await auth.LoginWithAppleAsync(req, cancellationToken);
