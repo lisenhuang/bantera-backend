@@ -106,9 +106,10 @@ builder.Services.AddSwaggerGen(options =>
         Description = """
             ## Authentication flow
             1. **Login** — `POST /api/auth/login` → receive `access_token` (15 min) + `refresh_token` (90 days)
-            2. **Call APIs** — add header `Authorization: Bearer <access_token>`
-            3. **On `401 token_expired`** — `POST /api/auth/refresh` → receive new token pair (old refresh token is revoked)
-            4. **On `401 session_expired`** — refresh token is expired/revoked → redirect to login screen
+            2. **(Development only)** **Register** — `POST /api/auth/register` → same token response as login (not deployed in non-Development environments)
+            3. **Call APIs** — add header `Authorization: Bearer <access_token>`
+            4. **On `401 token_expired`** — `POST /api/auth/refresh` → receive new token pair (old refresh token is revoked)
+            5. **On `401 session_expired`** — refresh token is expired/revoked → redirect to login screen
             """
     });
 
@@ -186,6 +187,36 @@ app.MapPost("/api/auth/login", async (LoginRequest req, AuthService auth) =>
 .Produces<LoginResponse>(200)
 .Produces<ApiError>(401)
 .AllowAnonymous();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapPost("/api/auth/register", async (RegisterRequest req, AuthService auth) =>
+    {
+        var (response, errorCode) = await auth.RegisterAsync(req.Email, req.Password);
+        if (response is null)
+        {
+            return Results.Json(
+                new ApiError(
+                    errorCode,
+                    "An account with this email already exists."),
+                statusCode: 409);
+        }
+
+        return Results.Ok(response);
+    })
+    .WithName("Register")
+    .WithMetadata(new SwaggerOperationAttribute(
+        "Register with email + password (development only)",
+        """
+        **Local development only.** This endpoint is not available when `ASPNETCORE_ENVIRONMENT` is not `Development`.
+
+        Creates a new email/password account and returns the same token pair as login.
+        """))
+    .Produces<LoginResponse>(200)
+    .Produces<ApiError>(400)
+    .Produces<ApiError>(409)
+    .AllowAnonymous();
+}
 
 app.MapPost("/api/auth/apple", async (AppleLoginRequest req, AuthService auth, CancellationToken cancellationToken) =>
 {
