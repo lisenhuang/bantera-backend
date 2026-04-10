@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using BanteraApi;
 using BanteraApi.Account;
 using BanteraApi.Auth;
 using BanteraApi.Cloudflare;
@@ -154,6 +155,14 @@ app.MapGet("/version", () =>
 .WithName("GetVersion")
 .WithMetadata(new SwaggerOperationAttribute("API version", "Returns the current API version number."))
 .Produces<object>(200);
+
+app.MapGet("/api/public/learning-languages", () => Results.Ok(LearningLanguageCatalog.Items))
+    .WithName("GetLearningLanguages")
+    .WithMetadata(new SwaggerOperationAttribute(
+        "Learning languages catalog",
+        "Returns BCP-47 identifiers with display names and flag emoji for profile and transcription UI. No authentication required."))
+    .Produces<IReadOnlyList<LearningLanguageItem>>(200)
+    .AllowAnonymous();
 
 // ── Auth endpoints ─────────────────────────────────────────────────────────────
 
