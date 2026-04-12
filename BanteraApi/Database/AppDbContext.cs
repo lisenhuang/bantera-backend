@@ -10,6 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<UserVideo> UserVideos => Set<UserVideo>();
     public DbSet<UserSavedVideo> UserSavedVideos => Set<UserSavedVideo>();
+    public DbSet<UserSavedCue> UserSavedCues => Set<UserSavedCue>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -91,6 +92,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
             e.Property(x => x.SavedAt).IsRequired();
             e.HasIndex(x => new { x.UserId, x.VideoId }).IsUnique();
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Video)
+             .WithMany()
+             .HasForeignKey(x => x.VideoId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<UserSavedCue>(e =>
+        {
+            e.ToTable("user_saved_cues");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.CueId).HasMaxLength(255).IsRequired();
+            e.Property(x => x.SavedAt).IsRequired();
+            e.HasIndex(x => new { x.UserId, x.VideoId, x.CueId }).IsUnique();
             e.HasOne(x => x.User)
              .WithMany()
              .HasForeignKey(x => x.UserId)

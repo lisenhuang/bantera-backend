@@ -7,6 +7,7 @@ using BanteraApi.Admin;
 using BanteraApi.Auth;
 using BanteraApi.Cloudflare;
 using BanteraApi.Database;
+using BanteraApi.Database.Entities;
 using BanteraApi.Gemini;
 using BanteraApi.Profile;
 using BanteraApi.Storage;
@@ -831,6 +832,75 @@ app.MapGet("/api/me/saved", async (
     return Results.Ok(videos);
 })
 .WithName("ListSavedVideos")
+.RequireAuthorization();
+
+// ── Saved cues ─────────────────────────────────────────────────────────────
+app.MapPost("/api/me/saved-cues", async (
+    SaveCueRequest req,
+    System.Security.Claims.ClaimsPrincipal user,
+    AppDbContext db,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return Results.Unauthorized();
+
+    var video = await db.UserVideos.FindAsync([req.VideoId], cancellationToken);
+    if (video is null || (!video.IsPublic && video.UserId != userId.Value))
+        return Results.NotFound();
+
+    var existing = await db.UserSavedCues.FirstOrDefaultAsync(
+        c => c.UserId == userId.Value && c.VideoId == req.VideoId && c.CueId == req.CueId,
+        cancellationToken);
+    if (existing is not null)
+        return Results.Ok(new { id = existing.Id });
+
+    var entry = new UserSavedCue
+    {
+        UserId = userId.Value,
+        VideoId = req.VideoId,
+        CueId = req.CueId,
+        CueIndex = req.CueIndex,
+        SavedAt = DateTime.UtcNow,
+    };
+    db.UserSavedCues.Add(entry);
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.Created($"/api/me/saved-cues/{entry.Id}", new { id = entry.Id });
+})
+.WithName("SaveCue")
+.RequireAuthorization();
+
+app.MapDelete("/api/me/saved-cues/{entryId:guid}", async (
+    Guid entryId,
+    System.Security.Claims.ClaimsPrincipal user,
+    AppDbContext db,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return Results.Unauthorized();
+
+    var entry = await db.UserSavedCues.FirstOrDefaultAsync(
+        c => c.Id == entryId && c.UserId == userId.Value, cancellationToken);
+    if (entry is null) return Results.NotFound();
+
+    db.UserSavedCues.Remove(entry);
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+})
+.WithName("UnsaveCue")
+.RequireAuthorization();
+
+app.MapGet("/api/me/saved-cues", async (
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return Results.Unauthorized();
+    var cues = await videoService.ListSavedCuesAsync(userId.Value, httpContext, cancellationToken);
+    return Results.Ok(cues);
+})
+.WithName("ListSavedCues")
 .RequireAuthorization();
 
 app.MapGet("/api/me/stats", async (

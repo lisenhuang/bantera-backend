@@ -725,6 +725,28 @@ public class VideoService(
             .AnyAsync(s => s.UserId == userId && s.VideoId == videoId, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<SavedCueResponse>> ListSavedCuesAsync(
+        Guid userId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var entries = await db.UserSavedCues
+            .Where(c => c.UserId == userId)
+            .Join(db.UserVideos, c => c.VideoId, v => v.Id, (c, v) => new { Cue = c, Video = v })
+            .Join(db.Users, x => x.Video.UserId, u => u.Id, (x, u) => new { x.Cue, x.Video, CreatorName = u.Name })
+            .OrderByDescending(x => x.Cue.SavedAt)
+            .ToListAsync(cancellationToken);
+
+        return entries
+            .Select(x => new SavedCueResponse(
+                x.Cue.Id,
+                x.Cue.CueId,
+                x.Cue.CueIndex,
+                x.Cue.SavedAt,
+                BuildResponse(x.Video, httpContext, x.CreatorName)))
+            .ToList();
+    }
+
     public async Task<IReadOnlyList<VideoUploadResponse>> ListSavedVideosAsync(
         Guid userId,
         HttpContext httpContext,
