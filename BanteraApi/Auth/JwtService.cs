@@ -5,13 +5,14 @@ using System.Text;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
+
 namespace BanteraApi.Auth;
 
 public class JwtService(IOptions<JwtSettings> options)
 {
     private readonly JwtSettings _settings = options.Value;
 
-    public string GenerateAccessToken(Guid userId)
+    public string GenerateAccessToken(Guid userId, string role)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_settings.Secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -20,6 +21,8 @@ public class JwtService(IOptions<JwtSettings> options)
         {
             new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new Claim(ClaimTypes.Role, role),  // for ASP.NET authorization policies
+            new Claim("role", role),            // for Next.js proxy JWT decoding
         };
 
         var token = new JwtSecurityToken(

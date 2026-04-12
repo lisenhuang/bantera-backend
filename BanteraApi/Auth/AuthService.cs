@@ -181,7 +181,7 @@ public class AuthService(
         session.RevokedAt = DateTime.UtcNow;
 
         // Issue new tokens
-        var accessToken = jwt.GenerateAccessToken(session.UserId);
+        var accessToken = jwt.GenerateAccessToken(session.UserId, session.User.Role);
         var newPlainRefreshToken = jwt.GenerateRefreshToken();
 
         db.UserSessions.Add(new UserSession
@@ -217,7 +217,7 @@ public class AuthService(
         if (user.Id == Guid.Empty)
             await db.SaveChangesAsync();
 
-        var accessToken = jwt.GenerateAccessToken(user.Id);
+        var accessToken = jwt.GenerateAccessToken(user.Id, user.Role);
         var plainRefreshToken = jwt.GenerateRefreshToken();
 
         db.UserSessions.Add(new UserSession
