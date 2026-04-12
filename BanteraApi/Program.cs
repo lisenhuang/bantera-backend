@@ -1,7 +1,9 @@
 using System.Text;
 using System.Text.Json;
+using System.Threading.RateLimiting;
 using BanteraApi;
 using BanteraApi.Account;
+using BanteraApi.Admin;
 using BanteraApi.Auth;
 using BanteraApi.Cloudflare;
 using BanteraApi.Database;
@@ -10,7 +12,9 @@ using BanteraApi.Profile;
 using BanteraApi.Storage;
 using BanteraApi.Videos;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Swashbuckle.AspNetCore.Annotations;
@@ -49,6 +53,37 @@ builder.Services.AddHttpClient("gemini", c =>
     c.Timeout = TimeSpan.FromSeconds(180);
 });
 builder.Services.AddScoped<GeminiService>();
+
+builder.Services.AddScoped<AdminService>();
+
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+// Reads real client IP from CF-Connecting-IP (Cloudflare), X-Forwarded-For, or RemoteIpAddress.
+static string GetClientIp(HttpContext ctx) =>
+    ctx.Request.Headers["CF-Connecting-IP"].FirstOrDefault()
+    ?? ctx.Request.Headers["X-Forwarded-For"].FirstOrDefault()?.Split(',')[0].Trim()
+    ?? ctx.Connection.RemoteIpAddress?.ToString()
+    ?? "unknown";
+
+builder.Services.AddRateLimiter(opts =>
+{
+    opts.AddPolicy("login", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: GetClientIp(ctx),
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(15),
+            QueueLimit = 0,
+        }));
+    opts.RejectionStatusCode = 429;
+});
+
+// ── Forwarded headers (reverse proxy / Cloudflare) ────────────────────────────
+builder.Services.Configure<ForwardedHeadersOptions>(opts =>
+{
+    opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    opts.KnownIPNetworks.Clear();
+    opts.KnownProxies.Clear();
+});
 
 // ── JWT Auth ──────────────────────────────────────────────────────────────────
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret is not configured.");
@@ -93,7 +128,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(opts =>
+    opts.AddPolicy("Admin", policy => policy.RequireRole("admin")));
 
 // ── Swagger ───────────────────────────────────────────────────────────────────
 builder.Services.AddEndpointsApiExplorer();
@@ -139,6 +175,8 @@ app.UseSwaggerUI(options =>
 });
 }
 
+app.UseForwardedHeaders();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -186,7 +224,8 @@ app.MapPost("/api/auth/login", async (LoginRequest req, AuthService auth) =>
     """))
 .Produces<LoginResponse>(200)
 .Produces<ApiError>(401)
-.AllowAnonymous();
+.AllowAnonymous()
+.RequireRateLimiting("login");
 
 if (app.Environment.IsDevelopment())
 {
@@ -935,6 +974,8 @@ if (failures.Count > 0)
 
 startupLogger.LogInformation("[Startup] All checks passed — starting server.");
 // ─────────────────────────────────────────────────────────────────────────────
+
+AdminEndpoints.Map(app);
 
 app.Run();
 
