@@ -235,7 +235,7 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         var recentStartUtc = todayUtc.AddDays(-7);
         var scenarioLine = useGoogleSearch
             ? $$"""
-Search from the internet to find one real recent news story connected to {{ResolveNewsFocus(language, languageCode)}}.
+Search from the internet to find some real recent news story connected to {{ResolveNewsFocus(language, languageCode)}}.
 - The story must have happened or been reported recently, between {{recentStartUtc:yyyy-MM-dd}} and {{todayUtc:yyyy-MM-dd}} UTC.
 - Prefer safe, public-interest topics suitable for conversational language practice, such as culture, science, technology, travel, sports, weather, business, education, infrastructure, or community events.
 - Avoid politics, government, elections, diplomacy, war, crime, disasters, deaths, injuries, or graphic/distressing events.
