@@ -131,7 +131,7 @@ public class VideoService(
     {
         var videos = await db.UserVideos
             .AsNoTracking()
-            .Where(v => v.UserId == userId)
+            .Where(v => v.UserId == userId && v.RemovedFromOwnerListAt == null)
             .OrderByDescending(v => v.CreatedAt)
             .ToListAsync(cancellationToken);
 
@@ -768,7 +768,31 @@ public class VideoService(
         Guid userId,
         CancellationToken cancellationToken = default)
     {
-        return await db.UserVideos.CountAsync(v => v.UserId == userId, cancellationToken);
+        return await db.UserVideos.CountAsync(
+            v => v.UserId == userId && v.RemovedFromOwnerListAt == null,
+            cancellationToken);
+    }
+
+    public async Task<bool> RemoveAiAudioFromOwnerListAsync(
+        Guid videoId,
+        Guid requesterId,
+        CancellationToken cancellationToken = default)
+    {
+        var video = await db.UserVideos
+            .FirstOrDefaultAsync(v => v.Id == videoId && v.UserId == requesterId, cancellationToken);
+
+        if (video is null || !video.IsAiGenerated || !IsAudioContentType(video.MediaContentType))
+            return false;
+
+        if (video.RemovedFromOwnerListAt is not null)
+            return true;
+
+        var now = DateTime.UtcNow;
+        video.RemovedFromOwnerListAt = now;
+        video.UpdatedAt = now;
+
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     public async Task<int> GetSavedCountAsync(
@@ -829,4 +853,7 @@ public class VideoService(
 
         return $"videos/{userId}/{Guid.NewGuid():N}.{extension}";
     }
+
+    private static bool IsAudioContentType(string contentType) =>
+        contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase);
 }

@@ -793,6 +793,31 @@ app.MapDelete("/api/me/videos/{videoId:guid}", async (
 .Produces(404)
 .RequireAuthorization();
 
+app.MapPost("/api/me/videos/{videoId:guid}/remove-from-list", async (
+    Guid videoId,
+    System.Security.Claims.ClaimsPrincipal user,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            statusCode: 401);
+
+    var removed = await videoService.RemoveAiAudioFromOwnerListAsync(
+        videoId,
+        userId.Value,
+        cancellationToken);
+
+    return removed ? Results.NoContent() : Results.NotFound();
+})
+.WithName("RemoveMyAiAudioFromList")
+.Produces(204)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
 app.MapGet("/api/videos/public", async (
     [FromQuery] string? languageCode,
     [FromQuery] int limit,

@@ -20,6 +20,7 @@ public class UserVideo
     public int DurationMs { get; set; }
     public int? VideoWidth { get; set; }
     public int? VideoHeight { get; set; }
+    public DateTime? RemovedFromOwnerListAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
