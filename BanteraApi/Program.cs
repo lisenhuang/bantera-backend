@@ -13,6 +13,7 @@ using BanteraApi.Profile;
 using BanteraApi.Storage;
 using BanteraApi.Videos;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -120,9 +121,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
                 var error = isExpired
                     ? new ApiError(ErrorCodes.TokenExpired,
-                        "Access token has expired. POST /api/auth/refresh with your refresh_token to get a new pair.")
+                        "Your session has expired. Please try again.")
                     : new ApiError(ErrorCodes.Unauthorized,
-                        "Missing or invalid Authorization header. Add 'Authorization: Bearer <access_token>'.");
+                        "Missing or invalid access token.");
 
                 await context.Response.WriteAsJsonAsync(error);
             }
@@ -164,6 +165,7 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 var app = builder.Build();
+const string GenericApiFailureMessage = "Something went wrong. Please try again.";
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 if (app.Environment.IsDevelopment())
@@ -175,6 +177,40 @@ app.UseSwaggerUI(options =>
     options.RoutePrefix = "swagger";
 });
 }
+
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var exceptionFeature = context.Features.Get<IExceptionHandlerPathFeature>();
+        var exception = exceptionFeature?.Error;
+        if (exception is not null && exception is not OperationCanceledException)
+        {
+            app.Logger.LogError(
+                exception,
+                "Unhandled API exception for {Method} {Path}",
+                context.Request.Method,
+                context.Request.Path);
+        }
+
+        if (context.Response.HasStarted)
+            return;
+
+        context.Response.Clear();
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+
+        if (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(
+                new ApiError(ErrorCodes.InternalError, GenericApiFailureMessage));
+            return;
+        }
+
+        context.Response.ContentType = "text/plain";
+        await context.Response.WriteAsync(GenericApiFailureMessage);
+    });
+});
 
 app.UseForwardedHeaders();
 app.UseRateLimiter();
@@ -265,8 +301,8 @@ app.MapPost("/api/auth/apple", async (AppleLoginRequest req, AuthService auth, C
     {
         var message = errorCode switch
         {
-            ErrorCodes.AppleIdentityMismatch => "The Apple credential does not match the signed identity token.",
-            ErrorCodes.AppleAudienceMismatch => "Apple sign-in was issued for a different app identifier. Check the iOS bundle identifier and backend Apple audience config.",
+            ErrorCodes.AppleIdentityMismatch => "The Apple credential did not match this sign-in attempt.",
+            ErrorCodes.AppleAudienceMismatch => "Apple sign-in could not be verified. Please try again.",
             _ => "Apple sign-in could not be verified. Please try again."
         };
 
@@ -603,6 +639,8 @@ app.MapPost("/api/me/audio/generate", async (
     AppDbContext db,
     CancellationToken cancellationToken) =>
 {
+    const string generationFailedMessage = "Something went wrong while creating the practice audio. Please try again.";
+
     var userId = TryGetUserId(user);
     if (userId is null)
     {
@@ -644,7 +682,13 @@ app.MapPost("/api/me/audio/generate", async (
 
     try
     {
-        var dialogue = await geminiService.GenerateDialogueAsync(req.LanguageCode, req.Scenario, req.DurationSeconds, cancellationToken);
+        var dialogue = await geminiService.GenerateDialogueAsync(
+            req.Language,
+            req.LanguageCode,
+            req.Scenario,
+            req.DurationSeconds,
+            req.ScenarioId,
+            cancellationToken);
         await SendAsync(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
 
         var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
@@ -652,9 +696,19 @@ app.MapPost("/api/me/audio/generate", async (
         var videoResponse = await videoService.SaveAiAudioAsync(userId.Value, dialogue.Title, wavBytes, req.Language, req.LanguageCode, cues, durationMs, httpContext, cancellationToken);
         await SendAsync(new { step = "done", video = videoResponse });
     }
-    catch (Exception ex) when (ex is not OperationCanceledException)
+    catch (ContentRejectedException ex)
     {
         await SendAsync(new { step = "error", message = ex.Message });
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+        app.Logger.LogError(
+            ex,
+            "Practice audio generation failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
+            userId,
+            req.LanguageCode,
+            req.ScenarioId);
+        await SendAsync(new { step = "error", message = generationFailedMessage });
     }
 })
 .WithName("GenerateAiAudio")

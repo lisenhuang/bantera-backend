@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -7,42 +8,89 @@ namespace BanteraApi.Gemini;
 
 public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<GeminiSettings> options)
 {
+    private const string LatestNewsScenarioId = "latest_news";
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
-    private static readonly Dictionary<string, string> AccentInstructions = new()
+    private static readonly Dictionary<string, string> AccentInstructions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["en-US"] = "Write the dialogue STRICTLY in US American English. The speakers MUST sound authentically American — use American vocabulary, spellings, and idioms (e.g. 'gotten', 'sidewalk', 'faucet', 'trash can', 'apartment'). Do NOT use British, Australian, or any other English variant.",
-        ["en-GB"] = "Write the dialogue STRICTLY in British English. The speakers MUST sound authentically British — use British vocabulary, spellings, and idioms (e.g. 'brilliant', 'cheers', 'biscuit', 'flat', 'rubbish', 'queue'). Do NOT use American or Australian English.",
-        ["en-UK"] = "Write the dialogue STRICTLY in British English. The speakers MUST sound authentically British — use British vocabulary, spellings, and idioms (e.g. 'brilliant', 'cheers', 'biscuit', 'flat', 'rubbish', 'queue'). Do NOT use American or Australian English.",
-        ["en-NZ"] = "Write the dialogue STRICTLY in New Zealand English. The speakers MUST sound authentically Kiwi — use New Zealand vocabulary and idioms (e.g. 'sweet as', 'chur', 'bach', 'dairy', 'togs', 'jandals', 'kia ora', 'choice'). This is NOT Australian English. Do NOT use Australian slang or idioms.",
         ["en-AU"] = "Write the dialogue STRICTLY in Australian English. The speakers MUST sound authentically Australian — use Australian vocabulary and idioms (e.g. 'arvo', 'brekkie', 'no worries', 'mate', 'servo', 'bottle-o'). Do NOT use New Zealand, British, or American English.",
         ["en-CA"] = "Write the dialogue STRICTLY in Canadian English. The speakers MUST sound authentically Canadian — use Canadian vocabulary and idioms (e.g. 'toque', 'loonie', 'double-double', 'eh', 'hydro'). Do NOT use American or British English.",
-        ["en-IE"] = "Write the dialogue STRICTLY in Irish English. The speakers MUST sound authentically Irish — use Irish vocabulary and idioms (e.g. 'grand', 'craic', 'gas', 'your man', 'deadly'). Do NOT use British or American English.",
         ["en-IN"] = "Write the dialogue STRICTLY in Indian English. The speakers MUST sound authentically Indian — use Indian English vocabulary, phrasing and idioms natural to India (e.g. 'prepone', 'do the needful', 'out of station', 'revert back', 'itself'). Sentence rhythm should reflect Indian English patterns. Do NOT use British, American, or Australian English.",
-        ["zh"]    = "Write the dialogue entirely in Mandarin Chinese (简体中文). Keep it natural and conversational.",
-        ["ja"]    = "Write the dialogue entirely in Japanese (日本語). Keep it natural and conversational.",
-        ["ko"]    = "Write the dialogue entirely in Korean (한국어). Keep it natural and conversational.",
-        ["fr"]    = "Write the dialogue entirely in French (Français). Keep it natural and conversational.",
-        ["de"]    = "Write the dialogue entirely in German (Deutsch). Keep it natural and conversational.",
-        ["es"]    = "Write the dialogue entirely in Spanish (Español). Keep it natural and conversational.",
-        ["pt"]    = "Write the dialogue entirely in Portuguese (Português). Keep it natural and conversational.",
-        ["hi"]    = "Write the dialogue entirely in Hindi (हिन्दी). Keep it natural and conversational.",
-        ["ar"]    = "Write the dialogue entirely in Arabic (العربية). Keep it natural and conversational.",
-        ["it"]    = "Write the dialogue entirely in Italian (Italiano). Keep it natural and conversational.",
-        ["si"]    = "Write the dialogue entirely in Sinhala (සිංහල). Keep it natural and conversational.",
+        ["en-IE"] = "Write the dialogue STRICTLY in Irish English. The speakers MUST sound authentically Irish — use Irish vocabulary and idioms (e.g. 'grand', 'craic', 'gas', 'your man', 'deadly'). Do NOT use British or American English.",
+        ["en-NZ"] = "Write the dialogue STRICTLY in New Zealand English. The speakers MUST sound authentically Kiwi — use New Zealand vocabulary and idioms (e.g. 'sweet as', 'chur', 'bach', 'dairy', 'togs', 'jandals', 'kia ora', 'choice'). This is NOT Australian English. Do NOT use Australian slang or idioms.",
+        ["en-SG"] = "Write the dialogue STRICTLY in Singapore English. The speakers MUST sound naturally Singaporean while remaining clear and conversational. Use vocabulary and phrasing common in Singapore when it fits naturally, but avoid making every line slang-heavy.",
+        ["en-ZA"] = "Write the dialogue STRICTLY in South African English. The speakers MUST sound naturally South African, with vocabulary and phrasing that fit South Africa. Do NOT use British, Australian, or American idioms as the dominant voice.",
+        ["en-GB"] = "Write the dialogue STRICTLY in British English. The speakers MUST sound authentically British — use British vocabulary, spellings, and idioms (e.g. 'brilliant', 'cheers', 'biscuit', 'flat', 'rubbish', 'queue'). Do NOT use American or Australian English.",
+        ["en-US"] = "Write the dialogue STRICTLY in US American English. The speakers MUST sound authentically American — use American vocabulary, spellings, and idioms (e.g. 'gotten', 'sidewalk', 'faucet', 'trash can', 'apartment'). Do NOT use British, Australian, or any other English variant.",
+        ["yue-CN"] = "Write the dialogue entirely in natural Cantonese as used in China mainland. Use Chinese characters, keep it conversational, and do not switch into Mandarin phrasing.",
+        ["zh-CN"] = "Write the dialogue entirely in Mandarin Chinese for China mainland (简体中文). Keep it natural and conversational.",
+        ["zh-HK"] = "Write the dialogue entirely in natural Chinese for Hong Kong (繁體中文), using wording that fits Hong Kong usage.",
+        ["zh-TW"] = "Write the dialogue entirely in natural Chinese for Taiwan (繁體中文), using wording that fits Taiwanese Mandarin usage.",
+        ["fr-BE"] = "Write the dialogue entirely in French for Belgium. Keep it natural and conversational, with wording that fits Belgian French when relevant.",
+        ["fr-CA"] = "Write the dialogue entirely in French for Canada. Keep it natural and conversational, with wording that fits Canadian French when relevant.",
+        ["fr-FR"] = "Write the dialogue entirely in French for France. Keep it natural and conversational.",
+        ["fr-CH"] = "Write the dialogue entirely in French for Switzerland. Keep it natural and conversational, with wording that fits Swiss French when relevant.",
+        ["de-AT"] = "Write the dialogue entirely in German for Austria. Keep it natural and conversational, with wording that fits Austrian German when relevant.",
+        ["de-DE"] = "Write the dialogue entirely in German for Germany. Keep it natural and conversational.",
+        ["de-CH"] = "Write the dialogue entirely in German for Switzerland. Keep it natural and conversational, with wording that fits Swiss Standard German when relevant.",
+        ["it-IT"] = "Write the dialogue entirely in Italian for Italy. Keep it natural and conversational.",
+        ["it-CH"] = "Write the dialogue entirely in Italian for Switzerland. Keep it natural and conversational, with wording that fits Swiss Italian when relevant.",
+        ["ja-JP"] = "Write the dialogue entirely in Japanese (日本語) for Japan. Keep it natural and conversational.",
+        ["ko-KR"] = "Write the dialogue entirely in Korean (한국어) for South Korea. Keep it natural and conversational.",
+        ["pt-BR"] = "Write the dialogue entirely in Portuguese for Brazil. Keep it natural and conversational, with Brazilian usage.",
+        ["pt-PT"] = "Write the dialogue entirely in Portuguese for Portugal. Keep it natural and conversational, with European Portuguese usage.",
+        ["es-CL"] = "Write the dialogue entirely in Spanish for Chile. Keep it natural and conversational, with wording that fits Chilean Spanish when relevant.",
+        ["es-MX"] = "Write the dialogue entirely in Spanish for Mexico. Keep it natural and conversational, with wording that fits Mexican Spanish when relevant.",
+        ["es-ES"] = "Write the dialogue entirely in Spanish for Spain. Keep it natural and conversational, with wording that fits Spain Spanish when relevant.",
+        ["es-US"] = "Write the dialogue entirely in Spanish for the United States. Keep it natural and conversational, using neutral US Spanish that feels natural for Spanish speakers in the United States.",
     };
 
     // Accent instructions injected into the TTS content so Gemini speaks the right accent.
-    private static readonly Dictionary<string, string> TtsAccentInstructions = new()
+    private static readonly Dictionary<string, string> TtsAccentInstructions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["en-US"] = "Both speakers must use a natural, authentic US American accent throughout. Do not use Australian, British, or New Zealand accents.",
-        ["en-GB"] = "Both speakers must use a natural, authentic British English accent throughout. Do not use Australian, American, or New Zealand accents.",
-        ["en-UK"] = "Both speakers must use a natural, authentic British English accent throughout. Do not use Australian, American, or New Zealand accents.",
-        ["en-NZ"] = "Both speakers must use a natural, authentic New Zealand English (Kiwi) accent throughout. This is NOT an Australian accent — New Zealand English has a distinctly higher, flatter vowel sound. Do not use Australian accents.",
         ["en-AU"] = "Both speakers must use a natural, authentic Australian accent throughout. Do not use New Zealand, British, or American accents.",
         ["en-CA"] = "Both speakers must use a natural, authentic Canadian English accent throughout.",
-        ["en-IE"] = "Both speakers must use a natural, authentic Irish English accent throughout.",
         ["en-IN"] = "Both speakers must use a natural, authentic Indian English accent throughout — the distinctive rhythm, intonation and stress patterns of Indian English speakers. Do not use British, American, or Australian accents.",
+        ["en-IE"] = "Both speakers must use a natural, authentic Irish English accent throughout.",
+        ["en-NZ"] = "Both speakers must use a natural, authentic New Zealand English accent throughout. Do not use Australian accents.",
+        ["en-SG"] = "Both speakers must use a natural, authentic Singapore English accent throughout.",
+        ["en-ZA"] = "Both speakers must use a natural, authentic South African English accent throughout.",
+        ["en-GB"] = "Both speakers must use a natural, authentic British English accent throughout. Do not use Australian, American, or New Zealand accents.",
+        ["en-US"] = "Both speakers must use a natural, authentic US American accent throughout. Do not use Australian, British, or New Zealand accents.",
+    };
+
+    private static readonly Dictionary<string, string> NewsFocusByLocale = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["en-AU"] = "Australia",
+        ["en-CA"] = "Canada",
+        ["en-IN"] = "India",
+        ["en-IE"] = "Ireland",
+        ["en-NZ"] = "New Zealand",
+        ["en-SG"] = "Singapore",
+        ["en-ZA"] = "South Africa",
+        ["en-GB"] = "the United Kingdom",
+        ["en-US"] = "the United States",
+        ["yue-CN"] = "China mainland",
+        ["zh-CN"] = "China mainland",
+        ["zh-HK"] = "Hong Kong",
+        ["zh-TW"] = "Taiwan",
+        ["fr-BE"] = "Belgium",
+        ["fr-CA"] = "Canada",
+        ["fr-FR"] = "France",
+        ["fr-CH"] = "Switzerland",
+        ["de-AT"] = "Austria",
+        ["de-DE"] = "Germany",
+        ["de-CH"] = "Switzerland",
+        ["it-IT"] = "Italy",
+        ["it-CH"] = "Switzerland",
+        ["ja-JP"] = "Japan",
+        ["ko-KR"] = "South Korea",
+        ["pt-BR"] = "Brazil",
+        ["pt-PT"] = "Portugal",
+        ["es-CL"] = "Chile",
+        ["es-MX"] = "Mexico",
+        ["es-ES"] = "Spain",
+        ["es-US"] = "the United States",
     };
 
     // Voice library — each voice tagged by gender and style keywords.
@@ -111,12 +159,63 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         return (v1, v2);
     }
 
+    private static bool IsLatestNewsScenario(string? scenarioId) =>
+        string.Equals(scenarioId, LatestNewsScenarioId, StringComparison.OrdinalIgnoreCase);
+
+    private static string TruncateForLog(string? value, int maxLength = 1200)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        var trimmed = value.Trim();
+        return trimmed.Length <= maxLength
+            ? trimmed
+            : $"{trimmed[..maxLength]}...";
+    }
+
+    private static string ResolveNewsFocus(string language, string languageCode)
+    {
+        var normalizedCode = languageCode.Trim();
+        if (NewsFocusByLocale.TryGetValue(normalizedCode, out var mapped))
+            return mapped;
+
+        var parts = normalizedCode.Split(['-', '_'], StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length > 0 && NewsFocusByLocale.TryGetValue(parts[0], out mapped))
+            return mapped;
+
+        if (parts.Length > 1)
+        {
+            var region = parts[^1];
+            if (region.Equals("UK", StringComparison.OrdinalIgnoreCase))
+                region = "GB";
+
+            if (region.Length == 2)
+            {
+                try
+                {
+                    return new RegionInfo(region.ToUpperInvariant()).EnglishName;
+                }
+                catch
+                {
+                    // Fall through to language-based fallback.
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(language))
+            return $"the region most closely associated with {language.Trim()}";
+
+        return $"the region implied by locale '{languageCode}'";
+    }
+
     private GeminiSettings Settings => options.Value;
 
     public async Task<GeneratedDialogue> GenerateDialogueAsync(
+        string language,
         string languageCode,
         string scenario,
         int durationSeconds,
+        string? scenarioId = null,
         CancellationToken cancellationToken = default)
     {
         var accentInstruction = AccentInstructions.GetValueOrDefault(languageCode,
@@ -128,9 +227,25 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
             : durationSeconds == 60 ? "1 minute"
             : $"{durationSeconds / 60} minutes";
 
-        var scenarioLine = string.IsNullOrWhiteSpace(scenario)
-            ? "Choose a random, interesting everyday scenario (e.g. ordering coffee, catching up after a holiday, a job interview, grocery shopping, getting lost on holiday)."
-            : $"The scenario is: {scenario}";
+        var useGoogleSearch = IsLatestNewsScenario(scenarioId);
+        var textModel = useGoogleSearch
+            ? Settings.LatestNewsTextModel
+            : Settings.TextModel;
+        var todayUtc = DateTime.UtcNow.Date;
+        var recentStartUtc = todayUtc.AddDays(-7);
+        var scenarioLine = useGoogleSearch
+            ? $$"""
+Search from the internet to find one real recent news story connected to {{ResolveNewsFocus(language, languageCode)}}.
+- The story must have happened or been reported recently, between {{recentStartUtc:yyyy-MM-dd}} and {{todayUtc:yyyy-MM-dd}} UTC.
+- Prefer safe, public-interest topics suitable for conversational language practice, such as culture, science, technology, travel, sports, weather, business, education, infrastructure, or community events.
+- Avoid politics, government, elections, diplomacy, war, crime, disasters, deaths, injuries, or graphic/distressing events.
+- Exclude any story that centers on Chinese politics, the Chinese government or ruling party, or any current or former Chinese government or party leader by name or title, even if the news is from another country.
+- Base the dialogue on the searched facts, but do NOT mention sources, URLs, publishers, headlines, or that you searched the web.
+- Make the conversation sound like two ordinary people naturally discussing that recent news soon after hearing about it.
+"""
+            : string.IsNullOrWhiteSpace(scenario)
+                ? "Choose a random, interesting everyday scenario (e.g. ordering coffee, catching up after a holiday, a job interview, grocery shopping, getting lost on holiday)."
+                : $"The scenario is: {scenario}";
 
         var prompt = $$"""
 You are a dialogue writer for conversational language learning.
@@ -138,6 +253,7 @@ You are a dialogue writer for conversational language learning.
 CONTENT POLICY (follow strictly):
 - Output is for neutral, everyday language practice only.
 - Do NOT generate dialogue, titles, or scenarios about politics of the People's Republic of China, its government or ruling party, or political leadership past or present; do NOT include politically sensitive topics concerning China.
+- Do NOT mention the names or titles of any current or former Chinese government leaders or Chinese Communist Party leaders anywhere in accepted output, even incidentally.
 - Do NOT generate content about any country's government, political leaders, elections, or politically sensitive current events when those would dominate the scene.
 - If the user's scenario OR any honest interpretation of it would require violating the above, you MUST refuse by returning ONLY this exact JSON (no markdown, no other text):
 {"rejected":true}
@@ -178,19 +294,32 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
         return await WithGeminiKeyAsync(async key =>
         {
             var client = httpClientFactory.CreateClient("gemini");
-            var url = $"/v1beta/models/{Settings.TextModel}:generateContent?key={key}";
-            var body = new
-            {
-                contents = new[] { new { parts = new[] { new { text = prompt } } } }
-            };
+            var url = $"/v1beta/models/{textModel}:generateContent?key={key}";
+            object body = useGoogleSearch
+                ? new
+                {
+                    contents = new[] { new { parts = new[] { new { text = prompt } } } },
+                    tools = new[] { new { google_search = new { } } }
+                }
+                : new
+                {
+                    contents = new[] { new { parts = new[] { new { text = prompt } } } }
+                };
 
             using var response = await client.PostAsync(
                 url,
                 new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
                 cancellationToken);
 
-            response.EnsureSuccessStatusCode();
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Gemini generateContent failed with status {(int)response.StatusCode} for model '{textModel}'. Body: {TruncateForLog(json)}",
+                    null,
+                    response.StatusCode);
+            }
+
             var root = JsonDocument.Parse(json).RootElement;
             var raw = root
                 .GetProperty("candidates")[0]

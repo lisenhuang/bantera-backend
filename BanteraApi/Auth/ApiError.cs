@@ -13,6 +13,9 @@ public record ApiError(
 /// <summary>Well-known error codes the app should handle.</summary>
 public static class ErrorCodes
 {
+    /// <summary>Unexpected internal server error.</summary>
+    public const string InternalError = "internal_error";
+
     /// <summary>Access token is expired. Call POST /api/auth/refresh.</summary>
     public const string TokenExpired = "token_expired";
 
