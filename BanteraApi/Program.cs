@@ -240,6 +240,14 @@ app.MapGet("/api/public/learning-languages", () => Results.Ok(LearningLanguageCa
     .Produces<IReadOnlyList<LearningLanguageItem>>(200)
     .AllowAnonymous();
 
+app.MapGet("/api/public/translation-languages", () => Results.Ok(TranslationLanguageCatalog.Items))
+    .WithName("GetTranslationLanguages")
+    .WithMetadata(new SwaggerOperationAttribute(
+        "Translation languages catalog",
+        "Returns BCP-47 identifiers for iOS built-in translation supported languages. No authentication required."))
+    .Produces<IReadOnlyList<LearningLanguageItem>>(200)
+    .AllowAnonymous();
+
 // ── Auth endpoints ─────────────────────────────────────────────────────────────
 
 app.MapPost("/api/auth/login", async (LoginRequest req, AuthService auth) =>
