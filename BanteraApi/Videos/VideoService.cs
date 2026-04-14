@@ -194,12 +194,12 @@ public class VideoService(
             query = query.Where(v => v.UserId != excludeUserId.Value);
 
         // Full-text search across file name and transcript text.
-        var search = searchQuery?.Trim();
+        var search = searchQuery?.Trim().ToLower();
         if (!string.IsNullOrWhiteSpace(search))
         {
             query = query.Where(v =>
-                v.OriginalFileName.Contains(search) ||
-                v.TranscriptText.Contains(search));
+                v.OriginalFileName.ToLower().Contains(search) ||
+                v.TranscriptText.ToLower().Contains(search));
         }
 
         var result = await query
