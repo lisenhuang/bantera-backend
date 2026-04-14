@@ -233,10 +233,15 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
             : Settings.TextModel;
         var todayUtc = DateTime.UtcNow.Date;
         var recentStartUtc = todayUtc.AddDays(-7);
+        var minNewsCount = Math.Max(1, durationSeconds / 60);
+        var newsCountPhrase = minNewsCount == 1
+            ? "at least 1 real recent news story"
+            : $"at least {minNewsCount} different real recent news stories";
         var scenarioLine = useGoogleSearch
             ? $$"""
-Search from the internet to find some real recent news story connected to {{ResolveNewsFocus(language, languageCode)}}.
-- The story must have happened or been reported recently, between {{recentStartUtc:yyyy-MM-dd}} and {{todayUtc:yyyy-MM-dd}} UTC.
+Search from the internet to find {{newsCountPhrase}} connected to {{ResolveNewsFocus(language, languageCode)}}.
+- Each story must have happened or been reported recently, between {{recentStartUtc:yyyy-MM-dd}} and {{todayUtc:yyyy-MM-dd}} UTC.
+- Weave all {{minNewsCount}} {{(minNewsCount == 1 ? "story" : "stories")}} naturally into the conversation — the speakers should discuss each one as they come up.
 - Prefer safe, public-interest topics suitable for conversational language practice, such as culture, science, technology, travel, sports, weather, business, education, infrastructure, or community events.
 - Avoid politics, government, elections, diplomacy, war, crime, disasters, deaths, injuries, or graphic/distressing events.
 - Exclude any story that centers on Chinese politics, the Chinese government or ruling party, or any current or former Chinese government or party leader by name or title, even if the news is from another country.
