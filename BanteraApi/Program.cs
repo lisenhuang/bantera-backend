@@ -400,8 +400,8 @@ app.MapDelete("/api/me", async (
 .WithMetadata(new SwaggerOperationAttribute(
     "Delete current account",
     """
-    Permanently deletes the authenticated user, sessions, identities, uploaded videos,
-    and saved-video links. AI-generated media blobs in object storage are not deleted.
+    Permanently deletes the authenticated user, sessions, identities, saved-video links,
+    and non-AI uploads. AI-generated audio is preserved and reassigned to Bantera AI.
     Requires `Authorization: Bearer <access_token>`.
 
     **Responses:**
