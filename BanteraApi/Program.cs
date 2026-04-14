@@ -1029,9 +1029,10 @@ app.MapGet("/api/videos/{videoId:guid}", async (
 .Produces(404)
 .AllowAnonymous();
 
-app.MapGet("/api/videos/{videoId:guid}/file", async (
+app.MapGet("/api/videos/{videoId:guid}/file", async Task<IResult> (
     Guid videoId,
     System.Security.Claims.ClaimsPrincipal user,
+    HttpContext httpContext,
     VideoService videoService,
     CancellationToken cancellationToken) =>
 {
@@ -1040,9 +1041,11 @@ app.MapGet("/api/videos/{videoId:guid}/file", async (
         TryGetUserId(user),
         cancellationToken);
 
-    return file is null
-        ? Results.NotFound()
-        : Results.Stream(file.Stream, file.ContentType, enableRangeProcessing: true);
+    if (file is null)
+        return Results.NotFound();
+
+    httpContext.Response.ContentLength = file.ContentLength;
+    return Results.Stream(file.Stream, file.ContentType, enableRangeProcessing: true);
 })
 .WithName("GetVideoFile")
 .WithMetadata(new SwaggerOperationAttribute(

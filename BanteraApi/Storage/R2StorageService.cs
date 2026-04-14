@@ -103,10 +103,12 @@ public class R2StorageService
 
         return new StoredObjectResult(
             response.ResponseStream,
-            response.Headers.ContentType ?? "application/octet-stream");
+            response.Headers.ContentType ?? "application/octet-stream",
+            response.Headers.ContentLength);
     }
 }
 
 public sealed record StoredObjectResult(
     Stream Stream,
-    string ContentType);
+    string ContentType,
+    long ContentLength);
