@@ -299,7 +299,9 @@ Write enough lines so that when spoken naturally (~130 words per minute), the di
 Aim for approximately {{targetWords}} words total across all speakers.
 
 Generate a natural, realistic spoken dialogue between exactly TWO people.
-- Name them Speaker1 and Speaker2.
+- In the JSON structure below, strictly use "Speaker1" and "Speaker2" as the labels for the speakers.
+- Inside the actual dialogue text (the "text" fields), give the characters realistic names natural to the target language and locale.
+- Characters should address each other by these real names, NEVER as "Speaker 1" or "Speaker 2".
 - Alternate turns naturally; each turn should be 1–3 sentences.
 - Keep sentences short and conversational — the way people actually talk.
 - Do NOT include stage directions or any text outside the dialogue.
