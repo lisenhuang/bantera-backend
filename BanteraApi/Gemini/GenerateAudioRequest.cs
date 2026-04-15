@@ -5,4 +5,6 @@ public record GenerateAudioRequest(
     string LanguageCode,
     string Scenario,
     int DurationSeconds,
-    string? ScenarioId = null);
+    string? ScenarioId = null,
+    string? NativeLanguage = null,
+    string? NativeLanguageCode = null);

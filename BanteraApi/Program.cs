@@ -696,6 +696,8 @@ app.MapPost("/api/me/audio/generate", async (
             req.Scenario,
             req.DurationSeconds,
             req.ScenarioId,
+            req.NativeLanguage,
+            req.NativeLanguageCode,
             cancellationToken);
         await SendAsync(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
 

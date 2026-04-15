@@ -216,6 +216,8 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         string scenario,
         int durationSeconds,
         string? scenarioId = null,
+        string? nativeLanguage = null,
+        string? nativeLanguageCode = null,
         CancellationToken cancellationToken = default)
     {
         var accentInstruction = AccentInstructions.GetValueOrDefault(languageCode,
@@ -234,12 +236,37 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         var todayUtc = DateTime.UtcNow.Date;
         var recentStartUtc = todayUtc.AddDays(-7);
         var minNewsCount = Math.Max(1, durationSeconds / 60);
-        var newsCountPhrase = minNewsCount == 1
-            ? "at least 1 real recent news story"
-            : $"at least {minNewsCount} different real recent news stories";
+        var newsFocus = ResolveNewsFocus(language, languageCode);
+        string searchInstruction;
+        if (!string.IsNullOrWhiteSpace(nativeLanguageCode) || !string.IsNullOrWhiteSpace(nativeLanguage))
+        {
+            var nativeNewsFocus = ResolveNewsFocus(nativeLanguage ?? "", nativeLanguageCode ?? "");
+            if (nativeNewsFocus.Equals(newsFocus, StringComparison.OrdinalIgnoreCase))
+            {
+                searchInstruction = $"Find {minNewsCount} real recent news {(minNewsCount == 1 ? "story" : "stories")} connected to {newsFocus}.";
+            }
+            else
+            {
+                if (minNewsCount == 1)
+                {
+                    searchInstruction = $"Find exactly 1 real recent news story connected to {nativeNewsFocus}. Do not search for {newsFocus}.";
+                }
+                else
+                {
+                    var nativeCount = (int)Math.Ceiling(minNewsCount / 2.0);
+                    var targetCount = minNewsCount - nativeCount;
+                    searchInstruction = $"Find {minNewsCount} real recent news stories: {nativeCount} connected to {nativeNewsFocus}, and {targetCount} connected to {newsFocus}.";
+                }
+            }
+        }
+        else
+        {
+            searchInstruction = $"Find {minNewsCount} real recent news {(minNewsCount == 1 ? "story" : "stories")} connected to {newsFocus}.";
+        }
+
         var scenarioLine = useGoogleSearch
             ? $$"""
-Search from the internet to find {{newsCountPhrase}} connected to {{ResolveNewsFocus(language, languageCode)}}.
+Search from the internet to follow this instruction: {{searchInstruction}}
 - Each story must have happened or been reported recently, between {{recentStartUtc:yyyy-MM-dd}} and {{todayUtc:yyyy-MM-dd}} UTC.
 - Weave all {{minNewsCount}} {{(minNewsCount == 1 ? "story" : "stories")}} naturally into the conversation — the speakers should discuss each one as they come up.
 - Prefer safe, public-interest topics suitable for conversational language practice, such as culture, science, technology, travel, sports, weather, business, education, infrastructure, or community events.
