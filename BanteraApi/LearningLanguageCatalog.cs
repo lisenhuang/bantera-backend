@@ -1,7 +1,7 @@
 namespace BanteraApi;
 
 /// <summary>
-/// Curated learning / transcription locale catalog aligned with Gemini locale keys.
+/// Curated learning language catalog: English variants plus French, Italian, German, and Spanish.
 /// </summary>
 public sealed record LearningLanguageItem(
     string Identifier,
@@ -10,38 +10,45 @@ public sealed record LearningLanguageItem(
 
 public static class LearningLanguageCatalog
 {
-    /// <summary>Deterministic order matching the supported transcription locales.</summary>
+    /// <summary>Deterministic order: generic language codes precede region variants.</summary>
     public static IReadOnlyList<LearningLanguageItem> Items { get; } =
     [
-        new("yue-CN", "Cantonese (China mainland)", "🇨🇳"),
-        new("zh-CN", "Chinese (China mainland)", "🇨🇳"),
-        new("zh-HK", "Chinese (Hong Kong)", "🇭🇰"),
-        new("zh-TW", "Chinese (Taiwan)", "🇹🇼"),
+        // English (13)
         new("en-AU", "English (Australia)", "🇦🇺"),
         new("en-CA", "English (Canada)", "🇨🇦"),
-        new("en-IN", "English (India)", "🇮🇳"),
+        new("en-ID", "English (Indonesia)", "🇮🇩"),
         new("en-IE", "English (Ireland)", "🇮🇪"),
+        new("en-IN", "English (India)", "🇮🇳"),
         new("en-NZ", "English (New Zealand)", "🇳🇿"),
+        new("en-PH", "English (Philippines)", "🇵🇭"),
+        new("en-SA", "English (Saudi Arabia)", "🇸🇦"),
         new("en-SG", "English (Singapore)", "🇸🇬"),
         new("en-ZA", "English (South Africa)", "🇿🇦"),
+        new("en-AE", "English (United Arab Emirates)", "🇦🇪"),
         new("en-GB", "English (United Kingdom)", "🇬🇧"),
         new("en-US", "English (United States)", "🇺🇸"),
+        // French (5)
+        new("fr", "French", "🇫🇷"),
         new("fr-BE", "French (Belgium)", "🇧🇪"),
         new("fr-CA", "French (Canada)", "🇨🇦"),
-        new("fr-FR", "French (France)", "🇫🇷"),
         new("fr-CH", "French (Switzerland)", "🇨🇭"),
-        new("de-AT", "German (Austria)", "🇦🇹"),
-        new("de-DE", "German (Germany)", "🇩🇪"),
-        new("de-CH", "German (Switzerland)", "🇨🇭"),
-        new("it-IT", "Italian (Italy)", "🇮🇹"),
+        new("fr-FR", "French (France)", "🇫🇷"),
+        // Italian (3)
+        new("it", "Italian", "🇮🇹"),
         new("it-CH", "Italian (Switzerland)", "🇨🇭"),
-        new("ja-JP", "Japanese (Japan)", "🇯🇵"),
-        new("ko-KR", "Korean (South Korea)", "🇰🇷"),
-        new("pt-BR", "Portuguese (Brazil)", "🇧🇷"),
-        new("pt-PT", "Portuguese (Portugal)", "🇵🇹"),
+        new("it-IT", "Italian (Italy)", "🇮🇹"),
+        // German (4)
+        new("de", "German", "🇩🇪"),
+        new("de-AT", "German (Austria)", "🇦🇹"),
+        new("de-CH", "German (Switzerland)", "🇨🇭"),
+        new("de-DE", "German (Germany)", "🇩🇪"),
+        // Spanish (7)
+        new("es", "Spanish", "🇪🇸"),
+        new("es-419", "Spanish (Latin America)", "🌎"),
         new("es-CL", "Spanish (Chile)", "🇨🇱"),
-        new("es-MX", "Spanish (Mexico)", "🇲🇽"),
+        new("es-CO", "Spanish (Colombia)", "🇨🇴"),
         new("es-ES", "Spanish (Spain)", "🇪🇸"),
+        new("es-MX", "Spanish (Mexico)", "🇲🇽"),
         new("es-US", "Spanish (United States)", "🇺🇸"),
     ];
 }
