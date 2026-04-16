@@ -1330,9 +1330,7 @@ static IReadOnlyList<VideoTranscriptCueRecord>? TryBuildRevAiCues(
 
         var first = wordTiming[timingIndex];
         var last = wordTiming[timingIndex + wordCount - 1];
-        var startMs = lineIndex == 0
-            ? Math.Max(0, first.StartMs)
-            : Math.Max(cues[^1].EndMs, first.StartMs);
+        var startMs = Math.Max(0, first.StartMs);
         var endMs = Math.Max(startMs + 1, last.EndMs);
         cues.Add(new VideoTranscriptCueRecord(lineIndex, startMs, endMs, line.Text));
         timingIndex += wordCount;
