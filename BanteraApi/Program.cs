@@ -20,6 +20,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Options;
 using Swashbuckle.AspNetCore.Annotations;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -743,6 +744,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
     System.Security.Claims.ClaimsPrincipal user,
     GeminiService geminiService,
     RevAiAlignmentService revAiAlignmentService,
+    IOptions<RevAiSettings> revAiOptions,
     R2StorageService r2StorageService,
     VideoService videoService,
     AppDbContext db,
@@ -814,33 +816,89 @@ app.MapPost("/api/me/audio/generate/v2", async (
 
         IReadOnlyList<WordTimingRecord>? wordTiming = null;
         IReadOnlyList<VideoTranscriptCueRecord>? cues = null;
-        if (RevAiAlignmentService.IsRevAiSupported(req.LanguageCode))
+        var revAiRequired = RevAiAlignmentService.TryGetSupportedLanguageCode(
+            req.LanguageCode,
+            out var revAiLanguageCode);
+        if (revAiRequired && revAiLanguageCode is not null)
         {
+            var transcript = string.Join("\n", dialogue.Lines.Select(l => l.Text));
+            var revAiLogOptions = revAiOptions.Value;
+            var diagnostics = RevAiTranscriptDiagnostics.Create(
+                transcript,
+                revAiLogOptions.TranscriptPreviewMaxChars);
+            var presignedUrl = r2StorageService.GeneratePresignedUrl(objectKey, TimeSpan.FromHours(1));
+            app.Logger.LogInformation(
+                "Rev.ai alignment attempt for user {UserId}, locale {LanguageCode}, revAiLanguageCode {RevAiLanguageCode}, scenarioId {ScenarioId}, audioUrl {AudioUrl}, transcriptChars {TranscriptChars}, transcriptLines {TranscriptLines}, transcriptHash {TranscriptHash}, normalizedTranscriptHash {NormalizedTranscriptHash}, transcriptPreview {TranscriptPreview}, transcriptFull {TranscriptFull}",
+                userId,
+                req.LanguageCode,
+                revAiLanguageCode,
+                req.ScenarioId,
+                presignedUrl,
+                diagnostics.CharCount,
+                diagnostics.LineCount,
+                diagnostics.TranscriptHash,
+                diagnostics.NormalizedTranscriptHash,
+                revAiLogOptions.LogTranscriptPreview ? diagnostics.TranscriptPreview : "(disabled)",
+                revAiLogOptions.LogTranscriptFull ? transcript : "(disabled)");
             try
             {
-                var transcript = string.Join("\n", dialogue.Lines.Select(l => l.Text));
-                var presignedUrl = r2StorageService.GeneratePresignedUrl(objectKey, TimeSpan.FromHours(1));
-                wordTiming = await revAiAlignmentService.AlignAsync(presignedUrl, transcript, cancellationToken);
-                cues = TryBuildRevAiCues(dialogue.Lines, wordTiming);
+                wordTiming = await revAiAlignmentService.AlignAsync(
+                    presignedUrl,
+                    revAiLanguageCode,
+                    transcript,
+                    cancellationToken);
+                if (!RevAiCueAlignmentBuilder.TryBuild(
+                        dialogue.Lines,
+                        wordTiming,
+                        out cues,
+                        out var failure))
+                {
+                    app.Logger.LogWarning(
+                        "Rev.ai cue alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. lineIndex={LineIndex}, matchedWords={MatchedWords}, expectedWords={ExpectedWords}, matchRatio={MatchRatio}, requiredMatchRatio={RequiredMatchRatio}, requiredMatchedWords={RequiredMatchedWords}, expectedToken={ExpectedToken}, actualWord={ActualWord}",
+                        userId,
+                        req.LanguageCode,
+                        req.ScenarioId,
+                        failure?.LineIndex,
+                        failure?.MatchedWords,
+                        failure?.ExpectedWords,
+                        failure?.MatchRatio,
+                        failure?.RequiredMatchRatio,
+                        failure?.RequiredMatchedWords,
+                        failure?.ExpectedToken,
+                        failure?.ActualWord);
+                    throw new InvalidOperationException(
+                        $"Rev.ai cue alignment produced non-alignable output for supported locale '{req.LanguageCode}' at line {failure?.LineIndex}.");
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                app.Logger.LogWarning(
+                app.Logger.LogError(
                     ex,
-                    "Rev.ai alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. Falling back to Gemini timing.",
+                    "Rev.ai alignment failed for supported locale. user {UserId}, locale {LanguageCode}, revAiLanguageCode {RevAiLanguageCode}, scenarioId {ScenarioId}, audioUrl {AudioUrl}",
                     userId,
                     req.LanguageCode,
-                    req.ScenarioId);
-                wordTiming = null;
+                    revAiLanguageCode,
+                    req.ScenarioId,
+                    presignedUrl);
+                await SendAsync(new { step = "error", message = generationFailedMessage });
+                return;
             }
         }
+        else
+        {
+            cues = await geminiService.GenerateCueTimingAsync(
+                wavBytes,
+                "audio/wav",
+                dialogue.Lines,
+                durationMs,
+                cancellationToken);
+        }
 
-        cues ??= await geminiService.GenerateCueTimingAsync(
-            wavBytes,
-            "audio/wav",
-            dialogue.Lines,
-            durationMs,
-            cancellationToken);
+        if (cues is null)
+        {
+            await SendAsync(new { step = "error", message = generationFailedMessage });
+            return;
+        }
 
         var videoResponse = await videoService.SaveAiAudioV2Async(
             userId.Value,
@@ -1309,35 +1367,3 @@ static Guid? TryGetUserId(System.Security.Claims.ClaimsPrincipal user)
     return userId;
 }
 
-static IReadOnlyList<VideoTranscriptCueRecord>? TryBuildRevAiCues(
-    DialogueLine[] lines,
-    IReadOnlyList<WordTimingRecord> wordTiming)
-{
-    if (lines.Length == 0 || wordTiming.Count == 0)
-        return null;
-
-    var cues = new List<VideoTranscriptCueRecord>(lines.Length);
-    var timingIndex = 0;
-    for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
-    {
-        var line = lines[lineIndex];
-        var wordCount = CountCueWords(line.Text);
-        if (wordCount <= 0)
-            return null;
-
-        if (timingIndex + wordCount > wordTiming.Count)
-            return null;
-
-        var first = wordTiming[timingIndex];
-        var last = wordTiming[timingIndex + wordCount - 1];
-        var startMs = Math.Max(0, first.StartMs);
-        var endMs = Math.Max(startMs + 1, last.EndMs);
-        cues.Add(new VideoTranscriptCueRecord(lineIndex, startMs, endMs, line.Text));
-        timingIndex += wordCount;
-    }
-
-    return cues.Count == lines.Length ? cues : null;
-}
-
-static int CountCueWords(string text) =>
-    System.Text.RegularExpressions.Regex.Matches(text, @"[\p{L}\p{N}']+").Count;
