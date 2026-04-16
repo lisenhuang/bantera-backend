@@ -185,4 +185,64 @@ public class RevAiCueAlignmentBuilderTests
         Assert.Equal(5340, cues[1].StartMs);
         Assert.Equal(11940, cues[1].EndMs);
     }
+
+    [Fact]
+    public void TryBuild_AnchorsCueStartToThatsWordTiming()
+    {
+        var lines = new[]
+        {
+            new DialogueLine("Speaker1", "Earlier cue line"),
+            new DialogueLine("Speaker2", "That’s so nice of you Mike"),
+        };
+        var wordTiming = new List<WordTimingRecord>
+        {
+            new("Earlier", 0, 8000, 0.99),
+            new("cue", 8001, 12000, 0.99),
+            new("line", 12001, 18000, 0.99),
+            new("That’s", 17730, 18000, 0.99),
+            new("so", 18001, 18700, 0.99),
+            new("nice", 18701, 19600, 0.99),
+            new("of", 19601, 20100, 0.99),
+            new("you", 20101, 20800, 0.99),
+            new("Mike", 20801, 22800, 0.99),
+        };
+
+        var success = RevAiCueAlignmentBuilder.TryBuild(lines, wordTiming, out var cues, out var failure);
+
+        Assert.True(success);
+        Assert.NotNull(cues);
+        Assert.Null(failure);
+        Assert.Equal(2, cues!.Count);
+        Assert.Equal(17730, cues[1].StartMs);
+        Assert.Equal(22800, cues[1].EndMs);
+    }
+
+    [Fact]
+    public void TryBuild_NormalizesSmartAndAsciiApostrophesForFirstWordAnchor()
+    {
+        var lines = new[]
+        {
+            new DialogueLine("Speaker1", "Earlier cue line"),
+            new DialogueLine("Speaker2", "That's so nice of you Mike"),
+        };
+        var wordTiming = new List<WordTimingRecord>
+        {
+            new("Earlier", 0, 8000, 0.99),
+            new("cue", 8001, 12000, 0.99),
+            new("line", 12001, 18000, 0.99),
+            new("That’s", 17730, 18000, 0.99),
+            new("so", 18001, 18700, 0.99),
+            new("nice", 18701, 19600, 0.99),
+            new("of", 19601, 20100, 0.99),
+            new("you", 20101, 20800, 0.99),
+            new("Mike", 20801, 22800, 0.99),
+        };
+
+        var success = RevAiCueAlignmentBuilder.TryBuild(lines, wordTiming, out var cues, out var failure);
+
+        Assert.True(success);
+        Assert.NotNull(cues);
+        Assert.Null(failure);
+        Assert.Equal(17730, cues![1].StartMs);
+    }
 }

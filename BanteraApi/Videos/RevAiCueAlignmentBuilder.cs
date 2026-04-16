@@ -9,6 +9,7 @@ public static class RevAiCueAlignmentBuilder
 {
     private static readonly Regex TokenRegex = new(@"[\p{L}\p{N}']+", RegexOptions.Compiled);
     private const int MatchLookaheadWindow = 6;
+    private const int FirstTokenLookaheadWindow = 20;
     private const double MinLineMatchRatio = 0.7;
     private const int MinMatchedWordsPerLine = 2;
 
@@ -57,7 +58,10 @@ public static class RevAiCueAlignmentBuilder
             for (var tokenIndex = 0; tokenIndex < tokens.Count; tokenIndex++)
             {
                 var token = tokens[tokenIndex];
-                var maxSearch = Math.Min(wordTiming.Count, timingCursor + MatchLookaheadWindow);
+                var lookahead = tokenIndex == 0
+                    ? FirstTokenLookaheadWindow
+                    : MatchLookaheadWindow;
+                var maxSearch = Math.Min(wordTiming.Count, timingCursor + lookahead);
                 var bestMatch = -1;
                 for (var cursor = timingCursor; cursor < maxSearch; cursor++)
                 {
@@ -78,7 +82,7 @@ public static class RevAiCueAlignmentBuilder
                 var matchedWord = wordTiming[bestMatch];
                 var startMs = Math.Max(0, matchedWord.StartMs);
                 var endMs = Math.Max(startMs + 1, matchedWord.EndMs);
-                lineStart = lineStart < 0 ? startMs : lineStart;
+                lineStart = lineStart < 0 ? startMs : Math.Min(lineStart, startMs);
                 lineEnd = endMs;
                 timingCursor = bestMatch + 1;
                 matchedCount++;
@@ -117,8 +121,9 @@ public static class RevAiCueAlignmentBuilder
 
     internal static List<string> Tokenize(string text)
     {
+        var normalizedText = NormalizeApostrophes(text ?? string.Empty);
         return TokenRegex
-            .Matches(text ?? string.Empty)
+            .Matches(normalizedText)
             .Select(match => NormalizeToken(match.Value))
             .Where(token => token.Length > 0)
             .ToList();
@@ -129,16 +134,21 @@ public static class RevAiCueAlignmentBuilder
         if (string.IsNullOrWhiteSpace(value))
             return string.Empty;
 
-        var normalized = value.Trim().Normalize(NormalizationForm.FormKC);
-        normalized = normalized
-            .Replace('\u2018', '\'')
-            .Replace('\u2019', '\'')
-            .Replace('\u02BC', '\'')
-            .Replace('\uFF07', '\'');
+        var normalized = NormalizeApostrophes(value.Trim());
         normalized = RemoveDiacritics(normalized);
         normalized = normalized.ToLowerInvariant();
         normalized = TokenRegex.Match(normalized).Value;
         return normalized;
+    }
+
+    private static string NormalizeApostrophes(string value)
+    {
+        return (value ?? string.Empty)
+            .Normalize(NormalizationForm.FormKC)
+            .Replace('\u2018', '\'')
+            .Replace('\u2019', '\'')
+            .Replace('\u02BC', '\'')
+            .Replace('\uFF07', '\'');
     }
 
     private static string RemoveDiacritics(string text)
