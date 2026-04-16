@@ -1060,7 +1060,7 @@ app.MapGet("/api/videos/public", async (
         search,
         mediaType,
         httpContext,
-        includeV2 == true,
+        includeV2 != false,
         cancellationToken);
 
     return Results.Ok(videos);
