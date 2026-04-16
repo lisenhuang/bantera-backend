@@ -10,6 +10,7 @@ using BanteraApi.Database;
 using BanteraApi.Database.Entities;
 using BanteraApi.Gemini;
 using BanteraApi.Profile;
+using BanteraApi.RevAi;
 using BanteraApi.Storage;
 using BanteraApi.Videos;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -55,6 +56,14 @@ builder.Services.AddHttpClient("gemini", c =>
     c.Timeout = TimeSpan.FromSeconds(180);
 });
 builder.Services.AddScoped<GeminiService>();
+
+builder.Services.Configure<RevAiSettings>(builder.Configuration.GetSection(RevAiSettings.Section));
+builder.Services.AddHttpClient("revai", c =>
+{
+    c.BaseAddress = new Uri("https://api.rev.ai");
+    c.Timeout = TimeSpan.FromSeconds(180);
+});
+builder.Services.AddScoped<RevAiAlignmentService>();
 
 builder.Services.AddScoped<AdminService>();
 
@@ -609,6 +618,7 @@ app.MapPost("/api/me/videos", async (
 .RequireAuthorization();
 
 app.MapGet("/api/me/videos", async (
+    [FromQuery] bool? includeV2,
     HttpContext httpContext,
     System.Security.Claims.ClaimsPrincipal user,
     VideoService videoService,
@@ -623,6 +633,7 @@ app.MapGet("/api/me/videos", async (
     var videos = await videoService.ListMyVideosAsync(
         userId.Value,
         httpContext,
+        includeV2 == true,
         cancellationToken);
 
     return Results.Ok(videos);
@@ -722,6 +733,146 @@ app.MapPost("/api/me/audio/generate", async (
     }
 })
 .WithName("GenerateAiAudio")
+.RequireAuthorization();
+
+// V2 keeps the same SSE shape while adding server-side alignment metadata.
+// Events: {"step":"dialogue"} → {"step":"audio"} → {"step":"aligning"} → {"step":"done","video":{...}}
+app.MapPost("/api/me/audio/generate/v2", async (
+    GenerateAudioRequest req,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    GeminiService geminiService,
+    RevAiAlignmentService revAiAlignmentService,
+    R2StorageService r2StorageService,
+    VideoService videoService,
+    AppDbContext db,
+    CancellationToken cancellationToken) =>
+{
+    const string generationFailedMessage = "Something went wrong while creating the practice audio. Please try again.";
+
+    var userId = TryGetUserId(user);
+    if (userId is null)
+    {
+        httpContext.Response.StatusCode = 401;
+        await httpContext.Response.WriteAsJsonAsync(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), cancellationToken);
+        return;
+    }
+
+    const int defaultDailyLimit = 5;
+    var todayUtc = DateTime.UtcNow.Date;
+    var todayCount = await db.UserVideos
+        .CountAsync(v => v.UserId == userId.Value && v.IsAiGenerated && v.CreatedAt >= todayUtc, cancellationToken);
+    var customLimit = await db.Users
+        .Where(u => u.Id == userId.Value)
+        .Select(u => u.AiAudioDailyLimit)
+        .FirstOrDefaultAsync(cancellationToken);
+    var dailyLimit = customLimit ?? defaultDailyLimit;
+    if (todayCount >= dailyLimit)
+    {
+        httpContext.Response.StatusCode = 429;
+        await httpContext.Response.WriteAsJsonAsync(
+            new ApiError(ErrorCodes.DailyLimitReached,
+                $"You've reached your daily limit of {dailyLimit} AI audio generation{(dailyLimit == 1 ? "" : "s")}. Try again tomorrow."),
+            cancellationToken);
+        return;
+    }
+
+    httpContext.Response.ContentType = "text/event-stream";
+    httpContext.Response.Headers["Cache-Control"] = "no-cache";
+    httpContext.Response.Headers["X-Accel-Buffering"] = "no";
+
+    var sseOpts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+    async Task SendAsync(object payload)
+    {
+        var json = JsonSerializer.Serialize(payload, sseOpts);
+        await httpContext.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
+        await httpContext.Response.Body.FlushAsync(cancellationToken);
+    }
+
+    try
+    {
+        var dialogue = await geminiService.GenerateDialogueAsync(
+            req.Language,
+            req.LanguageCode,
+            req.Scenario,
+            req.DurationSeconds,
+            req.ScenarioId,
+            req.NativeLanguage,
+            req.NativeLanguageCode,
+            cancellationToken);
+        await SendAsync(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
+
+        var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
+        var objectKey = $"videos/{userId.Value}/{Guid.NewGuid():N}.wav";
+        await r2StorageService.UploadObjectAsync(
+            objectKey,
+            new MemoryStream(wavBytes),
+            "audio/wav",
+            cancellationToken);
+        await SendAsync(new { step = "audio" });
+        await SendAsync(new { step = "aligning" });
+
+        IReadOnlyList<WordTimingRecord>? wordTiming = null;
+        IReadOnlyList<VideoTranscriptCueRecord>? cues = null;
+        if (RevAiAlignmentService.IsRevAiSupported(req.LanguageCode))
+        {
+            try
+            {
+                var transcript = string.Join("\n", dialogue.Lines.Select(l => l.Text));
+                var presignedUrl = r2StorageService.GeneratePresignedUrl(objectKey, TimeSpan.FromHours(1));
+                wordTiming = await revAiAlignmentService.AlignAsync(presignedUrl, transcript, cancellationToken);
+                cues = TryBuildRevAiCues(dialogue.Lines, wordTiming);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                app.Logger.LogWarning(
+                    ex,
+                    "Rev.ai alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. Falling back to Gemini timing.",
+                    userId,
+                    req.LanguageCode,
+                    req.ScenarioId);
+                wordTiming = null;
+            }
+        }
+
+        cues ??= await geminiService.GenerateCueTimingAsync(
+            wavBytes,
+            "audio/wav",
+            dialogue.Lines,
+            durationMs,
+            cancellationToken);
+
+        var videoResponse = await videoService.SaveAiAudioV2Async(
+            userId.Value,
+            dialogue.Title,
+            objectKey,
+            wavBytes.LongLength,
+            req.Language,
+            req.LanguageCode,
+            dialogue.Lines,
+            wordTiming,
+            cues,
+            durationMs,
+            httpContext,
+            cancellationToken);
+        await SendAsync(new { step = "done", video = videoResponse });
+    }
+    catch (ContentRejectedException ex)
+    {
+        await SendAsync(new { step = "error", message = ex.Message });
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+        app.Logger.LogError(
+            ex,
+            "Practice audio generation v2 failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
+            userId,
+            req.LanguageCode,
+            req.ScenarioId);
+        await SendAsync(new { step = "error", message = generationFailedMessage });
+    }
+})
+.WithName("GenerateAiAudioV2")
 .RequireAuthorization();
 
 // Corrects phone-transcribed cues using the original dialogue as ground truth.
@@ -834,6 +985,7 @@ app.MapGet("/api/videos/public", async (
     [FromQuery] int offset,
     [FromQuery] string? search,
     [FromQuery] string? mediaType,
+    [FromQuery] bool? includeV2,
     HttpContext httpContext,
     System.Security.Claims.ClaimsPrincipal user,
     VideoService videoService,
@@ -850,6 +1002,7 @@ app.MapGet("/api/videos/public", async (
         search,
         mediaType,
         httpContext,
+        includeV2 == true,
         cancellationToken);
 
     return Results.Ok(videos);
@@ -910,6 +1063,7 @@ app.MapGet("/api/me/saved/{videoId:guid}", async (
 .RequireAuthorization();
 
 app.MapGet("/api/me/saved", async (
+    [FromQuery] bool? includeV2,
     HttpContext httpContext,
     System.Security.Claims.ClaimsPrincipal user,
     VideoService videoService,
@@ -917,7 +1071,7 @@ app.MapGet("/api/me/saved", async (
 {
     var userId = TryGetUserId(user);
     if (userId is null) return Results.Unauthorized();
-    var videos = await videoService.ListSavedVideosAsync(userId.Value, httpContext, cancellationToken);
+    var videos = await videoService.ListSavedVideosAsync(userId.Value, httpContext, includeV2 == true, cancellationToken);
     return Results.Ok(videos);
 })
 .WithName("ListSavedVideos")
@@ -979,6 +1133,7 @@ app.MapDelete("/api/me/saved-cues/{entryId:guid}", async (
 .RequireAuthorization();
 
 app.MapGet("/api/me/saved-cues", async (
+    [FromQuery] bool? includeV2,
     HttpContext httpContext,
     System.Security.Claims.ClaimsPrincipal user,
     VideoService videoService,
@@ -986,7 +1141,7 @@ app.MapGet("/api/me/saved-cues", async (
 {
     var userId = TryGetUserId(user);
     if (userId is null) return Results.Unauthorized();
-    var cues = await videoService.ListSavedCuesAsync(userId.Value, httpContext, cancellationToken);
+    var cues = await videoService.ListSavedCuesAsync(userId.Value, httpContext, includeV2 == true, cancellationToken);
     return Results.Ok(cues);
 })
 .WithName("ListSavedCues")
@@ -1153,3 +1308,38 @@ static Guid? TryGetUserId(System.Security.Claims.ClaimsPrincipal user)
 
     return userId;
 }
+
+static IReadOnlyList<VideoTranscriptCueRecord>? TryBuildRevAiCues(
+    DialogueLine[] lines,
+    IReadOnlyList<WordTimingRecord> wordTiming)
+{
+    if (lines.Length == 0 || wordTiming.Count == 0)
+        return null;
+
+    var cues = new List<VideoTranscriptCueRecord>(lines.Length);
+    var timingIndex = 0;
+    for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+    {
+        var line = lines[lineIndex];
+        var wordCount = CountCueWords(line.Text);
+        if (wordCount <= 0)
+            return null;
+
+        if (timingIndex + wordCount > wordTiming.Count)
+            return null;
+
+        var first = wordTiming[timingIndex];
+        var last = wordTiming[timingIndex + wordCount - 1];
+        var startMs = lineIndex == 0
+            ? Math.Max(0, first.StartMs)
+            : Math.Max(cues[^1].EndMs, first.StartMs);
+        var endMs = Math.Max(startMs + 1, last.EndMs);
+        cues.Add(new VideoTranscriptCueRecord(lineIndex, startMs, endMs, line.Text));
+        timingIndex += wordCount;
+    }
+
+    return cues.Count == lines.Length ? cues : null;
+}
+
+static int CountCueWords(string text) =>
+    System.Text.RegularExpressions.Regex.Matches(text, @"[\p{L}\p{N}']+").Count;

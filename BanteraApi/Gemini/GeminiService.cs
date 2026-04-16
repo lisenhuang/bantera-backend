@@ -573,6 +573,143 @@ Example output for 3 cues:
         return cues;
     }
 
+    public async Task<IReadOnlyList<VideoTranscriptCueRecord>> GenerateCueTimingAsync(
+        byte[] audioBytes,
+        string mimeType,
+        DialogueLine[] lines,
+        int durationMs,
+        CancellationToken cancellationToken = default)
+    {
+        if (lines.Length == 0)
+            return [];
+
+        var lineList = string.Join(
+            "\n",
+            lines.Select((line, index) => $"{index}: {line.Text}"));
+
+        var prompt = $$"""
+You are aligning generated dialogue audio to known dialogue lines.
+
+Return ONLY valid JSON. No markdown, no extra text.
+The audio contains these exact dialogue lines in order:
+{{lineList}}
+
+Create one cue per dialogue line.
+Rules:
+- Return a JSON array with exactly {{lines.Length}} objects.
+- Each object must have: index, startMs, endMs.
+- index must match the line index above.
+- startMs and endMs must be integers in milliseconds within 0..{{durationMs}}.
+- Timings must be monotonic and non-overlapping.
+- Do not change, paraphrase, translate, or include dialogue text.
+- The last cue should end at the end of the spoken audio.
+
+Example:
+[{"index":0,"startMs":0,"endMs":1234},{"index":1,"startMs":1234,"endMs":2600}]
+""".Trim();
+
+        try
+        {
+            return await WithGeminiKeyAsync(async key =>
+            {
+                var client = httpClientFactory.CreateClient("gemini");
+                var url = $"/v1beta/models/{Settings.CueTimingModel}:generateContent?key={key}";
+                var body = new
+                {
+                    contents = new[]
+                    {
+                        new
+                        {
+                            parts = new object[]
+                            {
+                                new { text = prompt },
+                                new
+                                {
+                                    inlineData = new
+                                    {
+                                        mimeType,
+                                        data = Convert.ToBase64String(audioBytes),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                using var response = await client.PostAsync(
+                    url,
+                    new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
+                    cancellationToken);
+
+                var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new HttpRequestException(
+                        $"Gemini cue timing failed with status {(int)response.StatusCode} for model '{Settings.CueTimingModel}'. Body: {TruncateForLog(json)}",
+                        null,
+                        response.StatusCode);
+                }
+
+                var root = JsonDocument.Parse(json).RootElement;
+                var raw = root
+                    .GetProperty("candidates")[0]
+                    .GetProperty("content")
+                    .GetProperty("parts")[0]
+                    .GetProperty("text")
+                    .GetString() ?? "";
+
+                return ParseCueTimingResponse(raw, lines, durationMs);
+            }, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return EstimateCues(lines, durationMs);
+        }
+    }
+
+    private IReadOnlyList<VideoTranscriptCueRecord> ParseCueTimingResponse(
+        string raw,
+        DialogueLine[] lines,
+        int durationMs)
+    {
+        var cleaned = raw.Replace("```json", "").Replace("```", "").Trim();
+        var start = cleaned.IndexOf('[');
+        var end = cleaned.LastIndexOf(']');
+        if (start >= 0 && end > start)
+            cleaned = cleaned[start..(end + 1)];
+
+        var parsed = JsonSerializer.Deserialize<List<RawCueTiming>>(cleaned, JsonOpts);
+        if (parsed is null || parsed.Count != lines.Length)
+            return EstimateCues(lines, durationMs);
+
+        var cues = new List<VideoTranscriptCueRecord>(lines.Length);
+        var previousEnd = 0;
+        for (var i = 0; i < parsed.Count; i++)
+        {
+            var timing = parsed[i];
+            if (timing.Index != i)
+                return EstimateCues(lines, durationMs);
+
+            var startMs = Math.Clamp(timing.StartMs, 0, durationMs);
+            var endMs = Math.Clamp(timing.EndMs, 0, durationMs);
+            if (i == 0)
+                startMs = Math.Max(0, startMs);
+            else
+                startMs = Math.Max(startMs, previousEnd);
+
+            if (i == lines.Length - 1)
+                endMs = Math.Max(endMs, durationMs);
+
+            if (endMs <= startMs)
+                return EstimateCues(lines, durationMs);
+
+            cues.Add(new VideoTranscriptCueRecord(i, startMs, endMs, lines[i].Text));
+            previousEnd = endMs;
+        }
+
+        return cues;
+    }
+
     private static int CountWords(string text) =>
         string.IsNullOrWhiteSpace(text) ? 0 : text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
@@ -638,6 +775,11 @@ Example output for 3 cues:
     private record RawLine(
         [property: JsonPropertyName("speaker")] string? Speaker,
         [property: JsonPropertyName("text")]    string? Text);
+
+    private record RawCueTiming(
+        [property: JsonPropertyName("index")] int Index,
+        [property: JsonPropertyName("startMs")] int StartMs,
+        [property: JsonPropertyName("endMs")] int EndMs);
 }
 
 // ── Public result types ───────────────────────────────────────────────

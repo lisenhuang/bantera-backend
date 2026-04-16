@@ -106,6 +106,17 @@ public class R2StorageService
             response.Headers.ContentType ?? "application/octet-stream",
             response.Headers.ContentLength);
     }
+
+    public string GeneratePresignedUrl(string key, TimeSpan expiry)
+    {
+        return _client.GetPreSignedURL(new GetPreSignedUrlRequest
+        {
+            BucketName = _bucket,
+            Key = key,
+            Expires = DateTime.UtcNow.Add(expiry),
+            Verb = HttpVerb.GET,
+        });
+    }
 }
 
 public sealed record StoredObjectResult(

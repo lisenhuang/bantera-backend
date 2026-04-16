@@ -246,6 +246,9 @@ namespace BanteraApi.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("DialogueLinesJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<int>("DurationMs")
                         .HasColumnType("integer");
 
@@ -297,6 +300,9 @@ namespace BanteraApi.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("TranscriptionVersion")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -308,6 +314,9 @@ namespace BanteraApi.Migrations
 
                     b.Property<int?>("VideoWidth")
                         .HasColumnType("integer");
+
+                    b.Property<string>("WordTimingJson")
+                        .HasColumnType("jsonb");
 
                     b.HasKey("Id");
 

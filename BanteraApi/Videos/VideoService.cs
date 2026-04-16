@@ -4,6 +4,7 @@ using BanteraApi.Auth;
 using BanteraApi.Cloudflare;
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
+using BanteraApi.Gemini;
 using BanteraApi.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -127,13 +128,14 @@ public class VideoService(
     public async Task<IReadOnlyList<VideoUploadResponse>> ListMyVideosAsync(
         Guid userId,
         HttpContext httpContext,
+        bool includeV2 = false,
         CancellationToken cancellationToken = default)
     {
-        var videos = await db.UserVideos
+        var query = ApplyV2Filter(db.UserVideos.AsNoTracking(), includeV2)
             .AsNoTracking()
-            .Where(v => v.UserId == userId && v.RemovedFromOwnerListAt == null)
-            .OrderByDescending(v => v.CreatedAt)
-            .ToListAsync(cancellationToken);
+            .Where(v => v.UserId == userId && v.RemovedFromOwnerListAt == null);
+
+        var videos = await query.OrderByDescending(v => v.CreatedAt).ToListAsync(cancellationToken);
 
         return videos
             .Select(video => BuildResponse(video, httpContext))
@@ -155,6 +157,7 @@ public class VideoService(
         string? searchQuery,
         string? mediaType,
         HttpContext httpContext,
+        bool includeV2 = false,
         CancellationToken cancellationToken = default)
     {
         var normalizedCode = languageCode?.Trim().ToLowerInvariant();
@@ -166,8 +169,7 @@ public class VideoService(
                 ? normalizedCode[..normalizedCode.IndexOf('-')]
                 : null;
 
-        var query = db.UserVideos
-            .AsNoTracking()
+        var query = ApplyV2Filter(db.UserVideos.AsNoTracking(), includeV2)
             .Where(v => v.IsPublic);
 
         var mt = mediaType?.Trim().ToLowerInvariant();
@@ -255,7 +257,10 @@ public class VideoService(
             video.IsAiGenerated,
             video.IsTranscriptionEstimated,
             video.CreatedAt,
-            creatorDisplayName);
+            creatorDisplayName,
+            video.TranscriptionVersion,
+            ParseDialogueLines(video.DialogueLinesJson),
+            ParseWordTiming(video.WordTimingJson));
     }
 
     private static bool CanAccess(UserVideo video, Guid? requesterUserId)
@@ -442,6 +447,63 @@ public class VideoService(
             IsTranscriptionEstimated = true,
             CoverImageObjectKey = coverKey,
             FileSizeBytes = wavBytes.Length,
+            DurationMs = durationMs,
+            VideoWidth = null,
+            VideoHeight = null,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.UserVideos.Add(video);
+        await db.SaveChangesAsync(cancellationToken);
+        return BuildResponse(video, httpContext);
+    }
+
+    public async Task<VideoUploadResponse> SaveAiAudioV2Async(
+        Guid userId,
+        string title,
+        string objectKey,
+        long fileSizeBytes,
+        string transcriptLanguage,
+        string transcriptLanguageCode,
+        DialogueLine[] dialogueLines,
+        IReadOnlyList<WordTimingRecord>? wordTiming,
+        IReadOnlyList<Gemini.VideoTranscriptCueRecord> cues,
+        int durationMs,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var coverKey = await TryGenerateAiAudioCoverAsync(
+            userId,
+            title,
+            transcriptLanguage,
+            cancellationToken);
+
+        var transcriptText = string.Join("\n", cues.Select(c => c.Text));
+        var cuesJson = JsonSerializer.Serialize(
+            cues.Select(c => new VideoTranscriptCue(c.Index, c.StartMs, c.EndMs, c.Text)).ToList(),
+            TranscriptJsonOptions);
+
+        var video = new UserVideo
+        {
+            UserId = userId,
+            MediaObjectKey = objectKey,
+            MediaContentType = "audio/wav",
+            OriginalFileName = $"{title}.wav",
+            TranscriptText = transcriptText,
+            TranscriptLanguage = NormalizeTranscriptLanguage(transcriptLanguage),
+            TranscriptLanguageCode = NormalizeTranscriptLanguageCode(transcriptLanguageCode, transcriptLanguage),
+            TranscriptCuesJson = cuesJson,
+            TranscriptionVersion = 1,
+            DialogueLinesJson = JsonSerializer.Serialize(dialogueLines.Select(l => l.Text).ToArray(), TranscriptJsonOptions),
+            WordTimingJson = wordTiming is null
+                ? null
+                : JsonSerializer.Serialize(wordTiming, TranscriptJsonOptions),
+            IsPublic = true,
+            IsAiGenerated = true,
+            IsTranscriptionEstimated = false,
+            CoverImageObjectKey = coverKey,
+            FileSizeBytes = fileSizeBytes,
             DurationMs = durationMs,
             VideoWidth = null,
             VideoHeight = null,
@@ -728,11 +790,13 @@ public class VideoService(
     public async Task<IReadOnlyList<SavedCueResponse>> ListSavedCuesAsync(
         Guid userId,
         HttpContext httpContext,
+        bool includeV2 = false,
         CancellationToken cancellationToken = default)
     {
         var entries = await db.UserSavedCues
             .Where(c => c.UserId == userId)
             .Join(db.UserVideos, c => c.VideoId, v => v.Id, (c, v) => new { Cue = c, Video = v })
+            .Where(x => includeV2 || x.Video.TranscriptionVersion == null || x.Video.TranscriptionVersion == 0)
             .Join(db.Users, x => x.Video.UserId, u => u.Id, (x, u) => new { x.Cue, x.Video, CreatorName = u.Name })
             .OrderByDescending(x => x.Cue.SavedAt)
             .ToListAsync(cancellationToken);
@@ -750,11 +814,13 @@ public class VideoService(
     public async Task<IReadOnlyList<VideoUploadResponse>> ListSavedVideosAsync(
         Guid userId,
         HttpContext httpContext,
+        bool includeV2 = false,
         CancellationToken cancellationToken = default)
     {
         var result = await db.UserSavedVideos
             .Where(s => s.UserId == userId)
             .Join(db.UserVideos, s => s.VideoId, v => v.Id, (s, v) => new { Saved = s, Video = v })
+            .Where(x => includeV2 || x.Video.TranscriptionVersion == null || x.Video.TranscriptionVersion == 0)
             .Join(db.Users, x => x.Video.UserId, u => u.Id, (x, u) => new { x.Saved, x.Video, CreatorName = u.Name })
             .OrderByDescending(x => x.Saved.SavedAt)
             .ToListAsync(cancellationToken);
@@ -856,4 +922,49 @@ public class VideoService(
 
     private static bool IsAudioContentType(string contentType) =>
         contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase);
+
+    private static IQueryable<UserVideo> ApplyV2Filter(IQueryable<UserVideo> query, bool includeV2)
+    {
+        return includeV2
+            ? query
+            : query.Where(v => v.TranscriptionVersion == null || v.TranscriptionVersion == 0);
+    }
+
+    private static IReadOnlyList<string>? ParseDialogueLines(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+
+        try
+        {
+            var lines = JsonSerializer.Deserialize<List<string>>(json, TranscriptJsonOptions)?
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .Select(line => line.Trim())
+                .ToList();
+            return lines is { Count: > 0 } ? lines : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<WordTimingDto>? ParseWordTiming(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+
+        try
+        {
+            var timings = JsonSerializer.Deserialize<List<WordTimingRecord>>(json, TranscriptJsonOptions)?
+                .Where(t => !string.IsNullOrWhiteSpace(t.Word) && t.EndMs > t.StartMs)
+                .Select(t => new WordTimingDto(t.Word, t.StartMs, t.EndMs, t.Confidence))
+                .ToList();
+            return timings is { Count: > 0 } ? timings : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 }

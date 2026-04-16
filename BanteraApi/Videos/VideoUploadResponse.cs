@@ -1,5 +1,11 @@
 namespace BanteraApi.Videos;
 
+public sealed record WordTimingDto(
+    string Word,
+    int StartMs,
+    int EndMs,
+    double? Confidence);
+
 public sealed record VideoUploadResponse(
     Guid Id,
     Guid UserId,
@@ -19,4 +25,7 @@ public sealed record VideoUploadResponse(
     bool IsAiGenerated,
     bool IsTranscriptionEstimated,
     DateTime CreatedAt,
-    string? CreatorDisplayName);
+    string? CreatorDisplayName,
+    int? TranscriptionVersion,
+    IReadOnlyList<string>? DialogueLines,
+    IReadOnlyList<WordTimingDto>? WordTiming);
