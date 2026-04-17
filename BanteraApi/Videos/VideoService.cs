@@ -241,7 +241,8 @@ public class VideoService(
             video.TranscriptText,
             video.TranscriptLanguage,
             video.TranscriptLanguageCode,
-            ParseStoredTranscriptCues(video.TranscriptCuesJson),
+            ParseTranscriptCues(video.TranscriptCuesJson),
+            ParseOptionalStoredTranscriptCues(video.TranscriptShortCuesJson),
             video.IsPublic,
             video.DurationMs,
             video.FileSizeBytes,
@@ -387,9 +388,10 @@ public class VideoService(
         }
     }
 
-    private static IReadOnlyList<VideoTranscriptCue> ParseStoredTranscriptCues(string transcriptCuesJson)
+    private static IReadOnlyList<VideoTranscriptCue>? ParseOptionalStoredTranscriptCues(string? transcriptCuesJson)
     {
-        return ParseTranscriptCues(transcriptCuesJson);
+        var parsed = ParseTranscriptCues(transcriptCuesJson);
+        return parsed.Count > 0 ? parsed : null;
     }
 
     private static string NormalizeFileName(string? fileName)
@@ -470,6 +472,7 @@ public class VideoService(
         DialogueLine[] dialogueLines,
         IReadOnlyList<WordTimingRecord>? wordTiming,
         IReadOnlyList<Gemini.VideoTranscriptCueRecord> cues,
+        IReadOnlyList<Gemini.VideoTranscriptCueRecord>? shortCues,
         int durationMs,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
@@ -484,6 +487,11 @@ public class VideoService(
         var cuesJson = JsonSerializer.Serialize(
             cues.Select(c => new VideoTranscriptCue(c.Index, c.StartMs, c.EndMs, c.Text)).ToList(),
             TranscriptJsonOptions);
+        var shortCuesJson = shortCues is { Count: > 0 }
+            ? JsonSerializer.Serialize(
+                shortCues.Select(c => new VideoTranscriptCue(c.Index, c.StartMs, c.EndMs, c.Text)).ToList(),
+                TranscriptJsonOptions)
+            : null;
 
         var video = new UserVideo
         {
@@ -495,6 +503,7 @@ public class VideoService(
             TranscriptLanguage = NormalizeTranscriptLanguage(transcriptLanguage),
             TranscriptLanguageCode = NormalizeTranscriptLanguageCode(transcriptLanguageCode, transcriptLanguage),
             TranscriptCuesJson = cuesJson,
+            TranscriptShortCuesJson = shortCuesJson,
             TranscriptionVersion = 1,
             DialogueLinesJson = JsonSerializer.Serialize(dialogueLines.Select(l => l.Text).ToArray(), TranscriptJsonOptions),
             WordTimingJson = wordTiming is null
@@ -1025,6 +1034,7 @@ public class VideoService(
 
         video.TranscriptText = transcriptText;
         video.TranscriptCuesJson = JsonSerializer.Serialize(cues, TranscriptJsonOptions);
+        video.TranscriptShortCuesJson = null;
         video.IsTranscriptionEstimated = false;
         video.UpdatedAt = DateTime.UtcNow;
 

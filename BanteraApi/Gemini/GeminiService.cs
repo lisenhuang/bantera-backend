@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 
 namespace BanteraApi.Gemini;
@@ -10,6 +11,7 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
 {
     private const string LatestNewsScenarioId = "latest_news";
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
+    private static readonly Regex TokenRegex = new(@"[\p{L}\p{N}']+", RegexOptions.Compiled);
 
     private static readonly Dictionary<string, string> AccentInstructions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -306,6 +308,16 @@ Generate a natural, realistic spoken dialogue between exactly TWO people.
 - Keep sentences short and conversational — the way people actually talk.
 - Do NOT include stage directions or any text outside the dialogue.
 - Also write a short, catchy title for this dialogue (max 8 words).
+- For every line, also return "shortCues": an array of shorter speakable chunks for solo practice.
+- Goal: natural, self-contained practice chunks, not the maximum possible number of chunks.
+- Each short cue must be copied from that line's "text"; do not paraphrase, translate, rewrite, add, remove, or reorder words.
+- The shortCues array for a line must cover every word in that line exactly once and in the same order.
+- You may only split at natural phrase, clause, or sentence boundaries.
+- Prefer chunks that are easier to repeat aloud, usually 4-12 words, only when every chunk still sounds natural on its own.
+- Do not split a grammatically tight sentence just to hit a shorter length.
+- If splitting would create an incomplete, dependent, or awkward chunk, keep the neighboring words together or keep the full line as one cue.
+- Keep names, abbreviations, decimals, technical terms, and tightly connected technical phrases together.
+- It is valid and preferred to return one short cue equal to the full line text when that is the most natural practice unit.
 
 For each speaker, determine:
   • gender — RULES: if the scenario explicitly states a character's gender (e.g. "girl", "boy", "woman", "man", "he", "she"), you MUST use that gender. Otherwise infer from context. Output only "male" or "female".
@@ -319,8 +331,8 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
   "speaker2_gender": "male",
   "speaker2_styles": ["authoritative", "mature"],
   "lines": [
-    { "speaker": "Speaker1", "text": "..." },
-    { "speaker": "Speaker2", "text": "..." }
+    { "speaker": "Speaker1", "text": "...", "shortCues": ["..."] },
+    { "speaker": "Speaker2", "text": "...", "shortCues": ["...", "..."] }
   ]
 }
 """.Trim();
@@ -401,7 +413,16 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             var (voice1, voice2) = PickVoices(gender1, styles1, gender2, styles2);
 
             var dialogueLines = (parsed.Lines ?? [])
-                .Select(l => new DialogueLine(l.Speaker ?? "Speaker1", l.Text ?? ""))
+                .Select(l =>
+                {
+                    var text = (l.Text ?? string.Empty).Trim();
+                    var shortCues = BuildValidatedShortCues(text, l.ShortCues);
+                    return new DialogueLine(l.Speaker ?? "Speaker1", text)
+                    {
+                        ShortCues = shortCues,
+                    };
+                })
+                .Where(l => !string.IsNullOrWhiteSpace(l.Text))
                 .ToArray();
 
             return new GeneratedDialogue(
@@ -713,6 +734,64 @@ Example:
     private static int CountWords(string text) =>
         string.IsNullOrWhiteSpace(text) ? 0 : text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
+    private static IReadOnlyList<string> BuildValidatedShortCues(string lineText, IReadOnlyList<string>? rawShortCues)
+    {
+        if (string.IsNullOrWhiteSpace(lineText))
+            return [];
+
+        var normalizedLineText = lineText.Trim();
+        var cleanedShortCues = (rawShortCues ?? [])
+            .Where(cue => !string.IsNullOrWhiteSpace(cue))
+            .Select(cue => cue.Trim())
+            .ToArray();
+
+        if (cleanedShortCues.Length == 0)
+            return [normalizedLineText];
+
+        var expectedTokens = Tokenize(normalizedLineText);
+        if (expectedTokens.Count == 0)
+            return [normalizedLineText];
+
+        var actualTokens = cleanedShortCues
+            .SelectMany(Tokenize)
+            .ToList();
+        if (!expectedTokens.SequenceEqual(actualTokens))
+            return [normalizedLineText];
+
+        return cleanedShortCues;
+    }
+
+    private static List<string> Tokenize(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return [];
+
+        var normalized = NormalizeApostrophes(text);
+        return TokenRegex
+            .Matches(normalized)
+            .Select(match => NormalizeToken(match.Value))
+            .Where(token => token.Length > 0)
+            .ToList();
+    }
+
+    private static string NormalizeToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return string.Empty;
+
+        return TokenRegex.Match(NormalizeApostrophes(token).ToLowerInvariant()).Value;
+    }
+
+    private static string NormalizeApostrophes(string value)
+    {
+        return (value ?? string.Empty)
+            .Normalize(NormalizationForm.FormKC)
+            .Replace('\u2018', '\'')
+            .Replace('\u2019', '\'')
+            .Replace('\u02BC', '\'')
+            .Replace('\uFF07', '\'');
+    }
+
     private static byte[] PcmToWav(byte[] pcm, int sampleRate = 24000, int channels = 1, int bitsPerSample = 16)
     {
         var byteRate = sampleRate * channels * bitsPerSample / 8;
@@ -774,7 +853,8 @@ Example:
 
     private record RawLine(
         [property: JsonPropertyName("speaker")] string? Speaker,
-        [property: JsonPropertyName("text")]    string? Text);
+        [property: JsonPropertyName("text")]    string? Text,
+        [property: JsonPropertyName("shortCues")] string[]? ShortCues);
 
     private record RawCueTiming(
         [property: JsonPropertyName("index")] int Index,
@@ -786,7 +866,10 @@ Example:
 
 public record GeneratedDialogue(string Title, string Voice1, string Voice2, DialogueLine[] Lines);
 
-public record DialogueLine(string Speaker, string Text);
+public record DialogueLine(string Speaker, string Text)
+{
+    public IReadOnlyList<string> ShortCues { get; init; } = [];
+}
 
 public record VideoTranscriptCueRecord(int Index, int StartMs, int EndMs, string Text);
 

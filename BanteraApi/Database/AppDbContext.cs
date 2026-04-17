@@ -75,6 +75,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.TranscriptLanguageCode).HasMaxLength(16).IsRequired();
             e.Property(x => x.TranscriptText).IsRequired();
             e.Property(x => x.TranscriptCuesJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.TranscriptShortCuesJson).HasColumnType("jsonb");
             e.Property(x => x.DialogueLinesJson).HasColumnType("jsonb");
             e.Property(x => x.WordTimingJson).HasColumnType("jsonb");
             e.Property(x => x.CoverImageObjectKey).HasMaxLength(255);

@@ -12,6 +12,7 @@ public class UserVideo
     public string TranscriptLanguage { get; set; } = string.Empty;
     public string TranscriptLanguageCode { get; set; } = string.Empty;
     public string TranscriptCuesJson { get; set; } = "[]";
+    public string? TranscriptShortCuesJson { get; set; }
     public int? TranscriptionVersion { get; set; }
     public string? DialogueLinesJson { get; set; }
     public string? WordTimingJson { get; set; }

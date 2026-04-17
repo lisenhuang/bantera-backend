@@ -286,6 +286,9 @@ namespace BanteraApi.Migrations
                         .IsRequired()
                         .HasColumnType("jsonb");
 
+                    b.Property<string>("TranscriptShortCuesJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("TranscriptLanguage")
                         .IsRequired()
                         .HasMaxLength(35)

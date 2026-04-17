@@ -713,6 +713,7 @@ app.MapPost("/api/me/audio/generate", async (
             req.NativeLanguageCode,
             cancellationToken);
         await SendAsync(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
+        var flattenedShortCueTexts = BuildFlattenedShortCueTexts(dialogue.Lines);
 
         var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
         var cues = geminiService.EstimateCues(dialogue.Lines, durationMs);
@@ -804,6 +805,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             req.NativeLanguageCode,
             cancellationToken);
         await SendAsync(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
+        var flattenedShortCueTexts = BuildFlattenedShortCueTexts(dialogue.Lines);
 
         var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
         var objectKey = $"videos/{userId.Value}/{Guid.NewGuid():N}.wav";
@@ -817,6 +819,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
 
         IReadOnlyList<WordTimingRecord>? wordTiming = null;
         IReadOnlyList<VideoTranscriptCueRecord>? cues = null;
+        IReadOnlyList<VideoTranscriptCueRecord>? shortCues = null;
         var revAiRequired = RevAiAlignmentService.TryGetSupportedLanguageCode(
             req.LanguageCode,
             out var revAiLanguageCode);
@@ -870,6 +873,33 @@ app.MapPost("/api/me/audio/generate/v2", async (
                     throw new InvalidOperationException(
                         $"Rev.ai cue alignment produced non-alignable output for supported locale '{req.LanguageCode}' at line {failure?.LineIndex}.");
                 }
+
+                if (flattenedShortCueTexts.Count > 0)
+                {
+                    var shortCueLines = flattenedShortCueTexts
+                        .Select(text => new DialogueLine("Speaker1", text))
+                        .ToArray();
+                    if (!RevAiCueAlignmentBuilder.TryBuild(
+                            shortCueLines,
+                            wordTiming,
+                            out shortCues,
+                            out var shortCueFailure))
+                    {
+                        app.Logger.LogWarning(
+                            "Rev.ai short-cue alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. lineIndex={LineIndex}, matchedWords={MatchedWords}, expectedWords={ExpectedWords}, matchRatio={MatchRatio}, requiredMatchRatio={RequiredMatchRatio}, requiredMatchedWords={RequiredMatchedWords}, expectedToken={ExpectedToken}, actualWord={ActualWord}",
+                            userId,
+                            req.LanguageCode,
+                            req.ScenarioId,
+                            shortCueFailure?.LineIndex,
+                            shortCueFailure?.MatchedWords,
+                            shortCueFailure?.ExpectedWords,
+                            shortCueFailure?.MatchRatio,
+                            shortCueFailure?.RequiredMatchRatio,
+                            shortCueFailure?.RequiredMatchedWords,
+                            shortCueFailure?.ExpectedToken,
+                            shortCueFailure?.ActualWord);
+                    }
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -911,6 +941,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             dialogue.Lines,
             wordTiming,
             cues,
+            shortCues,
             durationMs,
             httpContext,
             cancellationToken);
@@ -1313,6 +1344,10 @@ using (var scope = app.Services.CreateScope())
         await db.Database.CloseConnectionAsync();
 
         startupLogger.LogInformation("[Startup] Applying pending migrations...");
+        await db.Database.ExecuteSqlRawAsync("""
+            ALTER TABLE user_videos
+            ADD COLUMN IF NOT EXISTS "TranscriptShortCuesJson" jsonb;
+            """);
         await db.Database.MigrateAsync();
 
         if (app.Environment.IsDevelopment())
@@ -1373,6 +1408,20 @@ static Guid? TryGetUserId(System.Security.Claims.ClaimsPrincipal user)
     return userId;
 }
 
+static IReadOnlyList<string> BuildFlattenedShortCueTexts(DialogueLine[] lines)
+{
+    if (lines.Length == 0)
+        return [];
+
+    if (!lines.Any(line => line.ShortCues.Count > 1))
+        return [];
+
+    var flattened = new List<string>();
+    foreach (var line in lines)
+        flattened.AddRange(line.ShortCues);
+    return flattened;
+}
+
 static SavedCueMetadata ResolveSavedCueMetadata(SaveCueRequest req, UserVideo video)
 {
     var cueText = NormalizeSavedCueText(req.CueText);
@@ -1382,12 +1431,28 @@ static SavedCueMetadata ResolveSavedCueMetadata(SaveCueRequest req, UserVideo vi
     var parentCueId = NormalizeSavedCueId(req.ParentCueId);
     var parentCueIndex = NormalizeCueIndex(req.ParentCueIndex);
 
-    var storedCues = ParseSavedCueTranscriptCues(video.TranscriptCuesJson);
+    var storedLongCues = ParseSavedCueTranscriptCues(video.TranscriptCuesJson);
+    var storedShortCues = ParseSavedCueTranscriptCues(video.TranscriptShortCuesJson);
+    var shouldUseShortCue =
+        cueMode == "short"
+        || IsShortCueId(req.CueId);
+    var primaryCues = shouldUseShortCue ? storedShortCues : storedLongCues;
 
     if (cueText is null || startTimeMs is null || endTimeMs is null)
     {
-        var currentCue = storedCues.FirstOrDefault(c =>
-            c.Index == req.CueIndex || req.CueId == $"{video.Id}-{c.Index}");
+        var currentCue = FindCurrentSavedCue(
+            primaryCues,
+            video.Id,
+            req.CueId,
+            req.CueIndex);
+        if (currentCue is null)
+        {
+            currentCue = FindCurrentSavedCue(
+                shouldUseShortCue ? storedLongCues : storedShortCues,
+                video.Id,
+                req.CueId,
+                req.CueIndex);
+        }
         if (currentCue is not null)
         {
             cueText ??= NormalizeSavedCueText(currentCue.Text);
@@ -1396,15 +1461,15 @@ static SavedCueMetadata ResolveSavedCueMetadata(SaveCueRequest req, UserVideo vi
         }
     }
 
-    var parentCue = storedCues.FirstOrDefault(c => c.Index == parentCueIndex);
+    var parentCue = storedLongCues.FirstOrDefault(c => c.Index == parentCueIndex);
     if (parentCue is null && startTimeMs is not null)
     {
-        parentCue = storedCues.FirstOrDefault(c =>
+        parentCue = storedLongCues.FirstOrDefault(c =>
             startTimeMs.Value >= c.StartMs && startTimeMs.Value < c.EndMs);
     }
     if (parentCue is null)
     {
-        parentCue = storedCues.FirstOrDefault(c =>
+        parentCue = storedLongCues.FirstOrDefault(c =>
             c.Index == req.CueIndex || req.CueId == $"{video.Id}-{c.Index}");
     }
 
@@ -1414,9 +1479,12 @@ static SavedCueMetadata ResolveSavedCueMetadata(SaveCueRequest req, UserVideo vi
         parentCueId ??= $"{video.Id}-{parentCue.Index}";
     }
 
-    cueMode ??= parentCueIndex == req.CueIndex && parentCueId == req.CueId
-        ? "long"
-        : null;
+    if (cueMode is null)
+    {
+        cueMode = shouldUseShortCue && storedShortCues.Count > 0
+            ? "short"
+            : "long";
+    }
 
     return new SavedCueMetadata(
         cueText,
@@ -1427,7 +1495,34 @@ static SavedCueMetadata ResolveSavedCueMetadata(SaveCueRequest req, UserVideo vi
         parentCueIndex);
 }
 
-static IReadOnlyList<VideoTranscriptCue> ParseSavedCueTranscriptCues(string transcriptCuesJson)
+static VideoTranscriptCue? FindCurrentSavedCue(
+    IReadOnlyList<VideoTranscriptCue> cues,
+    Guid videoId,
+    string cueId,
+    int cueIndex)
+{
+    if (cues.Count == 0)
+        return null;
+
+    return cues.FirstOrDefault(c =>
+        c.Index == cueIndex
+        || cueId == $"{videoId}-{c.Index}"
+        || cueId == $"{videoId}-s{c.Index}");
+}
+
+static bool IsShortCueId(string? cueId)
+{
+    if (string.IsNullOrWhiteSpace(cueId))
+        return false;
+
+    var marker = cueId.LastIndexOf("-s", StringComparison.OrdinalIgnoreCase);
+    if (marker <= 0)
+        return false;
+
+    return int.TryParse(cueId[(marker + 2)..], out _);
+}
+
+static IReadOnlyList<VideoTranscriptCue> ParseSavedCueTranscriptCues(string? transcriptCuesJson)
 {
     if (string.IsNullOrWhiteSpace(transcriptCuesJson))
         return [];
