@@ -12,6 +12,11 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
     private const string LatestNewsScenarioId = "latest_news";
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private static readonly Regex TokenRegex = new(@"[\p{L}\p{N}']+", RegexOptions.Compiled);
+    private static readonly HashSet<char> ApprovedShortCueBoundaryPunctuation =
+    [
+        ',', ';', ':', '.', '?', '!', '\u2026', // ... and ellipsis
+        '\u3001', '\u3002', '\uff1f', '\uff01', '\uff1b', '\uff1a'
+    ];
 
     private static readonly Dictionary<string, string> AccentInstructions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -312,12 +317,20 @@ Generate a natural, realistic spoken dialogue between exactly TWO people.
 - Goal: natural, self-contained practice chunks, not the maximum possible number of chunks.
 - Each short cue must be copied from that line's "text"; do not paraphrase, translate, rewrite, add, remove, or reorder words.
 - The shortCues array for a line must cover every word in that line exactly once and in the same order.
-- You may only split at natural phrase, clause, or sentence boundaries.
+- You may split a line only at a natural boundary that is also marked by punctuation in the original text.
+- For English, French, German, Italian, and Spanish, split only immediately after visible boundary punctuation already present in the original line.
+- Do not split between two words when there is no punctuation at that exact split point.
+- Do not add punctuation to create a split point.
+- Do not split at punctuation inside abbreviations, initials, decimals, version numbers, URLs, email addresses, or technical terms (for example: Node.js, Dr. Smith, 3.5, v1.2, example.com).
+- In French, punctuation may appear with spaces before ? ! ; : ; split after the punctuation mark, not before it.
+- In Spanish, do not split at opening ¿ or ¡ ; only closing punctuation can end a chunk.
 - Prefer chunks that are easier to repeat aloud, usually 4-12 words, only when every chunk still sounds natural on its own.
 - Do not split a grammatically tight sentence just to hit a shorter length.
 - If splitting would create an incomplete, dependent, or awkward chunk, keep the neighboring words together or keep the full line as one cue.
 - Keep names, abbreviations, decimals, technical terms, and tightly connected technical phrases together.
 - It is valid and preferred to return one short cue equal to the full line text when that is the most natural practice unit.
+- Example that must stay as one cue: "I reckon everyone in Wellington decided they needed a flat white at the same time."
+- Example of good split: "I usually check the logs first, then I ask the team what changed recently." -> ["I usually check the logs first,", "then I ask the team what changed recently."]
 
 For each speaker, determine:
   • gender — RULES: if the scenario explicitly states a character's gender (e.g. "girl", "boy", "woman", "man", "he", "she"), you MUST use that gender. Otherwise infer from context. Output only "male" or "female".
@@ -412,24 +425,32 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             string[] styles2 = parsed.Speaker2Styles ?? [];
             var (voice1, voice2) = PickVoices(gender1, styles1, gender2, styles2);
 
-            var dialogueLines = (parsed.Lines ?? [])
-                .Select(l =>
+            var dialogueLines = new List<DialogueLine>();
+            var shortCueValidationFailures = new List<ShortCueValidationFailure>();
+            var parsedLines = parsed.Lines ?? [];
+
+            for (var i = 0; i < parsedLines.Length; i++)
+            {
+                var line = parsedLines[i];
+                var text = (line.Text ?? string.Empty).Trim();
+                var validation = BuildValidatedShortCues(text, line.ShortCues, i);
+                if (validation.Failure is not null)
+                    shortCueValidationFailures.Add(validation.Failure);
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
+
+                dialogueLines.Add(new DialogueLine(line.Speaker ?? "Speaker1", text)
                 {
-                    var text = (l.Text ?? string.Empty).Trim();
-                    var shortCues = BuildValidatedShortCues(text, l.ShortCues);
-                    return new DialogueLine(l.Speaker ?? "Speaker1", text)
-                    {
-                        ShortCues = shortCues,
-                    };
-                })
-                .Where(l => !string.IsNullOrWhiteSpace(l.Text))
-                .ToArray();
+                    ShortCues = validation.ShortCues,
+                });
+            }
 
             return new GeneratedDialogue(
                 Title: parsed.Title ?? "Dialogue",
                 Voice1: voice1,
                 Voice2: voice2,
-                Lines: dialogueLines);
+                Lines: dialogueLines.ToArray(),
+                ShortCueValidationFailures: shortCueValidationFailures);
         }, cancellationToken);
     }
 
@@ -734,10 +755,22 @@ Example:
     private static int CountWords(string text) =>
         string.IsNullOrWhiteSpace(text) ? 0 : text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
-    private static IReadOnlyList<string> BuildValidatedShortCues(string lineText, IReadOnlyList<string>? rawShortCues)
+    private static ShortCueValidationResult BuildValidatedShortCues(string lineText, IReadOnlyList<string>? rawShortCues, int lineIndex)
     {
         if (string.IsNullOrWhiteSpace(lineText))
-            return [];
+        {
+            return new ShortCueValidationResult(
+                [],
+                new ShortCueValidationFailure(
+                    lineIndex,
+                    lineText,
+                    rawShortCues?.Where(cue => !string.IsNullOrWhiteSpace(cue)).Select(cue => cue.Trim()).ToArray() ?? [],
+                    "EmptyLineText",
+                    [],
+                    [],
+                    null,
+                    null));
+        }
 
         var normalizedLineText = lineText.Trim();
         var cleanedShortCues = (rawShortCues ?? [])
@@ -746,19 +779,167 @@ Example:
             .ToArray();
 
         if (cleanedShortCues.Length == 0)
-            return [normalizedLineText];
+        {
+            return new ShortCueValidationResult(
+                [normalizedLineText],
+                new ShortCueValidationFailure(
+                    lineIndex,
+                    normalizedLineText,
+                    [],
+                    "EmptyShortCues",
+                    [],
+                    [],
+                    null,
+                    null));
+        }
 
         var expectedTokens = Tokenize(normalizedLineText);
         if (expectedTokens.Count == 0)
-            return [normalizedLineText];
+        {
+            return new ShortCueValidationResult(
+                [normalizedLineText],
+                new ShortCueValidationFailure(
+                    lineIndex,
+                    normalizedLineText,
+                    cleanedShortCues,
+                    "NoTokens",
+                    [],
+                    [],
+                    null,
+                    null));
+        }
 
         var actualTokens = cleanedShortCues
             .SelectMany(Tokenize)
             .ToList();
         if (!expectedTokens.SequenceEqual(actualTokens))
-            return [normalizedLineText];
+        {
+            var firstMismatchTokenIndex = FindFirstMismatchIndex(expectedTokens, actualTokens);
+            return new ShortCueValidationResult(
+                [normalizedLineText],
+                new ShortCueValidationFailure(
+                    lineIndex,
+                    normalizedLineText,
+                    cleanedShortCues,
+                    "TokenCoverageMismatch",
+                    expectedTokens,
+                    actualTokens,
+                    firstMismatchTokenIndex,
+                    null));
+        }
 
-        return cleanedShortCues;
+        if (!HasValidPunctuationBoundaries(normalizedLineText, cleanedShortCues, out var invalidBoundaryCueIndex))
+        {
+            return new ShortCueValidationResult(
+                [normalizedLineText],
+                new ShortCueValidationFailure(
+                    lineIndex,
+                    normalizedLineText,
+                    cleanedShortCues,
+                    "InvalidPunctuationBoundary",
+                    expectedTokens,
+                    actualTokens,
+                    null,
+                    invalidBoundaryCueIndex));
+        }
+
+        return new ShortCueValidationResult(cleanedShortCues, null);
+    }
+
+    private static bool HasValidPunctuationBoundaries(string lineText, IReadOnlyList<string> shortCues, out int? invalidBoundaryCueIndex)
+    {
+        invalidBoundaryCueIndex = null;
+        if (shortCues.Count <= 1)
+            return true;
+
+        var cursor = 0;
+        for (var i = 0; i < shortCues.Count - 1; i++)
+        {
+            var cue = shortCues[i];
+            var at = lineText.IndexOf(cue, cursor, StringComparison.Ordinal);
+            if (at < 0)
+            {
+                invalidBoundaryCueIndex = i;
+                return false;
+            }
+
+            var end = at + cue.Length;
+            var nextCue = shortCues[i + 1];
+            var nextStart = lineText.IndexOf(nextCue, end, StringComparison.Ordinal);
+            if (nextStart < 0)
+            {
+                invalidBoundaryCueIndex = i + 1;
+                return false;
+            }
+            if (!IsValidShortCueBoundary(lineText, nextStart))
+            {
+                invalidBoundaryCueIndex = i + 1;
+                return false;
+            }
+
+            cursor = end;
+        }
+
+        return true;
+    }
+
+    private static bool IsValidShortCueBoundary(string text, int nextCueStart)
+    {
+        var punctuationIndex = nextCueStart - 1;
+        while (punctuationIndex >= 0 && char.IsWhiteSpace(text[punctuationIndex]))
+            punctuationIndex--;
+        if (punctuationIndex < 0)
+            return false;
+
+        var boundaryChar = text[punctuationIndex];
+        if (!ApprovedShortCueBoundaryPunctuation.Contains(boundaryChar))
+            return false;
+
+        // Reject periods inside tokens such as Node.js, 3.5, v1.2, example.com.
+        if (boundaryChar == '.')
+        {
+            var prev = GetPreviousNonWhitespace(text, punctuationIndex - 1);
+            var next = GetNextNonWhitespace(text, punctuationIndex + 1);
+            if (IsWordish(prev) && IsWordish(next))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static char? GetPreviousNonWhitespace(string text, int index)
+    {
+        for (var i = index; i >= 0; i--)
+        {
+            if (!char.IsWhiteSpace(text[i]))
+                return text[i];
+        }
+        return null;
+    }
+
+    private static char? GetNextNonWhitespace(string text, int index)
+    {
+        for (var i = index; i < text.Length; i++)
+        {
+            if (!char.IsWhiteSpace(text[i]))
+                return text[i];
+        }
+        return null;
+    }
+
+    private static bool IsWordish(char? c) => c is not null && char.IsLetterOrDigit(c.Value);
+
+    private static int? FindFirstMismatchIndex(IReadOnlyList<string> expectedTokens, IReadOnlyList<string> actualTokens)
+    {
+        var minCount = Math.Min(expectedTokens.Count, actualTokens.Count);
+        for (var i = 0; i < minCount; i++)
+        {
+            if (!string.Equals(expectedTokens[i], actualTokens[i], StringComparison.Ordinal))
+                return i;
+        }
+        if (expectedTokens.Count == actualTokens.Count)
+            return null;
+        return minCount;
     }
 
     private static List<string> Tokenize(string text)
@@ -860,16 +1041,35 @@ Example:
         [property: JsonPropertyName("index")] int Index,
         [property: JsonPropertyName("startMs")] int StartMs,
         [property: JsonPropertyName("endMs")] int EndMs);
+
+    private sealed record ShortCueValidationResult(
+        IReadOnlyList<string> ShortCues,
+        ShortCueValidationFailure? Failure);
 }
 
 // ── Public result types ───────────────────────────────────────────────
 
-public record GeneratedDialogue(string Title, string Voice1, string Voice2, DialogueLine[] Lines);
+public record GeneratedDialogue(
+    string Title,
+    string Voice1,
+    string Voice2,
+    DialogueLine[] Lines,
+    IReadOnlyList<ShortCueValidationFailure> ShortCueValidationFailures);
 
 public record DialogueLine(string Speaker, string Text)
 {
     public IReadOnlyList<string> ShortCues { get; init; } = [];
 }
+
+public record ShortCueValidationFailure(
+    int LineIndex,
+    string LineText,
+    IReadOnlyList<string> RawShortCues,
+    string Reason,
+    IReadOnlyList<string> ExpectedTokens,
+    IReadOnlyList<string> ActualTokens,
+    int? FirstMismatchTokenIndex,
+    int? InvalidBoundaryCueIndex);
 
 public record VideoTranscriptCueRecord(int Index, int StartMs, int EndMs, string Text);
 

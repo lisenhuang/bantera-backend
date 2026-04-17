@@ -9,6 +9,7 @@ using BanteraApi.Auth;
 using BanteraApi.Cloudflare;
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
+using BanteraApi.Diagnostics;
 using BanteraApi.Gemini;
 using BanteraApi.Profile;
 using BanteraApi.RevAi;
@@ -58,6 +59,9 @@ builder.Services.AddHttpClient("gemini", c =>
     c.Timeout = TimeSpan.FromSeconds(180);
 });
 builder.Services.AddScoped<GeminiService>();
+builder.Services.Configure<AiAudioDiagnosticsOptions>(
+    builder.Configuration.GetSection(AiAudioDiagnosticsOptions.Section));
+builder.Services.AddSingleton<AiAudioDiagnosticFileWriter>();
 
 builder.Services.Configure<RevAiSettings>(builder.Configuration.GetSection(RevAiSettings.Section));
 builder.Services.AddHttpClient("revai", c =>
@@ -747,6 +751,8 @@ app.MapPost("/api/me/audio/generate/v2", async (
     GeminiService geminiService,
     RevAiAlignmentService revAiAlignmentService,
     IOptions<RevAiSettings> revAiOptions,
+    IOptions<AiAudioDiagnosticsOptions> aiAudioDiagnosticsOptions,
+    AiAudioDiagnosticFileWriter diagnosticFileWriter,
     R2StorageService r2StorageService,
     VideoService videoService,
     AppDbContext db,
@@ -793,6 +799,17 @@ app.MapPost("/api/me/audio/generate/v2", async (
         await httpContext.Response.Body.FlushAsync(cancellationToken);
     }
 
+    var diagnosticsOptions = aiAudioDiagnosticsOptions.Value;
+    var lastStep = "started";
+    var longAlignmentMode = "none";
+    string? shortCueNullReason = null;
+    RevAiCueAlignmentBuilder.AlignmentFailure? shortCueAlignmentFailure = null;
+    RevAiCueAlignmentBuilder.AlignmentFailure? strictLongAlignmentFailure = null;
+    RevAiCueAlignmentBuilder.AlignmentFailure? tolerantLongAlignmentFailure = null;
+    var shortAlignmentAttempted = false;
+    var objectKey = string.Empty;
+    RevAiTranscriptDiagnostics? transcriptDiagnostics = null;
+
     try
     {
         var dialogue = await geminiService.GenerateDialogueAsync(
@@ -805,17 +822,49 @@ app.MapPost("/api/me/audio/generate/v2", async (
             req.NativeLanguageCode,
             cancellationToken);
         await SendAsync(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
+        lastStep = "dialogue";
+        if (dialogue.ShortCueValidationFailures.Count > 0)
+        {
+            await diagnosticFileWriter.WriteShortCueValidationFailureAsync(new
+            {
+                timestampUtc = DateTime.UtcNow,
+                userId = userId.Value,
+                language = req.Language,
+                languageCode = req.LanguageCode,
+                scenarioId = req.ScenarioId,
+                includeFullText = diagnosticsOptions.IncludeFullText,
+                lineFailures = dialogue.ShortCueValidationFailures.Select(f => new
+                {
+                    f.LineIndex,
+                    lineText = diagnosticsOptions.IncludeFullText ? f.LineText : TrimForDiagnostics(f.LineText, diagnosticsOptions.MaxPreviewChars),
+                    rawShortCues = f.RawShortCues,
+                    f.Reason,
+                    expectedTokens = f.ExpectedTokens,
+                    actualTokens = f.ActualTokens,
+                    f.FirstMismatchTokenIndex,
+                    f.InvalidBoundaryCueIndex,
+                }),
+            }, cancellationToken);
+        }
         var flattenedShortCueTexts = BuildFlattenedShortCueTexts(dialogue.Lines);
+        if (flattenedShortCueTexts.Count == 0)
+        {
+            shortCueNullReason = dialogue.ShortCueValidationFailures.Count > 0
+                ? "ShortCueValidationCollapsedToFullLines"
+                : "NoMultiPartShortCuesFromDialogue";
+        }
 
         var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
-        var objectKey = $"videos/{userId.Value}/{Guid.NewGuid():N}.wav";
+        objectKey = $"videos/{userId.Value}/{Guid.NewGuid():N}.wav";
         await r2StorageService.UploadObjectAsync(
             objectKey,
             new MemoryStream(wavBytes),
             "audio/wav",
             cancellationToken);
         await SendAsync(new { step = "audio" });
+        lastStep = "audio";
         await SendAsync(new { step = "aligning" });
+        lastStep = "aligning";
 
         IReadOnlyList<WordTimingRecord>? wordTiming = null;
         IReadOnlyList<VideoTranscriptCueRecord>? cues = null;
@@ -827,7 +876,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
         {
             var transcript = string.Join("\n", dialogue.Lines.Select(l => l.Text));
             var revAiLogOptions = revAiOptions.Value;
-            var diagnostics = RevAiTranscriptDiagnostics.Create(
+            transcriptDiagnostics = RevAiTranscriptDiagnostics.Create(
                 transcript,
                 revAiLogOptions.TranscriptPreviewMaxChars);
             var presignedUrl = r2StorageService.GeneratePresignedUrl(objectKey, TimeSpan.FromHours(1));
@@ -838,11 +887,11 @@ app.MapPost("/api/me/audio/generate/v2", async (
                 revAiLanguageCode,
                 req.ScenarioId,
                 presignedUrl,
-                diagnostics.CharCount,
-                diagnostics.LineCount,
-                diagnostics.TranscriptHash,
-                diagnostics.NormalizedTranscriptHash,
-                revAiLogOptions.LogTranscriptPreview ? diagnostics.TranscriptPreview : "(disabled)",
+                transcriptDiagnostics.CharCount,
+                transcriptDiagnostics.LineCount,
+                transcriptDiagnostics.TranscriptHash,
+                transcriptDiagnostics.NormalizedTranscriptHash,
+                revAiLogOptions.LogTranscriptPreview ? transcriptDiagnostics.TranscriptPreview : "(disabled)",
                 revAiLogOptions.LogTranscriptFull ? transcript : "(disabled)");
             try
             {
@@ -855,27 +904,116 @@ app.MapPost("/api/me/audio/generate/v2", async (
                         dialogue.Lines,
                         wordTiming,
                         out cues,
-                        out var failure))
+                        out var strictFailure))
                 {
+                    strictLongAlignmentFailure = strictFailure;
+                    var strictLinePreview = strictFailure?.LineIndex is int strictIndex
+                        && strictIndex >= 0
+                        && strictIndex < dialogue.Lines.Length
+                            ? dialogue.Lines[strictIndex].Text
+                            : null;
                     app.Logger.LogWarning(
-                        "Rev.ai cue alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. lineIndex={LineIndex}, matchedWords={MatchedWords}, expectedWords={ExpectedWords}, matchRatio={MatchRatio}, requiredMatchRatio={RequiredMatchRatio}, requiredMatchedWords={RequiredMatchedWords}, expectedToken={ExpectedToken}, actualWord={ActualWord}",
+                        "Rev.ai strict cue alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. lineIndex={LineIndex}, linePreview={LinePreview}, matchedWords={MatchedWords}, expectedWords={ExpectedWords}, matchRatio={MatchRatio}, requiredMatchRatio={RequiredMatchRatio}, requiredMatchedWords={RequiredMatchedWords}, expectedToken={ExpectedToken}, actualWord={ActualWord}",
                         userId,
                         req.LanguageCode,
                         req.ScenarioId,
-                        failure?.LineIndex,
-                        failure?.MatchedWords,
-                        failure?.ExpectedWords,
-                        failure?.MatchRatio,
-                        failure?.RequiredMatchRatio,
-                        failure?.RequiredMatchedWords,
-                        failure?.ExpectedToken,
-                        failure?.ActualWord);
-                    throw new InvalidOperationException(
-                        $"Rev.ai cue alignment produced non-alignable output for supported locale '{req.LanguageCode}' at line {failure?.LineIndex}.");
+                        strictFailure?.LineIndex,
+                        strictLinePreview,
+                        strictFailure?.MatchedWords,
+                        strictFailure?.ExpectedWords,
+                        strictFailure?.MatchRatio,
+                        strictFailure?.RequiredMatchRatio,
+                        strictFailure?.RequiredMatchedWords,
+                        strictFailure?.ExpectedToken,
+                        strictFailure?.ActualWord);
+                    await diagnosticFileWriter.WriteRevAiAlignmentFailureAsync(new
+                    {
+                        timestampUtc = DateTime.UtcNow,
+                        userId = userId.Value,
+                        languageCode = req.LanguageCode,
+                        revAiLanguageCode,
+                        scenarioId = req.ScenarioId,
+                        alignmentKind = "longStrict",
+                        linePreview = TrimForDiagnostics(strictLinePreview, diagnosticsOptions.MaxPreviewChars),
+                        failure = strictFailure,
+                        transcript = transcriptDiagnostics is null ? null : new
+                        {
+                            transcriptDiagnostics.CharCount,
+                            transcriptDiagnostics.LineCount,
+                            transcriptDiagnostics.TranscriptHash,
+                            transcriptDiagnostics.NormalizedTranscriptHash,
+                            transcriptPreview = TrimForDiagnostics(transcriptDiagnostics.TranscriptPreview, diagnosticsOptions.MaxPreviewChars),
+                        },
+                        wordTiming = BuildWordTimingSummary(wordTiming),
+                    }, cancellationToken);
+                    if (!RevAiCueAlignmentBuilder.TryBuildTolerant(
+                            dialogue.Lines,
+                            wordTiming,
+                            out cues,
+                            out var tolerantFailure))
+                    {
+                        tolerantLongAlignmentFailure = tolerantFailure;
+                        var tolerantLinePreview = tolerantFailure?.LineIndex is int tolerantIndex
+                            && tolerantIndex >= 0
+                            && tolerantIndex < dialogue.Lines.Length
+                                ? dialogue.Lines[tolerantIndex].Text
+                                : null;
+                        app.Logger.LogWarning(
+                            "Rev.ai tolerant cue alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. lineIndex={LineIndex}, linePreview={LinePreview}, matchedWords={MatchedWords}, expectedWords={ExpectedWords}, matchRatio={MatchRatio}, requiredMatchRatio={RequiredMatchRatio}, requiredMatchedWords={RequiredMatchedWords}, expectedToken={ExpectedToken}, actualWord={ActualWord}",
+                            userId,
+                            req.LanguageCode,
+                            req.ScenarioId,
+                            tolerantFailure?.LineIndex,
+                            tolerantLinePreview,
+                            tolerantFailure?.MatchedWords,
+                            tolerantFailure?.ExpectedWords,
+                            tolerantFailure?.MatchRatio,
+                            tolerantFailure?.RequiredMatchRatio,
+                            tolerantFailure?.RequiredMatchedWords,
+                            tolerantFailure?.ExpectedToken,
+                            tolerantFailure?.ActualWord);
+                        await diagnosticFileWriter.WriteRevAiAlignmentFailureAsync(new
+                        {
+                            timestampUtc = DateTime.UtcNow,
+                            userId = userId.Value,
+                            languageCode = req.LanguageCode,
+                            revAiLanguageCode,
+                            scenarioId = req.ScenarioId,
+                            alignmentKind = "longTolerant",
+                            linePreview = TrimForDiagnostics(tolerantLinePreview, diagnosticsOptions.MaxPreviewChars),
+                            failure = tolerantFailure,
+                            transcript = transcriptDiagnostics is null ? null : new
+                            {
+                                transcriptDiagnostics.CharCount,
+                                transcriptDiagnostics.LineCount,
+                                transcriptDiagnostics.TranscriptHash,
+                                transcriptDiagnostics.NormalizedTranscriptHash,
+                                transcriptPreview = TrimForDiagnostics(transcriptDiagnostics.TranscriptPreview, diagnosticsOptions.MaxPreviewChars),
+                            },
+                            wordTiming = BuildWordTimingSummary(wordTiming),
+                        }, cancellationToken);
+                        wordTiming = null;
+                        cues = null;
+                        shortCueNullReason ??= "LongCueAlignmentFallbackUsed";
+                    }
+                    else
+                    {
+                        longAlignmentMode = "tolerant";
+                        app.Logger.LogInformation(
+                            "Rev.ai tolerant cue alignment succeeded after strict failure for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
+                            userId,
+                            req.LanguageCode,
+                            req.ScenarioId);
+                    }
+                }
+                else
+                {
+                    longAlignmentMode = "strict";
                 }
 
-                if (flattenedShortCueTexts.Count > 0)
+                if (cues is not null && wordTiming is not null && flattenedShortCueTexts.Count > 0)
                 {
+                    shortAlignmentAttempted = true;
                     var shortCueLines = flattenedShortCueTexts
                         .Select(text => new DialogueLine("Speaker1", text))
                         .ToArray();
@@ -885,6 +1023,8 @@ app.MapPost("/api/me/audio/generate/v2", async (
                             out shortCues,
                             out var shortCueFailure))
                     {
+                        shortCueAlignmentFailure = shortCueFailure;
+                        shortCueNullReason ??= "ShortCueAlignmentFailed";
                         app.Logger.LogWarning(
                             "Rev.ai short-cue alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. lineIndex={LineIndex}, matchedWords={MatchedWords}, expectedWords={ExpectedWords}, matchRatio={MatchRatio}, requiredMatchRatio={RequiredMatchRatio}, requiredMatchedWords={RequiredMatchedWords}, expectedToken={ExpectedToken}, actualWord={ActualWord}",
                             userId,
@@ -898,21 +1038,62 @@ app.MapPost("/api/me/audio/generate/v2", async (
                             shortCueFailure?.RequiredMatchedWords,
                             shortCueFailure?.ExpectedToken,
                             shortCueFailure?.ActualWord);
+                        await diagnosticFileWriter.WriteRevAiAlignmentFailureAsync(new
+                        {
+                            timestampUtc = DateTime.UtcNow,
+                            userId = userId.Value,
+                            languageCode = req.LanguageCode,
+                            revAiLanguageCode,
+                            scenarioId = req.ScenarioId,
+                            alignmentKind = "shortStrict",
+                            failure = shortCueFailure,
+                            transcript = transcriptDiagnostics is null ? null : new
+                            {
+                                transcriptDiagnostics.CharCount,
+                                transcriptDiagnostics.LineCount,
+                                transcriptDiagnostics.TranscriptHash,
+                                transcriptDiagnostics.NormalizedTranscriptHash,
+                                transcriptPreview = TrimForDiagnostics(transcriptDiagnostics.TranscriptPreview, diagnosticsOptions.MaxPreviewChars),
+                            },
+                            wordTiming = BuildWordTimingSummary(wordTiming),
+                        }, cancellationToken);
                     }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                app.Logger.LogError(
+                app.Logger.LogWarning(
                     ex,
-                    "Rev.ai alignment failed for supported locale. user {UserId}, locale {LanguageCode}, revAiLanguageCode {RevAiLanguageCode}, scenarioId {ScenarioId}, audioUrl {AudioUrl}",
+                    "Rev.ai alignment failed for supported locale; falling back to Gemini cue timing. user {UserId}, locale {LanguageCode}, revAiLanguageCode {RevAiLanguageCode}, scenarioId {ScenarioId}, audioUrl {AudioUrl}",
                     userId,
                     req.LanguageCode,
                     revAiLanguageCode,
                     req.ScenarioId,
                     presignedUrl);
-                await SendAsync(new { step = "error", message = generationFailedMessage });
-                return;
+                await diagnosticFileWriter.WriteRevAiAlignmentFailureAsync(new
+                {
+                    timestampUtc = DateTime.UtcNow,
+                    userId = userId.Value,
+                    languageCode = req.LanguageCode,
+                    revAiLanguageCode,
+                    scenarioId = req.ScenarioId,
+                    alignmentKind = "revAiService",
+                    exceptionType = ex.GetType().FullName,
+                    exceptionMessage = ex.Message,
+                    exceptionStack = ex.ToString(),
+                    transcript = transcriptDiagnostics is null ? null : new
+                    {
+                        transcriptDiagnostics.CharCount,
+                        transcriptDiagnostics.LineCount,
+                        transcriptDiagnostics.TranscriptHash,
+                        transcriptDiagnostics.NormalizedTranscriptHash,
+                        transcriptPreview = TrimForDiagnostics(transcriptDiagnostics.TranscriptPreview, diagnosticsOptions.MaxPreviewChars),
+                    },
+                }, cancellationToken);
+                wordTiming = null;
+                cues = null;
+                shortCues = null;
+                shortCueNullReason ??= "LongCueAlignmentFallbackUsed";
             }
         }
         else
@@ -923,14 +1104,47 @@ app.MapPost("/api/me/audio/generate/v2", async (
                 dialogue.Lines,
                 durationMs,
                 cancellationToken);
+            longAlignmentMode = "geminiFallback";
+            shortCueNullReason ??= "NoWordTimingForShortCueAlignment";
         }
 
         if (cues is null)
         {
-            await SendAsync(new { step = "error", message = generationFailedMessage });
-            return;
+            app.Logger.LogWarning(
+                "Falling back to Gemini cue timing for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
+                userId,
+                req.LanguageCode,
+                req.ScenarioId);
+            wordTiming = null;
+            shortCues = null;
+            shortCueNullReason ??= "LongCueAlignmentFallbackUsed";
+            try
+            {
+                cues = await geminiService.GenerateCueTimingAsync(
+                    wavBytes,
+                    "audio/wav",
+                    dialogue.Lines,
+                    durationMs,
+                    cancellationToken);
+                longAlignmentMode = "geminiFallback";
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                app.Logger.LogWarning(
+                    ex,
+                    "Gemini cue timing fallback failed; using estimated timing. user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
+                    userId,
+                    req.LanguageCode,
+                    req.ScenarioId);
+                cues = geminiService.EstimateCues(dialogue.Lines, durationMs);
+                longAlignmentMode = "estimatedFallback";
+            }
         }
 
+        if (flattenedShortCueTexts.Count > 0 && shortCues is null && wordTiming is null)
+            shortCueNullReason ??= "NoWordTimingForShortCueAlignment";
+
+        lastStep = "saving";
         var videoResponse = await videoService.SaveAiAudioV2Async(
             userId.Value,
             dialogue.Title,
@@ -945,7 +1159,40 @@ app.MapPost("/api/me/audio/generate/v2", async (
             durationMs,
             httpContext,
             cancellationToken);
+        if (videoResponse.TranscriptShortCues is null)
+        {
+            await diagnosticFileWriter.WriteShortCueNullAsync(new
+            {
+                timestampUtc = DateTime.UtcNow,
+                userId = userId.Value,
+                language = req.Language,
+                languageCode = req.LanguageCode,
+                scenarioId = req.ScenarioId,
+                videoId = videoResponse.Id,
+                reason = shortCueNullReason ?? "Unknown",
+                longAlignmentMode,
+                shortAlignmentAttempted,
+                strictLongAlignmentFailure,
+                tolerantLongAlignmentFailure,
+                shortCueAlignmentFailure,
+                lineCount = dialogue.Lines.Length,
+                linesWithSplitCount = dialogue.Lines.Count(line => line.ShortCues.Count > 1),
+                flattenedShortCueCount = flattenedShortCueTexts.Count,
+                longCueCount = cues.Count,
+                wordTimingCount = wordTiming?.Count ?? 0,
+                includeFullText = diagnosticsOptions.IncludeFullText,
+                lineSummaries = dialogue.Lines.Select((line, index) => new
+                {
+                    lineIndex = index,
+                    lineText = diagnosticsOptions.IncludeFullText ? line.Text : TrimForDiagnostics(line.Text, diagnosticsOptions.MaxPreviewChars),
+                    shortCues = line.ShortCues,
+                    shortCueCount = line.ShortCues.Count,
+                    hasSplit = line.ShortCues.Count > 1,
+                }),
+            }, cancellationToken);
+        }
         await SendAsync(new { step = "done", video = videoResponse });
+        lastStep = "done";
     }
     catch (ContentRejectedException ex)
     {
@@ -959,6 +1206,24 @@ app.MapPost("/api/me/audio/generate/v2", async (
             userId,
             req.LanguageCode,
             req.ScenarioId);
+        await diagnosticFileWriter.WriteGenerationFailureAsync(new
+        {
+            timestampUtc = DateTime.UtcNow,
+            userId = userId.Value,
+            language = req.Language,
+            languageCode = req.LanguageCode,
+            nativeLanguage = req.NativeLanguage,
+            nativeLanguageCode = req.NativeLanguageCode,
+            scenarioId = req.ScenarioId,
+            durationSeconds = req.DurationSeconds,
+            lastStep,
+            objectKey = string.IsNullOrWhiteSpace(objectKey) ? null : objectKey,
+            longAlignmentMode,
+            shortCueNullReason,
+            exceptionType = ex.GetType().FullName,
+            exceptionMessage = ex.Message,
+            exceptionStack = ex.ToString(),
+        }, cancellationToken);
         await SendAsync(new { step = "error", message = generationFailedMessage });
     }
 })
@@ -1420,6 +1685,47 @@ static IReadOnlyList<string> BuildFlattenedShortCueTexts(DialogueLine[] lines)
     foreach (var line in lines)
         flattened.AddRange(line.ShortCues);
     return flattened;
+}
+
+static string TrimForDiagnostics(string? value, int maxChars)
+{
+    if (string.IsNullOrWhiteSpace(value))
+        return string.Empty;
+
+    var limit = maxChars <= 0 ? 500 : maxChars;
+    var trimmed = value.Trim();
+    return trimmed.Length <= limit
+        ? trimmed
+        : $"{trimmed[..limit]}...";
+}
+
+static object BuildWordTimingSummary(IReadOnlyList<WordTimingRecord>? wordTiming)
+{
+    if (wordTiming is null)
+    {
+        return new
+        {
+            wordTimingCount = 0,
+            firstWords = Array.Empty<object>(),
+            lastWords = Array.Empty<object>(),
+        };
+    }
+
+    var firstWords = wordTiming
+        .Take(20)
+        .Select(w => new { w.Word, w.StartMs, w.EndMs })
+        .ToArray();
+    var lastWords = wordTiming
+        .Skip(Math.Max(0, wordTiming.Count - 20))
+        .Select(w => new { w.Word, w.StartMs, w.EndMs })
+        .ToArray();
+
+    return new
+    {
+        wordTimingCount = wordTiming.Count,
+        firstWords,
+        lastWords,
+    };
 }
 
 static SavedCueMetadata ResolveSavedCueMetadata(SaveCueRequest req, UserVideo video)

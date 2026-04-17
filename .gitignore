@@ -5,6 +5,7 @@ obj/
 *.suo
 .vs/
 BanteraApi/appsettings.Development.json
+BanteraApi/diagnostics/*.json
 
 ## Secrets — never commit these
 appsettings.Production.json

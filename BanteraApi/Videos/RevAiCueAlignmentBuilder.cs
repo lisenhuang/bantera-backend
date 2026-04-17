@@ -8,10 +8,12 @@ namespace BanteraApi.Videos;
 public static class RevAiCueAlignmentBuilder
 {
     private static readonly Regex TokenRegex = new(@"[\p{L}\p{N}']+", RegexOptions.Compiled);
-    private const int MatchLookaheadWindow = 6;
-    private const int FirstTokenLookaheadWindow = 20;
-    private const double MinLineMatchRatio = 0.7;
-    private const int MinMatchedWordsPerLine = 2;
+    private const int StrictMatchLookaheadWindow = 6;
+    private const int StrictFirstTokenLookaheadWindow = 20;
+    private const double StrictMinLineMatchRatio = 0.7;
+    private const int StrictMinMatchedWordsPerLine = 2;
+    private const int TolerantMatchLookaheadWindow = 12;
+    private const int TolerantFirstTokenLookaheadWindow = 30;
 
     public sealed record AlignmentFailure(
         int LineIndex,
@@ -33,9 +35,47 @@ public static class RevAiCueAlignmentBuilder
         failure = null;
         if (lines.Length == 0 || wordTiming.Count == 0)
         {
-            failure = new AlignmentFailure(0, 0, 0, 0, MinLineMatchRatio, MinMatchedWordsPerLine, null, null);
+            failure = new AlignmentFailure(0, 0, 0, 0, StrictMinLineMatchRatio, StrictMinMatchedWordsPerLine, null, null);
             return false;
         }
+        return TryBuildCore(
+            lines,
+            wordTiming,
+            BuildMode.Strict,
+            out cues,
+            out failure);
+    }
+
+    public static bool TryBuildTolerant(
+        DialogueLine[] lines,
+        IReadOnlyList<WordTimingRecord> wordTiming,
+        out IReadOnlyList<VideoTranscriptCueRecord>? cues,
+        out AlignmentFailure? failure)
+    {
+        cues = null;
+        failure = null;
+        if (lines.Length == 0 || wordTiming.Count == 0)
+        {
+            failure = new AlignmentFailure(0, 0, 0, 0, 0.7, 2, null, null);
+            return false;
+        }
+        return TryBuildCore(
+            lines,
+            wordTiming,
+            BuildMode.Tolerant,
+            out cues,
+            out failure);
+    }
+
+    private static bool TryBuildCore(
+        DialogueLine[] lines,
+        IReadOnlyList<WordTimingRecord> wordTiming,
+        BuildMode mode,
+        out IReadOnlyList<VideoTranscriptCueRecord>? cues,
+        out AlignmentFailure? failure)
+    {
+        cues = null;
+        failure = null;
 
         var result = new List<VideoTranscriptCueRecord>(lines.Length);
         var timingCursor = 0;
@@ -45,7 +85,8 @@ public static class RevAiCueAlignmentBuilder
             var tokens = Tokenize(lines[lineIndex].Text);
             if (tokens.Count == 0)
             {
-                failure = new AlignmentFailure(lineIndex, 0, 0, 0, MinLineMatchRatio, MinMatchedWordsPerLine, null, null);
+                var (requiredMatchRatio, requiredMatchedWords) = GetThresholds(mode, 0);
+                failure = new AlignmentFailure(lineIndex, 0, 0, 0, requiredMatchRatio, requiredMatchedWords, null, null);
                 return false;
             }
 
@@ -59,8 +100,8 @@ public static class RevAiCueAlignmentBuilder
             {
                 var token = tokens[tokenIndex];
                 var lookahead = tokenIndex == 0
-                    ? FirstTokenLookaheadWindow
-                    : MatchLookaheadWindow;
+                    ? (mode == BuildMode.Strict ? StrictFirstTokenLookaheadWindow : TolerantFirstTokenLookaheadWindow)
+                    : (mode == BuildMode.Strict ? StrictMatchLookaheadWindow : TolerantMatchLookaheadWindow);
                 var maxSearch = Math.Min(wordTiming.Count, timingCursor + lookahead);
                 var bestMatch = -1;
                 for (var cursor = timingCursor; cursor < maxSearch; cursor++)
@@ -91,8 +132,9 @@ public static class RevAiCueAlignmentBuilder
             var matchRatio = tokens.Count == 0
                 ? 0
                 : (double)matchedCount / tokens.Count;
-            var meetsThreshold = matchedCount >= Math.Min(MinMatchedWordsPerLine, tokens.Count)
-                && matchRatio >= MinLineMatchRatio;
+            var (requiredMatchRatioForLine, requiredMatchedWordsForLine) = GetThresholds(mode, tokens.Count);
+            var meetsThreshold = matchedCount >= Math.Min(requiredMatchedWordsForLine, tokens.Count)
+                && matchRatio >= requiredMatchRatioForLine;
 
             if (!meetsThreshold || lineStart < 0 || lineEnd <= lineStart)
             {
@@ -101,8 +143,8 @@ public static class RevAiCueAlignmentBuilder
                     matchedCount,
                     tokens.Count,
                     matchRatio,
-                    MinLineMatchRatio,
-                    Math.Min(MinMatchedWordsPerLine, tokens.Count),
+                    requiredMatchRatioForLine,
+                    Math.Min(requiredMatchedWordsForLine, tokens.Count),
                     string.IsNullOrWhiteSpace(failedToken) ? null : failedToken,
                     string.IsNullOrWhiteSpace(actualWord) ? null : actualWord);
                 return false;
@@ -117,6 +159,22 @@ public static class RevAiCueAlignmentBuilder
 
         cues = result;
         return true;
+    }
+
+    private static (double RequiredMatchRatio, int RequiredMatchedWords) GetThresholds(BuildMode mode, int expectedWords)
+    {
+        if (mode == BuildMode.Strict)
+            return (StrictMinLineMatchRatio, StrictMinMatchedWordsPerLine);
+
+        var requiredMatchedWords = expectedWords >= 3 ? 3 : expectedWords;
+        var requiredMatchRatio = expectedWords >= 8 ? 0.55 : 0.7;
+        return (requiredMatchRatio, requiredMatchedWords);
+    }
+
+    private enum BuildMode
+    {
+        Strict,
+        Tolerant,
     }
 
     internal static List<string> Tokenize(string text)
