@@ -17,6 +17,31 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         ',', ';', ':', '.', '?', '!', '\u2026', // ... and ellipsis
         '\u3001', '\u3002', '\uff1f', '\uff01', '\uff1b', '\uff1a'
     ];
+    private static readonly HashSet<string> NonBoundaryAbbreviations = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "dr",
+        "mr",
+        "mrs",
+        "ms",
+        "prof",
+        "sr",
+        "jr",
+        "st",
+        "m",
+        "mme",
+        "mlle",
+        "sra",
+        "dra",
+        "dott",
+        "sig",
+        "sig.ra",
+        "z.b",
+        "bzw",
+        "ca",
+        "e.g",
+        "i.e",
+        "etc",
+    };
 
     private static readonly Dictionary<string, string> AccentInstructions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -895,36 +920,43 @@ Example:
         if (!ApprovedShortCueBoundaryPunctuation.Contains(boundaryChar))
             return false;
 
-        // Reject periods inside tokens such as Node.js, 3.5, v1.2, example.com.
+        // For periods, allow sentence boundaries but reject internal-token dots
+        // (Node.js, 3.5, v1.2, example.com) and known abbreviation boundaries
+        // (Dr., Mr., e.g., etc.).
         if (boundaryChar == '.')
         {
-            var prev = GetPreviousNonWhitespace(text, punctuationIndex - 1);
-            var next = GetNextNonWhitespace(text, punctuationIndex + 1);
-            if (IsWordish(prev) && IsWordish(next))
+            var immediatePrev = punctuationIndex > 0 ? (char?)text[punctuationIndex - 1] : null;
+            var immediateNext = punctuationIndex + 1 < text.Length ? (char?)text[punctuationIndex + 1] : null;
+            if (IsWordish(immediatePrev) && IsWordish(immediateNext))
+                return false;
+            if (IsKnownAbbreviationBeforePeriod(text, punctuationIndex))
                 return false;
         }
 
         return true;
     }
 
-    private static char? GetPreviousNonWhitespace(string text, int index)
+    private static bool IsKnownAbbreviationBeforePeriod(string text, int punctuationIndex)
     {
-        for (var i = index; i >= 0; i--)
-        {
-            if (!char.IsWhiteSpace(text[i]))
-                return text[i];
-        }
-        return null;
-    }
+        if (punctuationIndex <= 0)
+            return false;
 
-    private static char? GetNextNonWhitespace(string text, int index)
-    {
-        for (var i = index; i < text.Length; i++)
+        var start = punctuationIndex - 1;
+        while (start >= 0)
         {
-            if (!char.IsWhiteSpace(text[i]))
-                return text[i];
+            var c = text[start];
+            if (char.IsWhiteSpace(c) || c is ',' or ';' or ':' or '!' or '?' or '"' or '\'' or '(' or ')' or '[' or ']' or '{' or '}')
+                break;
+            start--;
         }
-        return null;
+
+        var tokenStart = start + 1;
+        if (tokenStart >= punctuationIndex)
+            return false;
+
+        var rawToken = text[tokenStart..punctuationIndex];
+        var normalizedToken = rawToken.Trim().TrimEnd('.').ToLowerInvariant();
+        return NonBoundaryAbbreviations.Contains(normalizedToken);
     }
 
     private static bool IsWordish(char? c) => c is not null && char.IsLetterOrDigit(c.Value);
