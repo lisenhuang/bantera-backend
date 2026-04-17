@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Threading.RateLimiting;
+using System.Data;
 using BanteraApi;
 using BanteraApi.Account;
 using BanteraApi.Admin;
@@ -1152,8 +1153,12 @@ app.MapPost("/api/me/saved-cues", async (
     var existing = await db.UserSavedCues.FirstOrDefaultAsync(
         c => c.UserId == userId.Value && c.VideoId == req.VideoId && c.CueId == req.CueId,
         cancellationToken);
+    var metadata = ResolveSavedCueMetadata(req, video);
     if (existing is not null)
+    {
+        await TryUpdateSavedCueMetadataAsync(db, existing.Id, metadata, cancellationToken);
         return Results.Ok(new { id = existing.Id });
+    }
 
     var entry = new UserSavedCue
     {
@@ -1165,6 +1170,7 @@ app.MapPost("/api/me/saved-cues", async (
     };
     db.UserSavedCues.Add(entry);
     await db.SaveChangesAsync(cancellationToken);
+    await TryUpdateSavedCueMetadataAsync(db, entry.Id, metadata, cancellationToken);
     return Results.Created($"/api/me/saved-cues/{entry.Id}", new { id = entry.Id });
 })
 .WithName("SaveCue")
@@ -1365,5 +1371,214 @@ static Guid? TryGetUserId(System.Security.Claims.ClaimsPrincipal user)
         return null;
 
     return userId;
+}
+
+static SavedCueMetadata ResolveSavedCueMetadata(SaveCueRequest req, UserVideo video)
+{
+    var cueText = NormalizeSavedCueText(req.CueText);
+    var startTimeMs = NormalizeCueTime(req.StartTimeMs);
+    var endTimeMs = NormalizeCueTime(req.EndTimeMs);
+    var cueMode = NormalizeCueMode(req.CueMode);
+    var parentCueId = NormalizeSavedCueId(req.ParentCueId);
+    var parentCueIndex = NormalizeCueIndex(req.ParentCueIndex);
+
+    var storedCues = ParseSavedCueTranscriptCues(video.TranscriptCuesJson);
+
+    if (cueText is null || startTimeMs is null || endTimeMs is null)
+    {
+        var currentCue = storedCues.FirstOrDefault(c =>
+            c.Index == req.CueIndex || req.CueId == $"{video.Id}-{c.Index}");
+        if (currentCue is not null)
+        {
+            cueText ??= NormalizeSavedCueText(currentCue.Text);
+            startTimeMs ??= currentCue.StartMs;
+            endTimeMs ??= currentCue.EndMs;
+        }
+    }
+
+    var parentCue = storedCues.FirstOrDefault(c => c.Index == parentCueIndex);
+    if (parentCue is null && startTimeMs is not null)
+    {
+        parentCue = storedCues.FirstOrDefault(c =>
+            startTimeMs.Value >= c.StartMs && startTimeMs.Value < c.EndMs);
+    }
+    if (parentCue is null)
+    {
+        parentCue = storedCues.FirstOrDefault(c =>
+            c.Index == req.CueIndex || req.CueId == $"{video.Id}-{c.Index}");
+    }
+
+    if (parentCue is not null)
+    {
+        parentCueIndex ??= parentCue.Index;
+        parentCueId ??= $"{video.Id}-{parentCue.Index}";
+    }
+
+    cueMode ??= parentCueIndex == req.CueIndex && parentCueId == req.CueId
+        ? "long"
+        : null;
+
+    return new SavedCueMetadata(
+        cueText,
+        startTimeMs,
+        endTimeMs,
+        cueMode,
+        parentCueId,
+        parentCueIndex);
+}
+
+static IReadOnlyList<VideoTranscriptCue> ParseSavedCueTranscriptCues(string transcriptCuesJson)
+{
+    if (string.IsNullOrWhiteSpace(transcriptCuesJson))
+        return [];
+    try
+    {
+        return JsonSerializer.Deserialize<List<VideoTranscriptCue>>(
+                transcriptCuesJson,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))
+            ?? [];
+    }
+    catch
+    {
+        return [];
+    }
+}
+
+static string? NormalizeSavedCueText(string? value)
+{
+    var normalized = value?.Trim();
+    if (string.IsNullOrEmpty(normalized))
+        return null;
+    return normalized.Length <= 4000 ? normalized : normalized[..4000];
+}
+
+static string? NormalizeSavedCueId(string? value)
+{
+    var normalized = value?.Trim();
+    if (string.IsNullOrEmpty(normalized))
+        return null;
+    return normalized.Length <= 255 ? normalized : normalized[..255];
+}
+
+static string? NormalizeCueMode(string? value)
+{
+    var normalized = value?.Trim().ToLowerInvariant();
+    return normalized is "short" or "long" ? normalized : null;
+}
+
+static int? NormalizeCueTime(int? value)
+{
+    return value is >= 0 ? value : null;
+}
+
+static int? NormalizeCueIndex(int? value)
+{
+    return value is >= 0 ? value : null;
+}
+
+static async Task TryUpdateSavedCueMetadataAsync(
+    AppDbContext db,
+    Guid entryId,
+    SavedCueMetadata metadata,
+    CancellationToken cancellationToken)
+{
+    if (!metadata.HasAnyValue)
+        return;
+    if (!await SavedCueMetadataColumnsExistAsync(db, cancellationToken))
+        return;
+
+    var connection = db.Database.GetDbConnection();
+    var shouldClose = connection.State != ConnectionState.Open;
+    if (shouldClose)
+        await connection.OpenAsync(cancellationToken);
+
+    try
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE user_saved_cues
+            SET
+                "CueText" = COALESCE(@cueText, "CueText"),
+                "StartTimeMs" = COALESCE(@startTimeMs, "StartTimeMs"),
+                "EndTimeMs" = COALESCE(@endTimeMs, "EndTimeMs"),
+                "CueMode" = COALESCE(@cueMode, "CueMode"),
+                "ParentCueId" = COALESCE(@parentCueId, "ParentCueId"),
+                "ParentCueIndex" = COALESCE(@parentCueIndex, "ParentCueIndex")
+            WHERE "Id" = @id
+            """;
+        AddDbParameter(command, "id", entryId);
+        AddDbParameter(command, "cueText", metadata.CueText);
+        AddDbParameter(command, "startTimeMs", metadata.StartTimeMs);
+        AddDbParameter(command, "endTimeMs", metadata.EndTimeMs);
+        AddDbParameter(command, "cueMode", metadata.CueMode);
+        AddDbParameter(command, "parentCueId", metadata.ParentCueId);
+        AddDbParameter(command, "parentCueIndex", metadata.ParentCueIndex);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+    finally
+    {
+        if (shouldClose)
+            await connection.CloseAsync();
+    }
+}
+
+static async Task<bool> SavedCueMetadataColumnsExistAsync(
+    AppDbContext db,
+    CancellationToken cancellationToken)
+{
+    var connection = db.Database.GetDbConnection();
+    var shouldClose = connection.State != ConnectionState.Open;
+    if (shouldClose)
+        await connection.OpenAsync(cancellationToken);
+
+    try
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_name = 'user_saved_cues'
+              AND column_name IN (
+                  'CueText',
+                  'StartTimeMs',
+                  'EndTimeMs',
+                  'CueMode',
+                  'ParentCueId',
+                  'ParentCueIndex'
+              )
+            """;
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result) == 6;
+    }
+    finally
+    {
+        if (shouldClose)
+            await connection.CloseAsync();
+    }
+}
+
+static void AddDbParameter(IDbCommand command, string name, object? value)
+{
+    var parameter = command.CreateParameter();
+    parameter.ParameterName = name;
+    parameter.Value = value ?? DBNull.Value;
+    command.Parameters.Add(parameter);
+}
+
+sealed record SavedCueMetadata(
+    string? CueText,
+    int? StartTimeMs,
+    int? EndTimeMs,
+    string? CueMode,
+    string? ParentCueId,
+    int? ParentCueIndex)
+{
+    public bool HasAnyValue =>
+        CueText is not null ||
+        StartTimeMs is not null ||
+        EndTimeMs is not null ||
+        CueMode is not null ||
+        ParentCueId is not null ||
+        ParentCueIndex is not null;
 }
 

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Data;
 using System.Text.Json;
 using BanteraApi.Auth;
 using BanteraApi.Cloudflare;
@@ -800,16 +801,139 @@ public class VideoService(
             .Join(db.Users, x => x.Video.UserId, u => u.Id, (x, u) => new { x.Cue, x.Video, CreatorName = u.Name })
             .OrderByDescending(x => x.Cue.SavedAt)
             .ToListAsync(cancellationToken);
+        var metadataById = await LoadSavedCueMetadataAsync(
+            entries.Select(x => x.Cue.Id).ToArray(),
+            cancellationToken);
 
         return entries
-            .Select(x => new SavedCueResponse(
-                x.Cue.Id,
-                x.Cue.CueId,
-                x.Cue.CueIndex,
-                x.Cue.SavedAt,
-                BuildResponse(x.Video, httpContext, x.CreatorName)))
+            .Select(x =>
+            {
+                metadataById.TryGetValue(x.Cue.Id, out var metadata);
+                return new SavedCueResponse(
+                    x.Cue.Id,
+                    x.Cue.CueId,
+                    x.Cue.CueIndex,
+                    metadata?.CueText,
+                    metadata?.StartTimeMs,
+                    metadata?.EndTimeMs,
+                    metadata?.CueMode,
+                    metadata?.ParentCueId,
+                    metadata?.ParentCueIndex,
+                    x.Cue.SavedAt,
+                    BuildResponse(x.Video, httpContext, x.CreatorName));
+            })
             .ToList();
     }
+
+    private async Task<Dictionary<Guid, SavedCueSegmentMetadata>> LoadSavedCueMetadataAsync(
+        Guid[] savedCueIds,
+        CancellationToken cancellationToken)
+    {
+        if (savedCueIds.Length == 0)
+            return [];
+        if (!await SavedCueMetadataColumnsExistAsync(cancellationToken))
+            return [];
+
+        var result = new Dictionary<Guid, SavedCueSegmentMetadata>();
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+        if (shouldClose)
+            await connection.OpenAsync(cancellationToken);
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT
+                    "Id",
+                    "CueText",
+                    "StartTimeMs",
+                    "EndTimeMs",
+                    "CueMode",
+                    "ParentCueId",
+                    "ParentCueIndex"
+                FROM user_saved_cues
+                WHERE "Id" = ANY(@ids)
+                """;
+            AddDbParameter(command, "ids", savedCueIds);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = reader.GetGuid(0);
+                result[id] = new SavedCueSegmentMetadata(
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetInt32(2),
+                    reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetString(5),
+                    reader.IsDBNull(6) ? null : reader.GetInt32(6));
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Could not load saved cue segment metadata; returning legacy saved cue fields only.");
+            return [];
+        }
+        finally
+        {
+            if (shouldClose)
+                await connection.CloseAsync();
+        }
+
+        return result;
+    }
+
+    private async Task<bool> SavedCueMetadataColumnsExistAsync(CancellationToken cancellationToken)
+    {
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+        if (shouldClose)
+            await connection.OpenAsync(cancellationToken);
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_name = 'user_saved_cues'
+                  AND column_name IN (
+                      'CueText',
+                      'StartTimeMs',
+                      'EndTimeMs',
+                      'CueMode',
+                      'ParentCueId',
+                      'ParentCueIndex'
+                  )
+                """;
+            var count = await command.ExecuteScalarAsync(cancellationToken);
+            return Convert.ToInt32(count) == 6;
+        }
+        finally
+        {
+            if (shouldClose)
+                await connection.CloseAsync();
+        }
+    }
+
+    private static void AddDbParameter(IDbCommand command, string name, object? value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value ?? DBNull.Value;
+        command.Parameters.Add(parameter);
+    }
+
+    private sealed record SavedCueSegmentMetadata(
+        string? CueText,
+        int? StartTimeMs,
+        int? EndTimeMs,
+        string? CueMode,
+        string? ParentCueId,
+        int? ParentCueIndex);
 
     public async Task<IReadOnlyList<VideoUploadResponse>> ListSavedVideosAsync(
         Guid userId,
