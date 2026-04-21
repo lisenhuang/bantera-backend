@@ -1190,6 +1190,60 @@ app.MapPost("/api/me/audio/generate/v2", async (
                     hasSplit = line.ShortCues.Count > 1,
                 }),
             }, cancellationToken);
+
+            var detailPayload = new
+            {
+                lineSummaries = dialogue.Lines.Select((line, index) => new
+                {
+                    lineIndex = index,
+                    lineText = diagnosticsOptions.IncludeFullText
+                        ? line.Text
+                        : TrimForDiagnostics(line.Text, diagnosticsOptions.MaxPreviewChars),
+                    shortCues = line.ShortCues,
+                    shortCueCount = line.ShortCues.Count,
+                    hasSplit = line.ShortCues.Count > 1,
+                }),
+                shortCueValidationFailures = dialogue.ShortCueValidationFailures.Select(f => new
+                {
+                    f.LineIndex,
+                    f.LineText,
+                    f.Reason,
+                    f.RawShortCues,
+                    f.ExpectedTokens,
+                    f.ActualTokens,
+                    f.FirstMismatchTokenIndex,
+                    f.InvalidBoundaryCueIndex,
+                }),
+                strictLongAlignmentFailure,
+                tolerantLongAlignmentFailure,
+                shortCueAlignmentFailure,
+            };
+
+            try
+            {
+                db.AiAudioShortCueDiagnostics.Add(new AiAudioShortCueDiagnostic
+                {
+                    VideoId = videoResponse.Id,
+                    UserId = userId.Value,
+                    LanguageCode = req.LanguageCode,
+                    ScenarioId = req.ScenarioId,
+                    Reason = shortCueNullReason ?? "Unknown",
+                    LongAlignmentMode = longAlignmentMode,
+                    ShortAlignmentAttempted = shortAlignmentAttempted,
+                    LineCount = dialogue.Lines.Length,
+                    LinesWithSplitCount = dialogue.Lines.Count(line => line.ShortCues.Count > 1),
+                    FlattenedShortCueCount = flattenedShortCueTexts.Count,
+                    LongCueCount = cues.Count,
+                    WordTimingCount = wordTiming?.Count ?? 0,
+                    DetailJson = JsonSerializer.Serialize(detailPayload),
+                });
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // Diagnostic write must never fail the user-facing request.
+                _ = ex;
+            }
         }
         await SendAsync(new { step = "done", video = videoResponse });
         lastStep = "done";
@@ -1612,6 +1666,26 @@ using (var scope = app.Services.CreateScope())
         await db.Database.ExecuteSqlRawAsync("""
             ALTER TABLE user_videos
             ADD COLUMN IF NOT EXISTS "TranscriptShortCuesJson" jsonb;
+            """);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS ai_audio_short_cue_diagnostics (
+                "Id" uuid NOT NULL,
+                "VideoId" uuid NOT NULL,
+                "UserId" uuid NOT NULL,
+                "CreatedAt" timestamp with time zone NOT NULL,
+                "LanguageCode" text NOT NULL,
+                "ScenarioId" text,
+                "Reason" text NOT NULL,
+                "LongAlignmentMode" text,
+                "ShortAlignmentAttempted" boolean NOT NULL,
+                "LineCount" integer NOT NULL,
+                "LinesWithSplitCount" integer NOT NULL,
+                "FlattenedShortCueCount" integer NOT NULL,
+                "LongCueCount" integer NOT NULL,
+                "WordTimingCount" integer NOT NULL,
+                "DetailJson" jsonb,
+                CONSTRAINT "PK_ai_audio_short_cue_diagnostics" PRIMARY KEY ("Id")
+            );
             """);
         await db.Database.MigrateAsync();
 

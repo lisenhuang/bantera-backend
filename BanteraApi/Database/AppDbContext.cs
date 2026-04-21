@@ -9,6 +9,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<UserIdentity> UserIdentities => Set<UserIdentity>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<UserVideo> UserVideos => Set<UserVideo>();
+    public DbSet<AiAudioShortCueDiagnostic> AiAudioShortCueDiagnostics => Set<AiAudioShortCueDiagnostic>();
     public DbSet<UserSavedVideo> UserSavedVideos => Set<UserSavedVideo>();
     public DbSet<UserSavedCue> UserSavedCues => Set<UserSavedCue>();
 
@@ -122,6 +123,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany()
              .HasForeignKey(x => x.VideoId)
              .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<AiAudioShortCueDiagnostic>(e =>
+        {
+            e.ToTable("ai_audio_short_cue_diagnostics");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.LanguageCode).HasMaxLength(16).IsRequired();
+            e.Property(x => x.ScenarioId).HasMaxLength(80);
+            e.Property(x => x.Reason).HasMaxLength(100).IsRequired();
+            e.Property(x => x.LongAlignmentMode).HasMaxLength(50);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.DetailJson).HasColumnType("jsonb");
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => x.Reason);
+            e.HasIndex(x => new { x.LanguageCode, x.Reason });
         });
     }
 }

@@ -22,6 +22,72 @@ namespace BanteraApi.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("BanteraApi.Database.Entities.AiAudioShortCueDiagnostic", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DetailJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("FlattenedShortCueCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LanguageCode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("LineCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LongAlignmentMode")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("LongCueCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LinesWithSplitCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ScenarioId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<bool>("ShortAlignmentAttempted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VideoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("WordTimingCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("Reason");
+
+                    b.HasIndex("LanguageCode", "Reason");
+
+                    b.ToTable("ai_audio_short_cue_diagnostics", (string)null);
+                });
+
             modelBuilder.Entity("BanteraApi.Database.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
