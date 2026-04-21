@@ -266,7 +266,7 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
             ? Settings.LatestNewsTextModel
             : Settings.TextModel;
         var todayUtc = DateTime.UtcNow.Date;
-        var recentStartUtc = todayUtc.AddDays(-7);
+        var recentStartUtc = DateTime.UtcNow.AddDays(-1);
         var minNewsCount = Math.Max(1, durationSeconds / 60);
         var newsFocus = ResolveNewsFocus(language, languageCode);
         string searchInstruction;
