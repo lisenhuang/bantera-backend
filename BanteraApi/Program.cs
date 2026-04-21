@@ -716,7 +716,6 @@ app.MapPost("/api/me/audio/generate", async (
             req.NativeLanguage,
             req.NativeLanguageCode,
             cancellationToken);
-        await SendAsync(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
         var flattenedShortCueTexts = BuildFlattenedShortCueTexts(dialogue.Lines);
 
         var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
@@ -768,14 +767,17 @@ app.MapPost("/api/me/audio/generate/v2", async (
         return;
     }
 
+    using var genCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+    var genToken = genCts.Token;
+
     const int defaultDailyLimit = 5;
     var todayUtc = DateTime.UtcNow.Date;
     var todayCount = await db.UserVideos
-        .CountAsync(v => v.UserId == userId.Value && v.IsAiGenerated && v.CreatedAt >= todayUtc, cancellationToken);
+        .CountAsync(v => v.UserId == userId.Value && v.IsAiGenerated && v.CreatedAt >= todayUtc, genToken);
     var customLimit = await db.Users
         .Where(u => u.Id == userId.Value)
         .Select(u => u.AiAudioDailyLimit)
-        .FirstOrDefaultAsync(cancellationToken);
+        .FirstOrDefaultAsync(genToken);
     var dailyLimit = customLimit ?? defaultDailyLimit;
     if (todayCount >= dailyLimit)
     {
@@ -798,6 +800,17 @@ app.MapPost("/api/me/audio/generate/v2", async (
         await httpContext.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
         await httpContext.Response.Body.FlushAsync(cancellationToken);
     }
+    async Task SendSafe(object payload)
+    {
+        try
+        {
+            await SendAsync(payload);
+        }
+        catch
+        {
+            // Ignore client disconnects. Generation continues in the background.
+        }
+    }
 
     var diagnosticsOptions = aiAudioDiagnosticsOptions.Value;
     var lastStep = "started";
@@ -809,9 +822,20 @@ app.MapPost("/api/me/audio/generate/v2", async (
     var shortAlignmentAttempted = false;
     var objectKey = string.Empty;
     RevAiTranscriptDiagnostics? transcriptDiagnostics = null;
+    UserAudioJob? job = null;
 
     try
     {
+        job = new UserAudioJob
+        {
+            UserId = userId.Value,
+            LanguageCode = req.LanguageCode,
+            ScenarioId = req.ScenarioId,
+        };
+        db.UserAudioJobs.Add(job);
+        await db.SaveChangesAsync(genToken);
+        await SendSafe(new { step = "started", jobId = job.Id });
+
         var dialogue = await geminiService.GenerateDialogueAsync(
             req.Language,
             req.LanguageCode,
@@ -820,8 +844,8 @@ app.MapPost("/api/me/audio/generate/v2", async (
             req.ScenarioId,
             req.NativeLanguage,
             req.NativeLanguageCode,
-            cancellationToken);
-        await SendAsync(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
+            genToken);
+        await SendSafe(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
         lastStep = "dialogue";
         if (dialogue.ShortCueValidationFailures.Count > 0)
         {
@@ -844,7 +868,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                     f.FirstMismatchTokenIndex,
                     f.InvalidBoundaryCueIndex,
                 }),
-            }, cancellationToken);
+            }, genToken);
         }
         var flattenedShortCueTexts = BuildFlattenedShortCueTexts(dialogue.Lines);
         if (flattenedShortCueTexts.Count == 0)
@@ -854,16 +878,16 @@ app.MapPost("/api/me/audio/generate/v2", async (
                 : "NoMultiPartShortCuesFromDialogue";
         }
 
-        var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
+        var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, genToken);
         objectKey = $"videos/{userId.Value}/{Guid.NewGuid():N}.wav";
         await r2StorageService.UploadObjectAsync(
             objectKey,
             new MemoryStream(wavBytes),
             "audio/wav",
-            cancellationToken);
-        await SendAsync(new { step = "audio" });
+            genToken);
+        await SendSafe(new { step = "audio" });
         lastStep = "audio";
-        await SendAsync(new { step = "aligning" });
+        await SendSafe(new { step = "aligning" });
         lastStep = "aligning";
 
         IReadOnlyList<WordTimingRecord>? wordTiming = null;
@@ -899,7 +923,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                     presignedUrl,
                     revAiLanguageCode,
                     transcript,
-                    cancellationToken);
+                    genToken);
                 if (!RevAiCueAlignmentBuilder.TryBuild(
                         dialogue.Lines,
                         wordTiming,
@@ -945,7 +969,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                             transcriptPreview = TrimForDiagnostics(transcriptDiagnostics.TranscriptPreview, diagnosticsOptions.MaxPreviewChars),
                         },
                         wordTiming = BuildWordTimingSummary(wordTiming),
-                    }, cancellationToken);
+                    }, genToken);
                     if (!RevAiCueAlignmentBuilder.TryBuildTolerant(
                             dialogue.Lines,
                             wordTiming,
@@ -991,7 +1015,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                                 transcriptPreview = TrimForDiagnostics(transcriptDiagnostics.TranscriptPreview, diagnosticsOptions.MaxPreviewChars),
                             },
                             wordTiming = BuildWordTimingSummary(wordTiming),
-                        }, cancellationToken);
+                        }, genToken);
                         wordTiming = null;
                         cues = null;
                         shortCueNullReason ??= "LongCueAlignmentFallbackUsed";
@@ -1056,7 +1080,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                                 transcriptPreview = TrimForDiagnostics(transcriptDiagnostics.TranscriptPreview, diagnosticsOptions.MaxPreviewChars),
                             },
                             wordTiming = BuildWordTimingSummary(wordTiming),
-                        }, cancellationToken);
+                        }, genToken);
                     }
                 }
             }
@@ -1089,7 +1113,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                         transcriptDiagnostics.NormalizedTranscriptHash,
                         transcriptPreview = TrimForDiagnostics(transcriptDiagnostics.TranscriptPreview, diagnosticsOptions.MaxPreviewChars),
                     },
-                }, cancellationToken);
+                }, genToken);
                 wordTiming = null;
                 cues = null;
                 shortCues = null;
@@ -1103,7 +1127,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                 "audio/wav",
                 dialogue.Lines,
                 durationMs,
-                cancellationToken);
+                genToken);
             longAlignmentMode = "geminiFallback";
             shortCueNullReason ??= "NoWordTimingForShortCueAlignment";
         }
@@ -1125,7 +1149,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                     "audio/wav",
                     dialogue.Lines,
                     durationMs,
-                    cancellationToken);
+                    genToken);
                 longAlignmentMode = "geminiFallback";
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1158,7 +1182,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             shortCues,
             durationMs,
             httpContext,
-            cancellationToken);
+            genToken);
         if (videoResponse.TranscriptShortCues is null)
         {
             await diagnosticFileWriter.WriteShortCueNullAsync(new
@@ -1189,7 +1213,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                     shortCueCount = line.ShortCues.Count,
                     hasSplit = line.ShortCues.Count > 1,
                 }),
-            }, cancellationToken);
+            }, genToken);
 
             var detailPayload = new
             {
@@ -1237,7 +1261,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                     WordTimingCount = wordTiming?.Count ?? 0,
                     DetailJson = JsonSerializer.Serialize(detailPayload),
                 });
-                await db.SaveChangesAsync(cancellationToken);
+                await db.SaveChangesAsync(genToken);
             }
             catch (Exception ex)
             {
@@ -1245,12 +1269,43 @@ app.MapPost("/api/me/audio/generate/v2", async (
                 _ = ex;
             }
         }
-        await SendAsync(new { step = "done", video = videoResponse });
+        if (job is not null)
+        {
+            job.Status = "done";
+            job.VideoId = videoResponse.Id;
+            job.CompletedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(genToken);
+        }
+        await SendSafe(new { step = "done", video = videoResponse });
         lastStep = "done";
     }
     catch (ContentRejectedException ex)
     {
-        await SendAsync(new { step = "error", message = ex.Message });
+        if (job is not null)
+        {
+            job.Status = "failed";
+            job.ErrorMessage = ex.Message;
+            job.CompletedAt = DateTime.UtcNow;
+            try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
+        }
+        await SendSafe(new { step = "error", message = ex.Message });
+    }
+    catch (OperationCanceledException ex)
+    {
+        app.Logger.LogWarning(
+            ex,
+            "Practice audio generation v2 timed out or was canceled for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
+            userId,
+            req.LanguageCode,
+            req.ScenarioId);
+        if (job is not null)
+        {
+            job.Status = "failed";
+            job.ErrorMessage = "Generation timed out.";
+            job.CompletedAt = DateTime.UtcNow;
+            try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
+        }
+        await SendSafe(new { step = "error", message = generationFailedMessage });
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {
@@ -1277,11 +1332,48 @@ app.MapPost("/api/me/audio/generate/v2", async (
             exceptionType = ex.GetType().FullName,
             exceptionMessage = ex.Message,
             exceptionStack = ex.ToString(),
-        }, cancellationToken);
-        await SendAsync(new { step = "error", message = generationFailedMessage });
+        }, genToken);
+        if (job is not null)
+        {
+            job.Status = "failed";
+            job.ErrorMessage = ex.Message;
+            job.CompletedAt = DateTime.UtcNow;
+            try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
+        }
+        await SendSafe(new { step = "error", message = generationFailedMessage });
     }
 })
 .WithName("GenerateAiAudioV2")
+.RequireAuthorization();
+
+app.MapGet("/api/me/audio/jobs/pending", async (
+    System.Security.Claims.ClaimsPrincipal user,
+    AppDbContext db,
+    CancellationToken ct) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), statusCode: 401);
+
+    var cutoff = DateTime.UtcNow.AddHours(-2);
+    var jobs = await db.UserAudioJobs
+        .Where(j => j.UserId == userId.Value && j.CreatedAt > cutoff)
+        .OrderByDescending(j => j.CreatedAt)
+        .Select(j => new
+        {
+            j.Id,
+            j.Status,
+            j.VideoId,
+            j.CreatedAt,
+            j.CompletedAt,
+            j.ErrorMessage,
+        })
+        .ToListAsync(ct);
+    return Results.Ok(jobs);
+})
+.WithName("GetPendingAudioJobs")
+.Produces(200)
+.Produces<ApiError>(401)
 .RequireAuthorization();
 
 // Corrects phone-transcribed cues using the original dialogue as ground truth.
@@ -1685,6 +1777,20 @@ using (var scope = app.Services.CreateScope())
                 "WordTimingCount" integer NOT NULL,
                 "DetailJson" jsonb,
                 CONSTRAINT "PK_ai_audio_short_cue_diagnostics" PRIMARY KEY ("Id")
+            );
+            """);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS user_audio_jobs (
+                "Id" uuid NOT NULL,
+                "UserId" uuid NOT NULL,
+                "Status" text NOT NULL,
+                "VideoId" uuid NULL,
+                "LanguageCode" text NULL,
+                "ScenarioId" text NULL,
+                "CreatedAt" timestamp with time zone NOT NULL,
+                "CompletedAt" timestamp with time zone NULL,
+                "ErrorMessage" text NULL,
+                CONSTRAINT "PK_user_audio_jobs" PRIMARY KEY ("Id")
             );
             """);
         await db.Database.MigrateAsync();

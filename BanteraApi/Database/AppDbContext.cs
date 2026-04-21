@@ -9,6 +9,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<UserIdentity> UserIdentities => Set<UserIdentity>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<UserVideo> UserVideos => Set<UserVideo>();
+    public DbSet<UserAudioJob> UserAudioJobs => Set<UserAudioJob>();
     public DbSet<AiAudioShortCueDiagnostic> AiAudioShortCueDiagnostics => Set<AiAudioShortCueDiagnostic>();
     public DbSet<UserSavedVideo> UserSavedVideos => Set<UserSavedVideo>();
     public DbSet<UserSavedCue> UserSavedCues => Set<UserSavedCue>();
@@ -86,6 +87,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
             e.HasOne(x => x.User)
              .WithMany(x => x.Videos)
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<UserAudioJob>(e =>
+        {
+            e.ToTable("user_audio_jobs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Status).HasMaxLength(20).IsRequired();
+            e.Property(x => x.LanguageCode).HasMaxLength(16);
+            e.Property(x => x.ScenarioId).HasMaxLength(80);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasIndex(x => new { x.UserId, x.Status, x.CreatedAt });
+            e.HasOne<User>()
+             .WithMany()
              .HasForeignKey(x => x.UserId)
              .OnDelete(DeleteBehavior.Cascade);
         });

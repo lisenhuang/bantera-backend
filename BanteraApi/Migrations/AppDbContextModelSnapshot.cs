@@ -148,6 +148,50 @@ namespace BanteraApi.Migrations
                     b.ToTable("users", (string)null);
                 });
 
+            modelBuilder.Entity("BanteraApi.Database.Entities.UserAudioJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<string>("LanguageCode")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("ScenarioId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("VideoId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.HasIndex("UserId", "Status", "CreatedAt");
+
+                    b.ToTable("user_audio_jobs", (string)null);
+                });
+
             modelBuilder.Entity("BanteraApi.Database.Entities.UserIdentity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -403,6 +447,15 @@ namespace BanteraApi.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.UserAudioJob", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("BanteraApi.Database.Entities.UserSavedCue", b =>
