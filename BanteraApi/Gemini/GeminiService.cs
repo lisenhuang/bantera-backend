@@ -296,6 +296,10 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
             searchInstruction = $"Find {minNewsCount} real recent news {(minNewsCount == 1 ? "story" : "stories")} connected to {newsFocus}.";
         }
 
+        var titleInstruction = useGoogleSearch
+            ? "- Also write a short title (max 10 words) that summarises the main news topic(s) discussed — e.g. \"Solar Storm Hits Power Grids Across Europe\" or \"Japan's Moon Rover Sends Back New Photos\". Do not use a generic conversational title."
+            : "- Also write a short, catchy title for this dialogue (max 8 words).";
+
         var scenarioLine = useGoogleSearch
             ? $$"""
 Search from the internet to follow this instruction: {{searchInstruction}}
@@ -337,7 +341,7 @@ Generate a natural, realistic spoken dialogue between exactly TWO people.
 - Alternate turns naturally; each turn should be 1–3 sentences.
 - Keep sentences short and conversational — the way people actually talk.
 - Do NOT include stage directions or any text outside the dialogue.
-- Also write a short, catchy title for this dialogue (max 8 words).
+{{titleInstruction}}
 - For every line, also return "shortCues": an array of shorter speakable chunks for solo practice.
 - Goal: natural, self-contained practice chunks, not the maximum possible number of chunks.
 - Each short cue must be copied from that line's "text"; do not paraphrase, translate, rewrite, add, remove, or reorder words.
