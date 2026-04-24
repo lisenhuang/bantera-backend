@@ -7,6 +7,123 @@ namespace BanteraApi.Tests;
 public class RevAiCueAlignmentBuilderTests
 {
     [Fact]
+    public void TryBuildBoundary_UsesFirstAndLastWordsWhenMiddleWordsDiffer()
+    {
+        var lines = new[]
+        {
+            new DialogueLine("Speaker1", "I have changed my focus today"),
+        };
+        var wordTiming = new List<WordTimingRecord>
+        {
+            new("I", 0, 100, 0.99),
+            new("have", 101, 220, 0.99),
+            new("adjusted", 221, 420, 0.99),
+            new("focus", 421, 550, 0.99),
+            new("today", 551, 700, 0.99),
+        };
+
+        var success = RevAiCueAlignmentBuilder.TryBuildBoundary(lines, wordTiming, out var cues, out var failure);
+
+        Assert.True(success);
+        Assert.NotNull(cues);
+        Assert.Null(failure);
+        Assert.Single(cues!);
+        Assert.Equal(0, cues[0].StartMs);
+        Assert.Equal(700, cues[0].EndMs);
+    }
+
+    [Fact]
+    public void TryBuildBoundary_FailsWhenBoundaryWordIsMissing()
+    {
+        var lines = new[]
+        {
+            new DialogueLine("Speaker1", "I have changed my focus today"),
+        };
+        var wordTiming = new List<WordTimingRecord>
+        {
+            new("I", 0, 100, 0.99),
+            new("have", 101, 220, 0.99),
+            new("changed", 221, 420, 0.99),
+            new("focus", 421, 550, 0.99),
+        };
+
+        var success = RevAiCueAlignmentBuilder.TryBuildBoundary(lines, wordTiming, out var cues, out var failure);
+
+        Assert.False(success);
+        Assert.Null(cues);
+        Assert.NotNull(failure);
+        Assert.Equal("today", failure!.ExpectedToken);
+    }
+
+    [Fact]
+    public void TryBuildShortCueBoundary_MergesMissingEndIntoNextCue()
+    {
+        var lines = new[]
+        {
+            new DialogueLine("Speaker1", "Hello there, nice to meet you")
+            {
+                ShortCues = ["Hello there", "nice to meet you"],
+            },
+        };
+        var longCues = new[]
+        {
+            new VideoTranscriptCueRecord(0, 0, 900, lines[0].Text),
+        };
+        var wordTiming = new List<WordTimingRecord>
+        {
+            new("Hello", 0, 120, 0.99),
+            new("nice", 300, 420, 0.99),
+            new("to", 421, 500, 0.99),
+            new("meet", 501, 650, 0.99),
+            new("you", 651, 820, 0.99),
+        };
+
+        var success = RevAiCueAlignmentBuilder.TryBuildShortCueBoundary(lines, longCues, wordTiming, out var shortCues, out var failure);
+
+        Assert.True(success);
+        Assert.NotNull(shortCues);
+        Assert.Null(failure);
+        Assert.Single(shortCues!);
+        Assert.Equal("Hello there nice to meet you", shortCues[0].Text);
+        Assert.Equal(0, shortCues[0].StartMs);
+        Assert.Equal(820, shortCues[0].EndMs);
+    }
+
+    [Fact]
+    public void TryBuildShortCueBoundary_MergesMissingStartIntoPreviousCue()
+    {
+        var lines = new[]
+        {
+            new DialogueLine("Speaker1", "Hello there, nice to meet you")
+            {
+                ShortCues = ["Hello there", "nice to meet you"],
+            },
+        };
+        var longCues = new[]
+        {
+            new VideoTranscriptCueRecord(0, 0, 900, lines[0].Text),
+        };
+        var wordTiming = new List<WordTimingRecord>
+        {
+            new("Hello", 0, 120, 0.99),
+            new("there", 121, 260, 0.99),
+            new("to", 421, 500, 0.99),
+            new("meet", 501, 650, 0.99),
+            new("you", 651, 820, 0.99),
+        };
+
+        var success = RevAiCueAlignmentBuilder.TryBuildShortCueBoundary(lines, longCues, wordTiming, out var shortCues, out var failure);
+
+        Assert.True(success);
+        Assert.NotNull(shortCues);
+        Assert.Null(failure);
+        Assert.Single(shortCues!);
+        Assert.Equal("Hello there nice to meet you", shortCues[0].Text);
+        Assert.Equal(0, shortCues[0].StartMs);
+        Assert.Equal(820, shortCues[0].EndMs);
+    }
+
+    [Fact]
     public void TryBuild_AlignsCueBoundsToFirstAndLastMatchedWords()
     {
         var lines = new[]

@@ -819,6 +819,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
     RevAiCueAlignmentBuilder.AlignmentFailure? shortCueAlignmentFailure = null;
     RevAiCueAlignmentBuilder.AlignmentFailure? strictLongAlignmentFailure = null;
     RevAiCueAlignmentBuilder.AlignmentFailure? tolerantLongAlignmentFailure = null;
+    RevAiCueAlignmentBuilder.AlignmentFailure? boundaryLongAlignmentFailure = null;
     var shortAlignmentAttempted = false;
     var objectKey = string.Empty;
     RevAiTranscriptDiagnostics? transcriptDiagnostics = null;
@@ -924,32 +925,29 @@ app.MapPost("/api/me/audio/generate/v2", async (
                     revAiLanguageCode,
                     transcript,
                     genToken);
-                if (!RevAiCueAlignmentBuilder.TryBuild(
+                if (!RevAiCueAlignmentBuilder.TryBuildBoundary(
                         dialogue.Lines,
                         wordTiming,
                         out cues,
-                        out var strictFailure))
+                        out var boundaryFailure))
                 {
-                    strictLongAlignmentFailure = strictFailure;
-                    var strictLinePreview = strictFailure?.LineIndex is int strictIndex
-                        && strictIndex >= 0
-                        && strictIndex < dialogue.Lines.Length
-                            ? dialogue.Lines[strictIndex].Text
+                    boundaryLongAlignmentFailure = boundaryFailure;
+                    var boundaryLinePreview = boundaryFailure?.LineIndex is int boundaryIndex
+                        && boundaryIndex >= 0
+                        && boundaryIndex < dialogue.Lines.Length
+                            ? dialogue.Lines[boundaryIndex].Text
                             : null;
                     app.Logger.LogWarning(
-                        "Rev.ai strict cue alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. lineIndex={LineIndex}, linePreview={LinePreview}, matchedWords={MatchedWords}, expectedWords={ExpectedWords}, matchRatio={MatchRatio}, requiredMatchRatio={RequiredMatchRatio}, requiredMatchedWords={RequiredMatchedWords}, expectedToken={ExpectedToken}, actualWord={ActualWord}",
+                        "Rev.ai boundary cue alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. lineIndex={LineIndex}, linePreview={LinePreview}, matchedWords={MatchedWords}, expectedWords={ExpectedWords}, expectedToken={ExpectedToken}, actualWord={ActualWord}",
                         userId,
                         req.LanguageCode,
                         req.ScenarioId,
-                        strictFailure?.LineIndex,
-                        strictLinePreview,
-                        strictFailure?.MatchedWords,
-                        strictFailure?.ExpectedWords,
-                        strictFailure?.MatchRatio,
-                        strictFailure?.RequiredMatchRatio,
-                        strictFailure?.RequiredMatchedWords,
-                        strictFailure?.ExpectedToken,
-                        strictFailure?.ActualWord);
+                        boundaryFailure?.LineIndex,
+                        boundaryLinePreview,
+                        boundaryFailure?.MatchedWords,
+                        boundaryFailure?.ExpectedWords,
+                        boundaryFailure?.ExpectedToken,
+                        boundaryFailure?.ActualWord);
                     await diagnosticFileWriter.WriteRevAiAlignmentFailureAsync(new
                     {
                         timestampUtc = DateTime.UtcNow,
@@ -957,9 +955,9 @@ app.MapPost("/api/me/audio/generate/v2", async (
                         languageCode = req.LanguageCode,
                         revAiLanguageCode,
                         scenarioId = req.ScenarioId,
-                        alignmentKind = "longStrict",
-                        linePreview = TrimForDiagnostics(strictLinePreview, diagnosticsOptions.MaxPreviewChars),
-                        failure = strictFailure,
+                        alignmentKind = "longBoundary",
+                        linePreview = TrimForDiagnostics(boundaryLinePreview, diagnosticsOptions.MaxPreviewChars),
+                        failure = boundaryFailure,
                         transcript = transcriptDiagnostics is null ? null : new
                         {
                             transcriptDiagnostics.CharCount,
@@ -970,79 +968,22 @@ app.MapPost("/api/me/audio/generate/v2", async (
                         },
                         wordTiming = BuildWordTimingSummary(wordTiming),
                     }, genToken);
-                    if (!RevAiCueAlignmentBuilder.TryBuildTolerant(
-                            dialogue.Lines,
-                            wordTiming,
-                            out cues,
-                            out var tolerantFailure))
-                    {
-                        tolerantLongAlignmentFailure = tolerantFailure;
-                        var tolerantLinePreview = tolerantFailure?.LineIndex is int tolerantIndex
-                            && tolerantIndex >= 0
-                            && tolerantIndex < dialogue.Lines.Length
-                                ? dialogue.Lines[tolerantIndex].Text
-                                : null;
-                        app.Logger.LogWarning(
-                            "Rev.ai tolerant cue alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. lineIndex={LineIndex}, linePreview={LinePreview}, matchedWords={MatchedWords}, expectedWords={ExpectedWords}, matchRatio={MatchRatio}, requiredMatchRatio={RequiredMatchRatio}, requiredMatchedWords={RequiredMatchedWords}, expectedToken={ExpectedToken}, actualWord={ActualWord}",
-                            userId,
-                            req.LanguageCode,
-                            req.ScenarioId,
-                            tolerantFailure?.LineIndex,
-                            tolerantLinePreview,
-                            tolerantFailure?.MatchedWords,
-                            tolerantFailure?.ExpectedWords,
-                            tolerantFailure?.MatchRatio,
-                            tolerantFailure?.RequiredMatchRatio,
-                            tolerantFailure?.RequiredMatchedWords,
-                            tolerantFailure?.ExpectedToken,
-                            tolerantFailure?.ActualWord);
-                        await diagnosticFileWriter.WriteRevAiAlignmentFailureAsync(new
-                        {
-                            timestampUtc = DateTime.UtcNow,
-                            userId = userId.Value,
-                            languageCode = req.LanguageCode,
-                            revAiLanguageCode,
-                            scenarioId = req.ScenarioId,
-                            alignmentKind = "longTolerant",
-                            linePreview = TrimForDiagnostics(tolerantLinePreview, diagnosticsOptions.MaxPreviewChars),
-                            failure = tolerantFailure,
-                            transcript = transcriptDiagnostics is null ? null : new
-                            {
-                                transcriptDiagnostics.CharCount,
-                                transcriptDiagnostics.LineCount,
-                                transcriptDiagnostics.TranscriptHash,
-                                transcriptDiagnostics.NormalizedTranscriptHash,
-                                transcriptPreview = TrimForDiagnostics(transcriptDiagnostics.TranscriptPreview, diagnosticsOptions.MaxPreviewChars),
-                            },
-                            wordTiming = BuildWordTimingSummary(wordTiming),
-                        }, genToken);
-                        wordTiming = null;
-                        cues = null;
-                        shortCueNullReason ??= "LongCueAlignmentFallbackUsed";
-                    }
-                    else
-                    {
-                        longAlignmentMode = "tolerant";
-                        app.Logger.LogInformation(
-                            "Rev.ai tolerant cue alignment succeeded after strict failure for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
-                            userId,
-                            req.LanguageCode,
-                            req.ScenarioId);
-                    }
+                    wordTiming = null;
+                    cues = null;
+                    shortCues = null;
+                    shortCueNullReason ??= "RequiredRevAiBoundaryAlignmentFailed";
                 }
                 else
                 {
-                    longAlignmentMode = "strict";
+                    longAlignmentMode = "revAiBoundary";
                 }
 
                 if (cues is not null && wordTiming is not null && flattenedShortCueTexts.Count > 0)
                 {
                     shortAlignmentAttempted = true;
-                    var shortCueLines = flattenedShortCueTexts
-                        .Select(text => new DialogueLine("Speaker1", text))
-                        .ToArray();
-                    if (!RevAiCueAlignmentBuilder.TryBuild(
-                            shortCueLines,
+                    if (!RevAiCueAlignmentBuilder.TryBuildShortCueBoundary(
+                            dialogue.Lines,
+                            cues,
                             wordTiming,
                             out shortCues,
                             out var shortCueFailure))
@@ -1069,7 +1010,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                             languageCode = req.LanguageCode,
                             revAiLanguageCode,
                             scenarioId = req.ScenarioId,
-                            alignmentKind = "shortStrict",
+                            alignmentKind = "shortBoundary",
                             failure = shortCueFailure,
                             transcript = transcriptDiagnostics is null ? null : new
                             {
@@ -1088,7 +1029,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             {
                 app.Logger.LogWarning(
                     ex,
-                    "Rev.ai alignment failed for supported locale; falling back to Gemini cue timing. user {UserId}, locale {LanguageCode}, revAiLanguageCode {RevAiLanguageCode}, scenarioId {ScenarioId}, audioUrl {AudioUrl}",
+                    "Rev.ai alignment failed for supported locale; failing AI audio generation. user {UserId}, locale {LanguageCode}, revAiLanguageCode {RevAiLanguageCode}, scenarioId {ScenarioId}, audioUrl {AudioUrl}",
                     userId,
                     req.LanguageCode,
                     revAiLanguageCode,
@@ -1117,31 +1058,11 @@ app.MapPost("/api/me/audio/generate/v2", async (
                 wordTiming = null;
                 cues = null;
                 shortCues = null;
-                shortCueNullReason ??= "LongCueAlignmentFallbackUsed";
+                shortCueNullReason ??= "RequiredRevAiAlignmentFailed";
             }
         }
         else
         {
-            cues = await geminiService.GenerateCueTimingAsync(
-                wavBytes,
-                "audio/wav",
-                dialogue.Lines,
-                durationMs,
-                genToken);
-            longAlignmentMode = "geminiFallback";
-            shortCueNullReason ??= "NoWordTimingForShortCueAlignment";
-        }
-
-        if (cues is null)
-        {
-            app.Logger.LogWarning(
-                "Falling back to Gemini cue timing for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
-                userId,
-                req.LanguageCode,
-                req.ScenarioId);
-            wordTiming = null;
-            shortCues = null;
-            shortCueNullReason ??= "LongCueAlignmentFallbackUsed";
             try
             {
                 cues = await geminiService.GenerateCueTimingAsync(
@@ -1156,13 +1077,19 @@ app.MapPost("/api/me/audio/generate/v2", async (
             {
                 app.Logger.LogWarning(
                     ex,
-                    "Gemini cue timing fallback failed; using estimated timing. user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
+                    "Gemini cue timing failed for non-Rev.ai locale; using estimated timing. user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
                     userId,
                     req.LanguageCode,
                     req.ScenarioId);
                 cues = geminiService.EstimateCues(dialogue.Lines, durationMs);
                 longAlignmentMode = "estimatedFallback";
             }
+            shortCueNullReason ??= "NoWordTimingForShortCueAlignment";
+        }
+
+        if (cues is null)
+        {
+            throw new InvalidOperationException("Required cue alignment did not produce valid timing.");
         }
 
         if (flattenedShortCueTexts.Count > 0 && shortCues is null && wordTiming is null)
@@ -1198,6 +1125,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                 shortAlignmentAttempted,
                 strictLongAlignmentFailure,
                 tolerantLongAlignmentFailure,
+                boundaryLongAlignmentFailure,
                 shortCueAlignmentFailure,
                 lineCount = dialogue.Lines.Length,
                 linesWithSplitCount = dialogue.Lines.Count(line => line.ShortCues.Count > 1),
@@ -1240,6 +1168,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
                 }),
                 strictLongAlignmentFailure,
                 tolerantLongAlignmentFailure,
+                boundaryLongAlignmentFailure,
                 shortCueAlignmentFailure,
             };
 
