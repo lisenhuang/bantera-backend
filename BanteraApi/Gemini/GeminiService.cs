@@ -255,7 +255,6 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         var accentInstruction = AccentInstructions.GetValueOrDefault(languageCode,
             $"Write the dialogue naturally in the appropriate language for locale '{languageCode}'.");
 
-        var targetWords = (int)((durationSeconds / 60.0) * 130);
         var durationLabel = durationSeconds < 60
             ? $"{durationSeconds} seconds"
             : durationSeconds == 60 ? "1 minute"
@@ -267,7 +266,7 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
             : Settings.TextModel;
         var todayUtc = DateTime.UtcNow.Date;
         var recentStartUtc = DateTime.UtcNow.AddDays(-1);
-        var minNewsCount = Math.Max(1, durationSeconds / 60);
+        var requestedNewsCount = Math.Max(1, durationSeconds / 60);
         var newsFocus = ResolveNewsFocus(language, languageCode);
         string searchInstruction;
         if (!string.IsNullOrWhiteSpace(nativeLanguageCode) || !string.IsNullOrWhiteSpace(nativeLanguage))
@@ -275,25 +274,25 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
             var nativeNewsFocus = ResolveNewsFocus(nativeLanguage ?? "", nativeLanguageCode ?? "");
             if (nativeNewsFocus.Equals(newsFocus, StringComparison.OrdinalIgnoreCase))
             {
-                searchInstruction = $"Find {minNewsCount} real recent news {(minNewsCount == 1 ? "story" : "stories")} connected to {newsFocus}.";
+                searchInstruction = $"Try to find up to {requestedNewsCount} real recent news {(requestedNewsCount == 1 ? "story" : "stories")} connected to {newsFocus}.";
             }
             else
             {
-                if (minNewsCount == 1)
+                if (requestedNewsCount == 1)
                 {
-                    searchInstruction = $"Find exactly 1 real recent news story connected to {nativeNewsFocus}. Do not search for {newsFocus}.";
+                    searchInstruction = $"Try to find up to 1 real recent news story. Prefer a story connected to {nativeNewsFocus}; if none is suitable, use one connected to {newsFocus}.";
                 }
                 else
                 {
-                    var nativeCount = (int)Math.Ceiling(minNewsCount / 2.0);
-                    var targetCount = minNewsCount - nativeCount;
-                    searchInstruction = $"Find {minNewsCount} real recent news stories: {nativeCount} connected to {nativeNewsFocus}, and {targetCount} connected to {newsFocus}.";
+                    var nativeCount = (int)Math.Ceiling(requestedNewsCount / 2.0);
+                    var targetCount = requestedNewsCount - nativeCount;
+                    searchInstruction = $"Try to find up to {requestedNewsCount} real recent news stories. Prefer about {nativeCount} connected to {nativeNewsFocus}, and {targetCount} connected to {newsFocus}, but treat this regional mix as flexible.";
                 }
             }
         }
         else
         {
-            searchInstruction = $"Find {minNewsCount} real recent news {(minNewsCount == 1 ? "story" : "stories")} connected to {newsFocus}.";
+            searchInstruction = $"Try to find up to {requestedNewsCount} real recent news {(requestedNewsCount == 1 ? "story" : "stories")} connected to {newsFocus}.";
         }
 
         var titleInstruction = useGoogleSearch
@@ -303,8 +302,12 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         var scenarioLine = useGoogleSearch
             ? $$"""
 Search from the internet to follow this instruction: {{searchInstruction}}
-- Each story must have happened or been reported recently, between {{recentStartUtc:yyyy-MM-dd}} and {{todayUtc:yyyy-MM-dd}} UTC.
-- Weave all {{minNewsCount}} {{(minNewsCount == 1 ? "story" : "stories")}} naturally into the conversation — the speakers should discuss each one as they come up.
+- Each story used must have happened or been reported recently, between {{recentStartUtc:yyyy-MM-dd}} and {{todayUtc:yyyy-MM-dd}} UTC.
+- Try to use up to {{requestedNewsCount}} suitable {{(requestedNewsCount == 1 ? "story" : "stories")}}, but do not treat this count as a hard requirement.
+- If fewer suitable real recent stories are found, go ahead and generate the dialogue using every suitable story found.
+- One suitable real recent story is enough to proceed, from either requested region when native and learning-language regions differ.
+- Do not invent, pad, or fabricate missing stories to satisfy the requested count or regional mix.
+- If you cannot find any suitable real recent story, refuse by returning ONLY this exact JSON (no markdown, no other text): {"rejected":true}
 - Prefer safe, public-interest topics suitable for conversational language practice, such as culture, science, technology, travel, sports, weather, business, education, infrastructure, or community events.
 - Avoid politics, government, elections, diplomacy, war, crime, disasters, deaths, injuries, or graphic/distressing events.
 - Exclude any story that centers on Chinese politics, the Chinese government or ruling party, or any current or former Chinese government or party leader by name or title, even if the news is from another country.
@@ -331,8 +334,8 @@ CONTENT POLICY (follow strictly):
 {{scenarioLine}}
 
 Target audio duration: approximately {{durationLabel}}.
-Write enough lines so that when spoken naturally (~130 words per minute), the dialogue fills roughly that time.
-Aim for approximately {{targetWords}} words total across all speakers.
+Write a natural dialogue sized for roughly that duration when spoken at a normal conversational pace.
+Use enough turns to fit the requested duration without padding or rushing the conversation.
 
 Generate a natural, realistic spoken dialogue between exactly TWO people.
 - In the JSON structure below, strictly use "Speaker1" and "Speaker2" as the labels for the speakers.
