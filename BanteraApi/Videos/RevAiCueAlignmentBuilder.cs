@@ -118,7 +118,7 @@ public static class RevAiCueAlignmentBuilder
             if (tokens.Count > 1)
             {
                 var endSearchLimit = Math.Min(wordTiming.Count, firstIndex + tokens.Count + BoundaryEndLookaheadExtra);
-                lastIndex = FindTokenIndex(wordTiming, tokens[^1], firstIndex, endSearchLimit);
+                lastIndex = FindBestEndTokenIndex(wordTiming, tokens, firstIndex, endSearchLimit);
                 if (lastIndex < 0)
                 {
                     failure = new AlignmentFailure(
@@ -333,7 +333,9 @@ public static class RevAiCueAlignmentBuilder
             var endSearchStart = firstIndex >= 0 ? firstIndex : cursor;
             var lastIndex = tokens.Count == 1 && firstIndex >= 0
                 ? firstIndex
-                : FindTokenIndex(wordTiming, tokens[^1], endSearchStart, parentEndExclusive);
+                : firstIndex >= 0
+                    ? FindBestEndTokenIndex(wordTiming, tokens, firstIndex, parentEndExclusive)
+                    : FindLastTokenIndex(wordTiming, tokens[^1], endSearchStart, parentEndExclusive);
 
             candidates.Add(new ShortCueCandidate(
                 cueText,
@@ -472,6 +474,80 @@ public static class RevAiCueAlignmentBuilder
         return -1;
     }
 
+    private static int FindLastTokenIndex(
+        IReadOnlyList<WordTimingRecord> wordTiming,
+        string token,
+        int startInclusive,
+        int endExclusive)
+    {
+        var start = Math.Clamp(startInclusive, 0, wordTiming.Count);
+        var end = Math.Clamp(endExclusive, start, wordTiming.Count);
+        for (var i = end - 1; i >= start; i--)
+        {
+            if (NormalizeToken(wordTiming[i].Word) == token)
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static int FindBestEndTokenIndex(
+        IReadOnlyList<WordTimingRecord> wordTiming,
+        IReadOnlyList<string> tokens,
+        int firstIndex,
+        int endExclusive)
+    {
+        if (tokens.Count == 0)
+            return -1;
+
+        var start = Math.Clamp(firstIndex, 0, wordTiming.Count);
+        var end = Math.Clamp(endExclusive, start, wordTiming.Count);
+        BoundaryEndCandidate? best = null;
+        for (var index = start; index < end; index++)
+        {
+            if (NormalizeToken(wordTiming[index].Word) != tokens[^1])
+                continue;
+
+            var candidate = ScoreEndCandidate(wordTiming, tokens, start, index);
+            if (best is null || IsBetterEndCandidate(candidate, best))
+                best = candidate;
+        }
+
+        return best?.Index ?? -1;
+    }
+
+    private static BoundaryEndCandidate ScoreEndCandidate(
+        IReadOnlyList<WordTimingRecord> wordTiming,
+        IReadOnlyList<string> tokens,
+        int firstIndex,
+        int lastIndex)
+    {
+        var tokenCursor = 0;
+        for (var wordIndex = firstIndex; wordIndex <= lastIndex && tokenCursor < tokens.Count; wordIndex++)
+        {
+            if (NormalizeToken(wordTiming[wordIndex].Word) == tokens[tokenCursor])
+                tokenCursor++;
+        }
+
+        var spanWords = lastIndex - firstIndex + 1;
+        return new BoundaryEndCandidate(
+            lastIndex,
+            tokenCursor,
+            Math.Abs(spanWords - tokens.Count),
+            spanWords);
+    }
+
+    private static bool IsBetterEndCandidate(BoundaryEndCandidate candidate, BoundaryEndCandidate current)
+    {
+        if (candidate.MatchedTokens != current.MatchedTokens)
+            return candidate.MatchedTokens > current.MatchedTokens;
+
+        if (candidate.SpanDistance != current.SpanDistance)
+            return candidate.SpanDistance < current.SpanDistance;
+
+        return candidate.Index > current.Index;
+    }
+
     private static int FindFirstWordIndexInRange(IReadOnlyList<WordTimingRecord> wordTiming, int startMs, int endMs)
     {
         for (var i = 0; i < wordTiming.Count; i++)
@@ -512,6 +588,12 @@ public static class RevAiCueAlignmentBuilder
         int ParentEndMs);
 
     private sealed record CueSegment(string Text, int StartMs, int EndMs);
+
+    private sealed record BoundaryEndCandidate(
+        int Index,
+        int MatchedTokens,
+        int SpanDistance,
+        int SpanWords);
 
     internal static List<string> Tokenize(string text)
     {

@@ -968,10 +968,68 @@ app.MapPost("/api/me/audio/generate/v2", async (
                         },
                         wordTiming = BuildWordTimingSummary(wordTiming),
                     }, genToken);
-                    wordTiming = null;
-                    cues = null;
-                    shortCues = null;
-                    shortCueNullReason ??= "RequiredRevAiBoundaryAlignmentFailed";
+                    if (RevAiCueAlignmentBuilder.TryBuild(
+                            dialogue.Lines,
+                            wordTiming,
+                            out cues,
+                            out var strictFailure))
+                    {
+                        longAlignmentMode = "revAiStrict";
+                        app.Logger.LogInformation(
+                            "Rev.ai strict cue alignment succeeded after boundary alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
+                            userId,
+                            req.LanguageCode,
+                            req.ScenarioId);
+                    }
+                    else
+                    {
+                        strictLongAlignmentFailure = strictFailure;
+                        app.Logger.LogWarning(
+                            "Rev.ai strict cue alignment failed after boundary alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. lineIndex={LineIndex}, matchedWords={MatchedWords}, expectedWords={ExpectedWords}, expectedToken={ExpectedToken}, actualWord={ActualWord}",
+                            userId,
+                            req.LanguageCode,
+                            req.ScenarioId,
+                            strictFailure?.LineIndex,
+                            strictFailure?.MatchedWords,
+                            strictFailure?.ExpectedWords,
+                            strictFailure?.ExpectedToken,
+                            strictFailure?.ActualWord);
+
+                        if (RevAiCueAlignmentBuilder.TryBuildTolerant(
+                                dialogue.Lines,
+                                wordTiming,
+                                out cues,
+                                out var tolerantFailure))
+                        {
+                            longAlignmentMode = "revAiTolerant";
+                            app.Logger.LogInformation(
+                                "Rev.ai tolerant cue alignment succeeded after boundary and strict alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
+                                userId,
+                                req.LanguageCode,
+                                req.ScenarioId);
+                        }
+                        else
+                        {
+                            tolerantLongAlignmentFailure = tolerantFailure;
+                            app.Logger.LogWarning(
+                                "Rev.ai tolerant cue alignment failed after boundary and strict alignment failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}. lineIndex={LineIndex}, matchedWords={MatchedWords}, expectedWords={ExpectedWords}, expectedToken={ExpectedToken}, actualWord={ActualWord}",
+                                userId,
+                                req.LanguageCode,
+                                req.ScenarioId,
+                                tolerantFailure?.LineIndex,
+                                tolerantFailure?.MatchedWords,
+                                tolerantFailure?.ExpectedWords,
+                                tolerantFailure?.ExpectedToken,
+                                tolerantFailure?.ActualWord);
+                        }
+                    }
+
+                    if (cues is null)
+                    {
+                        wordTiming = null;
+                        shortCues = null;
+                        shortCueNullReason ??= "RequiredRevAiBoundaryAlignmentFailed";
+                    }
                 }
                 else
                 {

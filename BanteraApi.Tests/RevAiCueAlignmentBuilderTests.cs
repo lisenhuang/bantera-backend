@@ -33,6 +33,75 @@ public class RevAiCueAlignmentBuilderTests
     }
 
     [Fact]
+    public void TryBuildBoundary_UsesLastMatchingEndWordWhenFinalWordRepeats()
+    {
+        var lines = new[]
+        {
+            new DialogueLine("Speaker1", "It makes me think we should be backing the clever stuff as well as the shiny stuff."),
+        };
+        var wordTiming = BuildRepeatedStuffWordTiming();
+
+        var success = RevAiCueAlignmentBuilder.TryBuildBoundary(lines, wordTiming, out var cues, out var failure);
+
+        Assert.True(success);
+        Assert.NotNull(cues);
+        Assert.Null(failure);
+        Assert.Single(cues!);
+        Assert.Equal(76350, cues[0].StartMs);
+        Assert.Equal(80160, cues[0].EndMs);
+    }
+
+    [Fact]
+    public void TryBuildBoundary_DoesNotOverreachWhenFinalWordRepeatsInNextLine()
+    {
+        var lines = new[]
+        {
+            new DialogueLine("Speaker1", "Yeah, a little bit, Sarah. What's got you thinking about it?"),
+            new DialogueLine("Speaker2", "Well, I saw something about Geely unveiling their new robotaxi in Beijing. It sounds pretty futuristic!"),
+        };
+        var wordTiming = new List<WordTimingRecord>
+        {
+            new("Yeah", 2820, 3180, 0.99),
+            new("a", 3180, 3240, 0.99),
+            new("little", 3240, 3450, 0.99),
+            new("bit", 3450, 3630, 0.99),
+            new("Sarah", 3630, 3990, 0.99),
+            new("What's", 4140, 4350, 0.99),
+            new("got", 4350, 4530, 0.99),
+            new("you", 4530, 4650, 0.99),
+            new("thinking", 4650, 4950, 0.99),
+            new("about", 4950, 5160, 0.99),
+            new("it", 5160, 5400, 0.99),
+            new("Well", 5700, 5940, 0.99),
+            new("I", 5940, 6030, 0.99),
+            new("saw", 6030, 6210, 0.99),
+            new("something", 6210, 6570, 0.99),
+            new("about", 6570, 6750, 0.99),
+            new("Geely", 6750, 7110, 0.99),
+            new("unveiling", 7110, 7530, 0.99),
+            new("their", 7530, 7680, 0.99),
+            new("new", 7680, 7890, 0.99),
+            new("robotaxi", 7890, 8370, 0.99),
+            new("in", 8370, 8490, 0.99),
+            new("Beijing", 8490, 8910, 0.99),
+            new("It", 8910, 9060, 0.99),
+            new("sounds", 9060, 9300, 0.99),
+            new("pretty", 9300, 9540, 0.99),
+            new("futuristic", 9540, 9990, 0.99),
+        };
+
+        var success = RevAiCueAlignmentBuilder.TryBuildBoundary(lines, wordTiming, out var cues, out var failure);
+
+        Assert.True(success);
+        Assert.NotNull(cues);
+        Assert.Null(failure);
+        Assert.Equal(2, cues!.Count);
+        Assert.Equal(5400, cues[0].EndMs);
+        Assert.Equal(5700, cues[1].StartMs);
+        Assert.Equal(9990, cues[1].EndMs);
+    }
+
+    [Fact]
     public void TryBuildBoundary_FailsWhenBoundaryWordIsMissing()
     {
         var lines = new[]
@@ -87,6 +156,33 @@ public class RevAiCueAlignmentBuilderTests
         Assert.Equal("Hello there nice to meet you", shortCues[0].Text);
         Assert.Equal(0, shortCues[0].StartMs);
         Assert.Equal(820, shortCues[0].EndMs);
+    }
+
+    [Fact]
+    public void TryBuildShortCueBoundary_UsesLastMatchingEndWordWhenFinalWordRepeats()
+    {
+        var lineText = "It makes me think we should be backing the clever stuff as well as the shiny stuff.";
+        var lines = new[]
+        {
+            new DialogueLine("Speaker1", lineText)
+            {
+                ShortCues = [lineText],
+            },
+        };
+        var longCues = new[]
+        {
+            new VideoTranscriptCueRecord(0, 76350, 80160, lineText),
+        };
+        var wordTiming = BuildRepeatedStuffWordTiming();
+
+        var success = RevAiCueAlignmentBuilder.TryBuildShortCueBoundary(lines, longCues, wordTiming, out var shortCues, out var failure);
+
+        Assert.True(success);
+        Assert.NotNull(shortCues);
+        Assert.Null(failure);
+        Assert.Single(shortCues!);
+        Assert.Equal(76350, shortCues[0].StartMs);
+        Assert.Equal(80160, shortCues[0].EndMs);
     }
 
     [Fact]
@@ -362,4 +458,25 @@ public class RevAiCueAlignmentBuilderTests
         Assert.Null(failure);
         Assert.Equal(17730, cues![1].StartMs);
     }
+
+    private static List<WordTimingRecord> BuildRepeatedStuffWordTiming() =>
+    [
+        new("It", 76350, 76530, 0.99),
+        new("makes", 76530, 76770, 0.99),
+        new("me", 76770, 76920, 0.99),
+        new("think", 76920, 77160, 0.99),
+        new("we", 77160, 77280, 0.99),
+        new("should", 77280, 77490, 0.99),
+        new("be", 77490, 77610, 0.99),
+        new("backing", 77610, 78000, 0.99),
+        new("the", 78000, 78090, 0.99),
+        new("clever", 78090, 78420, 0.99),
+        new("stuff", 78420, 78750, 0.99),
+        new("as", 78750, 78900, 0.99),
+        new("well", 78900, 79140, 0.99),
+        new("as", 79140, 79260, 0.99),
+        new("the", 79260, 79350, 0.99),
+        new("shiny", 79350, 79710, 0.99),
+        new("stuff", 79710, 80160, 0.99),
+    ];
 }
