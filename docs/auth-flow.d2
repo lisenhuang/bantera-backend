@@ -1,0 +1,63 @@
+title: Bantera App — Authentication Flow {
+  near: top-center
+  shape: text
+  style.font-size: 20
+}
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+shape: sequence_diagram
+
+App: Flutter App
+Backend: .NET Backend (BanteraApi)
+Apple: Apple Identity Server
+Store: Local Storage\n(auth_session.json)
+
+# ─── Email / Password Login ───────────────────────────────────────────────────
+App -> Backend: "POST /api/auth/login\n{ email, password }"
+Backend -> Backend: "BCrypt.Verify(password, hash)"
+Backend -> App: "200 OK\n{ accessToken (Bantera JWT), refreshToken (opaque), expiresIn, tokenType }"
+App -> Store: "Persist session to disk"
+App -> App: "Schedule silent refresh\n(5 min before expiry)"
+
+# ─── Sign in with Apple ───────────────────────────────────────────────────────
+App -> Apple: "Request Apple ID credential\n(email + fullName scopes)"
+Apple -> App: "identityToken (Apple OIDC JWT)"
+App -> Backend: "POST /api/auth/apple\n{ identityToken, userIdentifier, email, givenName, familyName }"
+Backend -> Apple: "GET /auth/keys  (fetch public JWKS)"
+Apple -> Backend: "Public signing keys (JWKS)"
+Backend -> Backend: "Verify Apple JWT signature locally\n(issuer, audience, lifetime, sub)"
+Backend -> App: "200 OK\n{ accessToken (Bantera JWT), refreshToken (opaque), expiresIn, tokenType }"
+App -> Store: "Persist session to disk"
+App -> App: "Schedule silent refresh\n(5 min before expiry)"
+
+# ─── Authenticated API Request ─────────────────────────────────────────────────
+App -> Backend: "GET /api/me/profile\nAuthorization: Bearer <accessToken>"
+Backend -> App: "200 OK  { UserProfile }"
+
+# ─── Access Token Expired ─────────────────────────────────────────────────────
+App -> Backend: "GET /api/me/videos\nAuthorization: Bearer <expiredToken>"
+Backend -> App: "401 Unauthorized  { code: token_expired }"
+App -> Backend: "POST /api/auth/refresh\n{ refreshToken (opaque) }"
+Backend -> Backend: "Lookup by SHA-256(token), verify hash\nRevoke old session (token rotation)"
+Backend -> App: "200 OK\n{ new accessToken (JWT), new refreshToken (opaque), expiresIn }"
+App -> Store: "Persist updated session"
+App -> Backend: "GET /api/me/videos  (retry)\nAuthorization: Bearer <newAccessToken>"
+Backend -> App: "200 OK  [videos]"
+
+# ─── Proactive Silent Refresh (timer fires) ────────────────────────────────────
+App -> Backend: "POST /api/auth/refresh\n{ refreshToken (opaque) }"
+Backend -> Backend: "Lookup by SHA-256(token), verify hash\nRevoke old session (token rotation)"
+Backend -> App: "200 OK\n{ new accessToken (JWT), new refreshToken (opaque), expiresIn }"
+App -> Store: "Persist updated session"
+App -> App: "Reschedule next refresh"
+
+# ─── Refresh Token Expired → Sign Out ─────────────────────────────────────────
+App -> Backend: "POST /api/auth/refresh\n{ expiredRefreshToken }"
+Backend -> App: "401 Unauthorized\n(session not found / expired / revoked)"
+App -> Store: "Delete auth_session.json"
+App -> App: "Sign out → navigate to login screen"
