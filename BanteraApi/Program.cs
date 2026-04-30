@@ -1,3 +1,4 @@
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading.RateLimiting;
@@ -6,6 +7,7 @@ using BanteraApi;
 using BanteraApi.Account;
 using BanteraApi.Admin;
 using BanteraApi.Auth;
+using BanteraApi.Chat;
 using BanteraApi.Cloudflare;
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
@@ -43,6 +45,14 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddScoped<VideoService>();
 builder.Services.AddScoped<AccountDeletionService>();
+builder.Services.Configure<ApnsSettings>(builder.Configuration.GetSection(ApnsSettings.Section));
+builder.Services.AddSingleton<ChatRealtimeService>();
+builder.Services.AddScoped<ChatService>();
+builder.Services.AddHttpClient<ChatPushNotificationService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
+builder.Services.AddHostedService<ChatCleanupService>();
 
 builder.Services.Configure<CloudflareSettings>(builder.Configuration.GetSection("Cloudflare"));
 builder.Services.AddHttpClient("cloudflare", c =>
@@ -231,6 +241,7 @@ app.UseForwardedHeaders();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseWebSockets();
 
 // ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -577,6 +588,425 @@ app.MapGet("/api/users/{userId:guid}/avatar", async (
 .Produces(200)
 .Produces(404)
 .AllowAnonymous();
+
+app.MapGet("/api/chat/bootstrap", async (
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var response = await chatService.GetBootstrapAsync(userId.Value, httpContext, cancellationToken);
+    return response is null ? Results.NotFound() : Results.Ok(response);
+})
+.WithName("GetChatBootstrap")
+.Produces<ChatBootstrapResponse>(200)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapGet("/api/chat/threads/{threadId:guid}/messages", async (
+    Guid threadId,
+    [FromQuery] int limit,
+    [FromQuery] int offset,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var messages = await chatService.ListMessagesAsync(
+        userId.Value,
+        threadId,
+        httpContext,
+        limit,
+        offset,
+        cancellationToken);
+
+    return messages is null ? Results.NotFound() : Results.Ok(messages);
+})
+.WithName("ListChatMessages")
+.Produces<IReadOnlyList<ChatMessageResponse>>(200)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapPost("/api/chat/threads/dm/{otherUserId:guid}/messages/audio", async (
+    Guid otherUserId,
+    [FromForm] SendChatAudioRequest request,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var (message, errorCode) = await chatService.SendDirectMessageAudioAsync(
+        userId.Value,
+        otherUserId,
+        request,
+        httpContext,
+        cancellationToken);
+
+    return message is null ? ChatErrorResult(errorCode) : Results.Ok(message);
+})
+.DisableAntiforgery()
+.Accepts<SendChatAudioRequest>("multipart/form-data")
+.WithName("SendDirectChatAudio")
+.Produces<ChatMessageResponse>(200)
+.Produces<ApiError>(400)
+.Produces<ApiError>(401)
+.Produces<ApiError>(403)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapPost("/api/chat/threads/group/{groupKind}/messages/audio", async (
+    string groupKind,
+    [FromForm] SendChatAudioRequest request,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var (message, errorCode) = await chatService.SendGroupAudioAsync(
+        userId.Value,
+        groupKind,
+        request,
+        httpContext,
+        cancellationToken);
+
+    return message is null ? ChatErrorResult(errorCode) : Results.Ok(message);
+})
+.DisableAntiforgery()
+.Accepts<SendChatAudioRequest>("multipart/form-data")
+.WithName("SendGroupChatAudio")
+.Produces<ChatMessageResponse>(200)
+.Produces<ApiError>(400)
+.Produces<ApiError>(401)
+.Produces<ApiError>(403)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapGet("/api/chat/messages/{messageId:guid}/audio", async (
+    Guid messageId,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var audio = await chatService.GetMessageAudioAsync(userId.Value, messageId, cancellationToken);
+    return audio is null
+        ? Results.NotFound()
+        : Results.Stream(audio.Stream, audio.ContentType, enableRangeProcessing: true);
+})
+.WithName("GetChatMessageAudio")
+.Produces(200)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapPost("/api/chat/messages/{messageId:guid}/received", async (
+    Guid messageId,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var acknowledged = await chatService.AcknowledgeReceivedAsync(userId.Value, messageId, cancellationToken);
+    return acknowledged ? Results.NoContent() : Results.NotFound();
+})
+.WithName("AcknowledgeChatMessage")
+.Produces(StatusCodes.Status204NoContent)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapPost("/api/chat/threads/{threadId:guid}/read", async (
+    Guid threadId,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var updated = await chatService.MarkThreadReadAsync(userId.Value, threadId, cancellationToken);
+    return updated ? Results.NoContent() : Results.NotFound();
+})
+.WithName("MarkChatThreadRead")
+.Produces(StatusCodes.Status204NoContent)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapPut("/api/chat/notifications/global", async (
+    UpdateChatNotificationsRequest request,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var updated = await chatService.UpdateGlobalNotificationsAsync(userId.Value, request.Enabled, cancellationToken);
+    return updated ? Results.NoContent() : Results.NotFound();
+})
+.WithName("UpdateGlobalChatNotifications")
+.Produces(StatusCodes.Status204NoContent)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapPut("/api/chat/threads/{threadId:guid}/notifications", async (
+    Guid threadId,
+    UpdateChatNotificationsRequest request,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var updated = await chatService.UpdateThreadNotificationsAsync(userId.Value, threadId, request.Enabled, cancellationToken);
+    return updated ? Results.NoContent() : Results.NotFound();
+})
+.WithName("UpdateChatThreadNotifications")
+.Produces(StatusCodes.Status204NoContent)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapPut("/api/chat/push/apns-token", async (
+    RegisterPushTokenRequest request,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var updated = await chatService.RegisterPushTokenAsync(userId.Value, request.Token, request.IsSandbox, cancellationToken);
+    return updated
+        ? Results.NoContent()
+        : Results.Json(new ApiError(ChatErrorCodes.ChatInvalidAudio, "Provide a valid APNs device token."), statusCode: 400);
+})
+.WithName("RegisterApnsToken")
+.Produces(StatusCodes.Status204NoContent)
+.Produces<ApiError>(400)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
+app.MapPost("/api/chat/blocks/{otherUserId:guid}", async (
+    Guid otherUserId,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var updated = await chatService.BlockUserAsync(userId.Value, otherUserId, cancellationToken);
+    return updated ? Results.NoContent() : Results.NotFound();
+})
+.WithName("BlockChatUser")
+.Produces(StatusCodes.Status204NoContent)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapDelete("/api/chat/blocks/{otherUserId:guid}", async (
+    Guid otherUserId,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var updated = await chatService.UnblockUserAsync(userId.Value, otherUserId, cancellationToken);
+    return updated ? Results.NoContent() : Results.NotFound();
+})
+.WithName("UnblockChatUser")
+.Produces(StatusCodes.Status204NoContent)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapDelete("/api/chat/threads/dm/{threadId:guid}", async (
+    Guid threadId,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var updated = await chatService.DeleteDirectMessageForSelfAsync(userId.Value, threadId, cancellationToken);
+    return updated ? Results.NoContent() : Results.NotFound();
+})
+.WithName("DeleteDirectMessageForSelf")
+.Produces(StatusCodes.Status204NoContent)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
+app.MapGet("/api/chat/blocks", async (
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var blockedUsers = await chatService.ListBlockedUsersAsync(userId.Value, httpContext, cancellationToken);
+    return Results.Ok(blockedUsers);
+})
+.WithName("ListBlockedChatUsers")
+.Produces<IReadOnlyList<ChatUserResponse>>(200)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
+app.Map("/ws/chat", async (
+    HttpContext httpContext,
+    ChatRealtimeService realtimeService,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    if (!httpContext.WebSockets.IsWebSocketRequest)
+    {
+        httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await httpContext.Response.WriteAsJsonAsync(
+            new ApiError(ChatErrorCodes.ChatForbidden, "This endpoint requires a WebSocket upgrade."),
+            cancellationToken);
+        return;
+    }
+
+    var userId = TryGetUserId(httpContext.User);
+    if (userId is null)
+    {
+        httpContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await httpContext.Response.WriteAsJsonAsync(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            cancellationToken);
+        return;
+    }
+
+    using var socket = await httpContext.WebSockets.AcceptWebSocketAsync();
+    var connectionId = realtimeService.Register(userId.Value, socket);
+
+    await realtimeService.SendToUserAsync(
+        userId.Value,
+        new { type = "ready", payload = new { userId = userId.Value } },
+        cancellationToken);
+    await realtimeService.SendToUserAsync(
+        userId.Value,
+        new
+        {
+            type = "presence.snapshot",
+            payload = new
+            {
+                onlineUserIds = realtimeService.SnapshotOnlineUserIds()
+                    .Select(id => id.ToString())
+                    .ToArray(),
+            }
+        },
+        cancellationToken);
+    await realtimeService.SendToUsersAsync(
+        realtimeService.SnapshotOnlineUserIds(),
+        new
+        {
+            type = "presence.changed",
+            payload = new { userId = userId.Value, isOnline = true }
+        },
+        cancellationToken);
+
+    try
+    {
+        while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
+        {
+            var raw = await ChatRealtimeService.ReceiveTextAsync(socket, cancellationToken);
+            if (string.IsNullOrWhiteSpace(raw))
+                break;
+
+            using var document = JsonDocument.Parse(raw);
+            var root = document.RootElement;
+            var type = root.TryGetProperty("type", out var typeProperty)
+                ? typeProperty.GetString()
+                : null;
+            var hasPayload = root.TryGetProperty("payload", out var payloadProperty)
+                && payloadProperty.ValueKind == JsonValueKind.Object;
+
+            if (string.Equals(type, "ping", StringComparison.OrdinalIgnoreCase))
+            {
+                await realtimeService.SendToUserAsync(
+                    userId.Value,
+                    new { type = "ready", payload = new { userId = userId.Value } },
+                    cancellationToken);
+                continue;
+            }
+
+            if (!string.Equals(type, "dm.recording.started", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(type, "dm.recording.stopped", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!hasPayload
+                || !payloadProperty.TryGetProperty("threadId", out var threadIdProperty)
+                || !Guid.TryParse(threadIdProperty.GetString(), out var threadId))
+            {
+                continue;
+            }
+
+            await chatService.ForwardRecordingStatusAsync(
+                userId.Value,
+                threadId,
+                string.Equals(type, "dm.recording.started", StringComparison.OrdinalIgnoreCase),
+                cancellationToken);
+        }
+    }
+    finally
+    {
+        realtimeService.Unregister(userId.Value, connectionId);
+        await CloseWebSocketQuietlyAsync(socket);
+        await realtimeService.SendToUsersAsync(
+            realtimeService.SnapshotOnlineUserIds(),
+            new
+            {
+                type = "presence.changed",
+                payload = new { userId = userId.Value, isOnline = false }
+            },
+            CancellationToken.None);
+    }
+})
+.RequireAuthorization();
 
 app.MapPost("/api/me/videos", async (
     [FromForm] UploadVideoRequest req,
@@ -1826,6 +2256,50 @@ startupLogger.LogInformation("[Startup] All checks passed — starting server.")
 AdminEndpoints.Map(app);
 
 app.Run();
+
+static IResult UnauthorizedResult()
+{
+    return Results.Json(
+        new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+        statusCode: StatusCodes.Status401Unauthorized);
+}
+
+static IResult ChatErrorResult(string? errorCode)
+{
+    var code = errorCode ?? ChatErrorCodes.ChatInvalidAudio;
+    var statusCode = code switch
+    {
+        ChatErrorCodes.ChatBlocked or ChatErrorCodes.ChatForbidden => StatusCodes.Status403Forbidden,
+        ChatErrorCodes.ChatNotFound => StatusCodes.Status404NotFound,
+        _ => StatusCodes.Status400BadRequest,
+    };
+
+    var message = code switch
+    {
+        ChatErrorCodes.ChatBlocked => "Chat is blocked for this user.",
+        ChatErrorCodes.ChatForbidden => "This chat action is not allowed.",
+        ChatErrorCodes.ChatNotFound => "The chat thread or user could not be found.",
+        ChatErrorCodes.ChatInvalidLanguage => "Choose a valid learning or native language before sending chat audio.",
+        _ => "Provide one supported audio file under 20 MB and shorter than 60 seconds.",
+    };
+
+    return Results.Json(new ApiError(code, message), statusCode: statusCode);
+}
+
+static async Task CloseWebSocketQuietlyAsync(WebSocket socket)
+{
+    if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+    {
+        try
+        {
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
+        }
+        catch
+        {
+            // Ignore close races during shutdown/disconnect.
+        }
+    }
+}
 
 static Guid? TryGetUserId(System.Security.Claims.ClaimsPrincipal user)
 {
