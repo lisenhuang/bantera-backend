@@ -1,10 +1,14 @@
 using System;
+using BanteraApi.Database;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace BanteraApi.Migrations
 {
+    [DbContext(typeof(AppDbContext))]
+    [Migration("20260430120000_AddChatFeature")]
     public partial class AddChatFeature : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
