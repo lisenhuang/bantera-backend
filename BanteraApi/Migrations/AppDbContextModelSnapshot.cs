@@ -88,6 +88,203 @@ namespace BanteraApi.Migrations
                     b.ToTable("ai_audio_short_cue_diagnostics", (string)null);
                 });
 
+            modelBuilder.Entity("BanteraApi.Database.Entities.ChatBlock", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("BlockedUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BlockerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlockedUserId");
+
+                    b.HasIndex("BlockerUserId", "BlockedUserId")
+                        .IsUnique();
+
+                    b.ToTable("chat_blocks", (string)null);
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.ChatMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("AudioContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("AudioObjectKey")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DurationMs")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid>("SenderUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SpokenLanguageCode")
+                        .IsRequired()
+                        .HasMaxLength(35)
+                        .HasColumnType("character varying(35)");
+
+                    b.Property<Guid>("ThreadId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("SenderUserId");
+
+                    b.HasIndex("ThreadId", "CreatedAt");
+
+                    b.ToTable("chat_messages", (string)null);
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.ChatMessageReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("MessageId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("chat_message_receipts", (string)null);
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.ChatThread", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DirectMessageKey")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime?>("LastMessageAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LanguageDisplayName")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("LanguageKey")
+                        .HasMaxLength(35)
+                        .HasColumnType("character varying(35)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Type", "DirectMessageKey")
+                        .IsUnique()
+                        .HasFilter("\"DirectMessageKey\" IS NOT NULL");
+
+                    b.HasIndex("Type", "LanguageKey")
+                        .IsUnique()
+                        .HasFilter("\"LanguageKey\" IS NOT NULL");
+
+                    b.ToTable("chat_threads", (string)null);
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.ChatThreadMembership", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsMuted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LastReadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LastReadMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ThreadId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("UnreadCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("ThreadId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("chat_thread_memberships", (string)null);
+                });
+
             modelBuilder.Entity("BanteraApi.Database.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -104,6 +301,11 @@ namespace BanteraApi.Migrations
 
                     b.Property<DateTime?>("AvatarUpdatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("ChatNotificationsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -342,6 +544,46 @@ namespace BanteraApi.Migrations
                     b.ToTable("user_sessions", (string)null);
                 });
 
+            modelBuilder.Entity("BanteraApi.Database.Entities.UserPushToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsSandbox")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Token")
+                        .IsUnique();
+
+                    b.ToTable("user_push_tokens", (string)null);
+                });
+
             modelBuilder.Entity("BanteraApi.Database.Entities.UserVideo", b =>
                 {
                     b.Property<Guid>("Id")
@@ -438,6 +680,82 @@ namespace BanteraApi.Migrations
                     b.ToTable("user_videos", (string)null);
                 });
 
+            modelBuilder.Entity("BanteraApi.Database.Entities.ChatBlock", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.User", "BlockedUser")
+                        .WithMany("BlockedByUsers")
+                        .HasForeignKey("BlockedUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BanteraApi.Database.Entities.User", "BlockerUser")
+                        .WithMany("BlockedUsers")
+                        .HasForeignKey("BlockerUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("BlockedUser");
+
+                    b.Navigation("BlockerUser");
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.ChatMessage", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.User", "SenderUser")
+                        .WithMany("SentChatMessages")
+                        .HasForeignKey("SenderUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BanteraApi.Database.Entities.ChatThread", "Thread")
+                        .WithMany("Messages")
+                        .HasForeignKey("ThreadId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("SenderUser");
+
+                    b.Navigation("Thread");
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.ChatMessageReceipt", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.ChatMessage", "Message")
+                        .WithMany("Receipts")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BanteraApi.Database.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.ChatThreadMembership", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.ChatThread", "Thread")
+                        .WithMany("Memberships")
+                        .HasForeignKey("ThreadId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BanteraApi.Database.Entities.User", "User")
+                        .WithMany("ChatMemberships")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Thread");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("BanteraApi.Database.Entities.UserIdentity", b =>
                 {
                     b.HasOne("BanteraApi.Database.Entities.User", "User")
@@ -507,6 +825,17 @@ namespace BanteraApi.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("BanteraApi.Database.Entities.UserPushToken", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.User", "User")
+                        .WithMany("PushTokens")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("BanteraApi.Database.Entities.UserVideo", b =>
                 {
                     b.HasOne("BanteraApi.Database.Entities.User", "User")
@@ -520,11 +849,33 @@ namespace BanteraApi.Migrations
 
             modelBuilder.Entity("BanteraApi.Database.Entities.User", b =>
                 {
+                    b.Navigation("BlockedByUsers");
+
+                    b.Navigation("BlockedUsers");
+
+                    b.Navigation("ChatMemberships");
+
                     b.Navigation("Identities");
+
+                    b.Navigation("PushTokens");
+
+                    b.Navigation("SentChatMessages");
 
                     b.Navigation("Sessions");
 
                     b.Navigation("Videos");
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.ChatMessage", b =>
+                {
+                    b.Navigation("Receipts");
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.ChatThread", b =>
+                {
+                    b.Navigation("Memberships");
+
+                    b.Navigation("Messages");
                 });
 #pragma warning restore 612, 618
         }

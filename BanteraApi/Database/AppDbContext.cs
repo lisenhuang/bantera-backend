@@ -13,6 +13,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AiAudioShortCueDiagnostic> AiAudioShortCueDiagnostics => Set<AiAudioShortCueDiagnostic>();
     public DbSet<UserSavedVideo> UserSavedVideos => Set<UserSavedVideo>();
     public DbSet<UserSavedCue> UserSavedCues => Set<UserSavedCue>();
+    public DbSet<ChatThread> ChatThreads => Set<ChatThread>();
+    public DbSet<ChatThreadMembership> ChatThreadMemberships => Set<ChatThreadMembership>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatMessageReceipt> ChatMessageReceipts => Set<ChatMessageReceipt>();
+    public DbSet<ChatBlock> ChatBlocks => Set<ChatBlock>();
+    public DbSet<UserPushToken> UserPushTokens => Set<UserPushToken>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -25,6 +31,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.TranslationLanguage).HasMaxLength(35);
             e.Property(x => x.NativeLanguage).HasMaxLength(35);
             e.Property(x => x.LearningLanguage).HasMaxLength(35);
+            e.Property(x => x.ChatNotificationsEnabled).HasDefaultValue(true).IsRequired();
             e.Property(x => x.AvatarObjectKey).HasMaxLength(255);
             e.Property(x => x.Role).HasMaxLength(20).IsRequired();
             e.Property(x => x.Status).HasMaxLength(50).IsRequired();
@@ -157,6 +164,117 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.CreatedAt);
             e.HasIndex(x => x.Reason);
             e.HasIndex(x => new { x.LanguageCode, x.Reason });
+        });
+
+        b.Entity<ChatThread>(e =>
+        {
+            e.ToTable("chat_threads");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Type).HasMaxLength(20).IsRequired();
+            e.Property(x => x.DirectMessageKey).HasMaxLength(80);
+            e.Property(x => x.LanguageKey).HasMaxLength(35);
+            e.Property(x => x.LanguageDisplayName).HasMaxLength(80);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.HasIndex(x => new { x.Type, x.DirectMessageKey })
+                .IsUnique()
+                .HasFilter("\"DirectMessageKey\" IS NOT NULL");
+            e.HasIndex(x => new { x.Type, x.LanguageKey })
+                .IsUnique()
+                .HasFilter("\"LanguageKey\" IS NOT NULL");
+        });
+
+        b.Entity<ChatThreadMembership>(e =>
+        {
+            e.ToTable("chat_thread_memberships");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.UnreadCount).HasDefaultValue(0).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.HasIndex(x => new { x.ThreadId, x.UserId }).IsUnique();
+            e.HasOne(x => x.Thread)
+             .WithMany(x => x.Memberships)
+             .HasForeignKey(x => x.ThreadId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.User)
+             .WithMany(x => x.ChatMemberships)
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<ChatMessage>(e =>
+        {
+            e.ToTable("chat_messages");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.AudioObjectKey).HasMaxLength(255).IsRequired();
+            e.Property(x => x.AudioContentType).HasMaxLength(100).IsRequired();
+            e.Property(x => x.OriginalFileName).HasMaxLength(255).IsRequired();
+            e.Property(x => x.SpokenLanguageCode).HasMaxLength(35).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.HasIndex(x => new { x.ThreadId, x.CreatedAt });
+            e.HasIndex(x => x.ExpiresAt);
+            e.HasOne(x => x.Thread)
+             .WithMany(x => x.Messages)
+             .HasForeignKey(x => x.ThreadId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.SenderUser)
+             .WithMany(x => x.SentChatMessages)
+             .HasForeignKey(x => x.SenderUserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<ChatMessageReceipt>(e =>
+        {
+            e.ToTable("chat_message_receipts");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.ReceivedAt).IsRequired();
+            e.HasIndex(x => new { x.MessageId, x.UserId }).IsUnique();
+            e.HasOne(x => x.Message)
+             .WithMany(x => x.Receipts)
+             .HasForeignKey(x => x.MessageId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<ChatBlock>(e =>
+        {
+            e.ToTable("chat_blocks");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.HasIndex(x => new { x.BlockerUserId, x.BlockedUserId }).IsUnique();
+            e.HasOne(x => x.BlockerUser)
+             .WithMany(x => x.BlockedUsers)
+             .HasForeignKey(x => x.BlockerUserId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.BlockedUser)
+             .WithMany(x => x.BlockedByUsers)
+             .HasForeignKey(x => x.BlockedUserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<UserPushToken>(e =>
+        {
+            e.ToTable("user_push_tokens");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Platform).HasMaxLength(20).IsRequired();
+            e.Property(x => x.Token).HasMaxLength(255).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
+            e.Property(x => x.LastSeenAt).IsRequired();
+            e.HasIndex(x => new { x.UserId, x.Token }).IsUnique();
+            e.HasOne(x => x.User)
+             .WithMany(x => x.PushTokens)
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

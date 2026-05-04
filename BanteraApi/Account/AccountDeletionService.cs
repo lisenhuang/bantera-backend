@@ -34,6 +34,11 @@ public class AccountDeletionService(
             .Where(video => !ShouldPreserveAiAudio(video))
             .SelectMany(GetStorageKeysToDelete)
             .ToList();
+        var chatAudioKeysToDelete = await db.ChatMessages
+            .Where(m => m.SenderUserId == userId)
+            .Select(m => m.AudioObjectKey)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .ToListAsync(cancellationToken);
         var avatarKeyToDelete = user.AvatarObjectKey;
 
         if (videosToPreserve.Count > 0)
@@ -68,6 +73,9 @@ public class AccountDeletionService(
         }
 
         foreach (var key in objectKeysToDelete)
+            await SafeDeleteObjectAsync(key, cancellationToken);
+
+        foreach (var key in chatAudioKeysToDelete)
             await SafeDeleteObjectAsync(key, cancellationToken);
 
         if (!string.IsNullOrEmpty(avatarKeyToDelete))

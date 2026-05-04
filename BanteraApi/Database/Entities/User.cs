@@ -7,6 +7,7 @@ public class User
     public string? TranslationLanguage { get; set; }
     public string? NativeLanguage { get; set; }
     public string? LearningLanguage { get; set; }
+    public bool ChatNotificationsEnabled { get; set; } = true;
     public int? AiAudioDailyLimit { get; set; }
     public string? AvatarObjectKey { get; set; }
     public DateTime? AvatarUpdatedAt { get; set; }
@@ -20,4 +21,9 @@ public class User
     public ICollection<UserIdentity> Identities { get; set; } = [];
     public ICollection<UserSession> Sessions { get; set; } = [];
     public ICollection<UserVideo> Videos { get; set; } = [];
+    public ICollection<ChatThreadMembership> ChatMemberships { get; set; } = [];
+    public ICollection<ChatMessage> SentChatMessages { get; set; } = [];
+    public ICollection<ChatBlock> BlockedUsers { get; set; } = [];
+    public ICollection<ChatBlock> BlockedByUsers { get; set; } = [];
+    public ICollection<UserPushToken> PushTokens { get; set; } = [];
 }
