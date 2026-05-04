@@ -875,6 +875,31 @@ app.MapDelete("/api/chat/threads/dm/{threadId:guid}", async (
 .Produces(404)
 .RequireAuthorization();
 
+app.MapDelete("/api/chat/messages/{messageId:guid}", async (
+    Guid messageId,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var (ok, errorCode) = await chatService.DeleteOwnMessageAsync(userId.Value, messageId, cancellationToken);
+    return errorCode switch
+    {
+        ChatErrorCodes.ChatNotFound => Results.NotFound(),
+        ChatErrorCodes.ChatForbidden => Results.Forbid(),
+        _ => Results.NoContent(),
+    };
+})
+.WithName("DeleteOwnChatMessage")
+.Produces(StatusCodes.Status204NoContent)
+.Produces<ApiError>(401)
+.Produces(403)
+.Produces(404)
+.RequireAuthorization();
+
 app.MapGet("/api/chat/blocks", async (
     HttpContext httpContext,
     System.Security.Claims.ClaimsPrincipal user,

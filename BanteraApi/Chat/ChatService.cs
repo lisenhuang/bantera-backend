@@ -600,6 +600,43 @@ public class ChatService(
         return true;
     }
 
+    public async Task<(bool Ok, string? ErrorCode)> DeleteOwnMessageAsync(
+        Guid userId,
+        Guid messageId,
+        CancellationToken cancellationToken = default)
+    {
+        var message = await db.ChatMessages
+            .Include(m => m.Thread)
+            .FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
+        if (message is null)
+            return (false, ChatErrorCodes.ChatNotFound);
+        if (message.SenderUserId != userId)
+            return (false, ChatErrorCodes.ChatForbidden);
+
+        var memberIds = await db.ChatThreadMemberships
+            .Where(m => m.ThreadId == message.ThreadId && m.DeletedAt == null)
+            .Select(m => m.UserId)
+            .ToListAsync(cancellationToken);
+
+        db.ChatMessages.Remove(message);
+        await db.SaveChangesAsync(cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(message.AudioObjectKey))
+        {
+            try
+            {
+                await r2StorageService.DeleteObjectAsync(message.AudioObjectKey, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to delete chat audio {Key} for message {MessageId}.", message.AudioObjectKey, messageId);
+            }
+        }
+
+        await NotifyUsersAboutThreadUpdateAsync(memberIds, message.ThreadId, cancellationToken);
+        return (true, null);
+    }
+
     public async Task<bool> ForwardRecordingStatusAsync(
         Guid userId,
         Guid threadId,
