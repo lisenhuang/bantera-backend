@@ -16,6 +16,12 @@ public static class ChatLanguageResolver
             .Concat(TranslationLanguageCatalog.Items)
             .GroupBy(item => Normalize(item.Identifier) ?? item.Identifier, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase));
+    private static readonly Lazy<HashSet<string>> LearningCatalogMatchKeys =
+        new(() => LearningLanguageCatalog.Items
+            .Select(item => Normalize(item.Identifier))
+            .Where(normalized => normalized is not null)
+            .Select(normalized => MatchKeyFor(normalized!))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase));
 
     public static ChatLanguageDescriptor? Resolve(string? languageCode)
     {
@@ -59,6 +65,15 @@ public static class ChatLanguageResolver
             return false;
 
         return matchKeys.Contains(descriptor.MatchKey, StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static bool IsLearningCatalogLanguageFamily(string? languageCode)
+    {
+        var normalized = Normalize(languageCode);
+        if (normalized is null)
+            return false;
+
+        return LearningCatalogMatchKeys.Value.Contains(MatchKeyFor(normalized));
     }
 
     private static string MatchKeyFor(string normalized)

@@ -792,7 +792,8 @@ public class ChatService(
         return groupKind switch
         {
             ChatGroupKinds.Learning => ChatLanguageResolver.Resolve(user.LearningLanguage),
-            ChatGroupKinds.Native => ChatLanguageResolver.Resolve(user.NativeLanguage),
+            ChatGroupKinds.Native when ChatLanguageResolver.IsLearningCatalogLanguageFamily(user.NativeLanguage) =>
+                ChatLanguageResolver.Resolve(user.NativeLanguage),
             _ => null,
         };
     }
@@ -860,7 +861,8 @@ public class ChatService(
     private static bool MatchesGroupKey(User user, string groupKey)
     {
         return ChatLanguageResolver.MatchesAny(user.LearningLanguage, [groupKey])
-            || ChatLanguageResolver.MatchesAny(user.NativeLanguage, [groupKey]);
+            || ChatLanguageResolver.IsLearningCatalogLanguageFamily(user.NativeLanguage)
+                && ChatLanguageResolver.MatchesAny(user.NativeLanguage, [groupKey]);
     }
 
     private async Task<ChatThreadSummaryResponse> BuildGroupThreadSummaryAsync(
