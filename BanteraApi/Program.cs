@@ -2183,6 +2183,14 @@ app.MapGet("/api/videos/{videoId:guid}/cover", async (
 // ── Startup checks ────────────────────────────────────────────────────────────
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
 var failures = new List<string>();
+var apnsSettings = app.Services.GetRequiredService<IOptions<ApnsSettings>>().Value;
+startupLogger.LogInformation(
+    "[Startup] APNs configured. EnvironmentMode={EnvironmentMode} AutoSandboxWhenTokenIsSandboxTrue={SandboxEndpoint} AutoProductionWhenTokenIsSandboxFalse={ProductionEndpoint} BundleId={BundleId} HasConfiguration={HasConfiguration}",
+    apnsSettings.EnvironmentMode,
+    ApnsSettings.SandboxEndpoint,
+    ApnsSettings.ProductionEndpoint,
+    apnsSettings.BundleId,
+    apnsSettings.HasConfiguration);
 
 // 1. Postgres
 using (var scope = app.Services.CreateScope())

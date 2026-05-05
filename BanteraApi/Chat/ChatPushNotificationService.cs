@@ -42,9 +42,10 @@ public class ChatPushNotificationService(
         var providerToken = CreateProviderToken();
         foreach (var pushToken in activeTokens)
         {
+            var effectiveSandbox = _settings.EffectiveSandbox(pushToken.IsSandbox);
             using var request = new HttpRequestMessage(
                 HttpMethod.Post,
-                BuildEndpoint(pushToken.Token, pushToken.IsSandbox));
+                BuildEndpoint(pushToken.Token, effectiveSandbox));
             request.Version = new Version(2, 0);
             request.VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher;
             request.Headers.Authorization = new AuthenticationHeaderValue("bearer", providerToken);
@@ -66,34 +67,63 @@ public class ChatPushNotificationService(
             {
                 using var response = await httpClient.SendAsync(request, cancellationToken);
                 if (response.IsSuccessStatusCode)
+                {
+                    logger.LogInformation(
+                        "[ChatPush] APNs send succeeded. Status={Status} EnvironmentMode={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType}",
+                        (int)response.StatusCode,
+                        _settings.EnvironmentMode,
+                        pushToken.IsSandbox,
+                        effectiveSandbox,
+                        BuildHost(effectiveSandbox),
+                        TokenSuffix(pushToken.Token),
+                        data.TryGetValue("threadId", out var successThreadId) ? successThreadId : null,
+                        data.TryGetValue("threadType", out var successThreadType) ? successThreadType : null);
                     continue;
+                }
 
                 var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 logger.LogWarning(
-                    "[ChatPush] APNs send failed. Status={Status} Sandbox={Sandbox} Body={Body}",
+                    "[ChatPush] APNs send failed. Status={Status} EnvironmentMode={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType} Body={Body}",
                     (int)response.StatusCode,
+                    _settings.EnvironmentMode,
                     pushToken.IsSandbox,
+                    effectiveSandbox,
+                    BuildHost(effectiveSandbox),
+                    TokenSuffix(pushToken.Token),
+                    data.TryGetValue("threadId", out var failedThreadId) ? failedThreadId : null,
+                    data.TryGetValue("threadType", out var failedThreadType) ? failedThreadType : null,
                     responseBody);
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "[ChatPush] APNs send threw for sandbox={Sandbox}.", pushToken.IsSandbox);
+                logger.LogWarning(
+                    ex,
+                    "[ChatPush] APNs send threw. EnvironmentMode={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType}",
+                    _settings.EnvironmentMode,
+                    pushToken.IsSandbox,
+                    effectiveSandbox,
+                    BuildHost(effectiveSandbox),
+                    TokenSuffix(pushToken.Token),
+                    data.TryGetValue("threadId", out var thrownThreadId) ? thrownThreadId : null,
+                    data.TryGetValue("threadType", out var thrownThreadType) ? thrownThreadType : null);
             }
         }
     }
 
-    private bool HasConfiguration()
-    {
-        return !string.IsNullOrWhiteSpace(_settings.KeyId)
-            && !string.IsNullOrWhiteSpace(_settings.TeamId)
-            && !string.IsNullOrWhiteSpace(_settings.BundleId)
-            && !string.IsNullOrWhiteSpace(_settings.PrivateKeyPem);
-    }
+    private bool HasConfiguration() => _settings.HasConfiguration;
 
     private static Uri BuildEndpoint(string token, bool isSandbox)
     {
-        var host = isSandbox ? "https://api.sandbox.push.apple.com" : "https://api.push.apple.com";
-        return new Uri($"{host}/3/device/{token}");
+        return new Uri($"{BuildHost(isSandbox)}/3/device/{token}");
+    }
+
+    private static string BuildHost(bool isSandbox) =>
+        isSandbox ? ApnsSettings.SandboxEndpoint : ApnsSettings.ProductionEndpoint;
+
+    private static string TokenSuffix(string token)
+    {
+        var normalized = token.Trim();
+        return normalized.Length <= 8 ? normalized : normalized[^8..];
     }
 
     private string CreateProviderToken()

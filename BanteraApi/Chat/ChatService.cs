@@ -491,6 +491,7 @@ public class ChatService(
             .ToListAsync(cancellationToken);
         var existing = existingForToken.FirstOrDefault(t => t.UserId == userId);
         var now = DateTime.UtcNow;
+        var wasExisting = existing is not null;
 
         db.UserPushTokens.RemoveRange(existingForToken.Where(t => t.UserId != userId));
         if (existing is null)
@@ -514,7 +515,19 @@ public class ChatService(
         }
 
         await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation(
+            "[ChatPush] APNs token {Action}. UserId={UserId} IsSandbox={IsSandbox} TokenSuffix={TokenSuffix}",
+            wasExisting ? "updated" : "registered",
+            userId,
+            isSandbox,
+            TokenSuffix(normalized));
         return true;
+    }
+
+    private static string TokenSuffix(string token)
+    {
+        var normalized = token.Trim();
+        return normalized.Length <= 8 ? normalized : normalized[^8..];
     }
 
     public async Task<bool> BlockUserAsync(

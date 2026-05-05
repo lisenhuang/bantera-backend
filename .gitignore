@@ -4,6 +4,7 @@ obj/
 *.user
 *.suo
 .vs/
+BanteraApi/appsettings.json
 BanteraApi/appsettings.Development.json
 BanteraApi/diagnostics/*.json
 
