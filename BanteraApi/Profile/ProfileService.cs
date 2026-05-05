@@ -1,17 +1,21 @@
 using System.Net;
 using BanteraApi.Auth;
+using BanteraApi.Cloudflare;
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
 using BanteraApi.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
 
 namespace BanteraApi.Profile;
 
 public class ProfileService(
     AppDbContext db,
     R2StorageService r2StorageService,
+    CloudflareImageService cloudflareImageService,
     LinkGenerator linkGenerator,
     ILogger<ProfileService> logger,
     IMemoryCache memoryCache)
@@ -162,6 +166,60 @@ public class ProfileService(
         return (BuildResponse(user, httpContext), null);
     }
 
+    public async Task<AvatarGenerationReadiness> GetAvatarGenerationReadinessAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await LoadUserAsync(userId, cancellationToken);
+        if (user is null)
+            return AvatarGenerationReadiness.NotFound;
+
+        if (!string.IsNullOrWhiteSpace(user.AvatarObjectKey))
+            return AvatarGenerationReadiness.AlreadyExists;
+
+        return HasRequiredAvatarPromptFields(user)
+            ? AvatarGenerationReadiness.Ready
+            : AvatarGenerationReadiness.MissingRequiredProfile;
+    }
+
+    public async Task<bool> GenerateMissingAvatarAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await LoadUserAsync(userId, cancellationToken);
+        if (user is null)
+            return false;
+
+        if (!string.IsNullOrWhiteSpace(user.AvatarObjectKey))
+            return false;
+
+        if (!HasRequiredAvatarPromptFields(user))
+            return false;
+
+        var name = ResolveName(user).Trim();
+        var nativeLanguage = user.NativeLanguage!.Trim();
+        var learningLanguage = user.LearningLanguage!.Trim();
+        var prompt = BuildGeneratedAvatarPrompt(name, nativeLanguage, learningLanguage);
+
+        var pngBytes = await cloudflareImageService.GenerateImageAsync(prompt, cancellationToken);
+        using var image = Image.Load(pngBytes);
+        await using var jpegStream = new MemoryStream();
+        await image.SaveAsJpegAsync(jpegStream, new JpegEncoder { Quality = 85 }, cancellationToken);
+        jpegStream.Position = 0;
+
+        await db.Entry(user).ReloadAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(user.AvatarObjectKey))
+            return false;
+
+        await StoreAvatarAsync(
+            user,
+            jpegStream,
+            "image/jpeg",
+            cancellationToken);
+
+        return true;
+    }
+
     public async Task<StoredObjectResult?> GetAvatarAsync(
         Guid userId,
         CancellationToken cancellationToken = default)
@@ -186,6 +244,37 @@ public class ProfileService(
     }
 
     private static string AvatarObjectKeyCacheKey(Guid userId) => $"avatar:object-key:{userId:N}";
+
+    private async Task StoreAvatarAsync(
+        User user,
+        Stream content,
+        string contentType,
+        CancellationToken cancellationToken)
+    {
+        var oldKey = user.AvatarObjectKey;
+        var newKey = BuildAvatarObjectKey(user.Id, contentType);
+
+        await r2StorageService.UploadObjectAsync(newKey, content, contentType, cancellationToken);
+
+        user.AvatarObjectKey = newKey;
+        user.AvatarUpdatedAt = DateTime.UtcNow;
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+
+        memoryCache.Remove(AvatarObjectKeyCacheKey(user.Id));
+
+        if (!string.IsNullOrWhiteSpace(oldKey) && !string.Equals(oldKey, newKey, StringComparison.Ordinal))
+        {
+            try
+            {
+                await r2StorageService.DeleteObjectAsync(oldKey, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to delete old avatar object {Key}", oldKey);
+            }
+        }
+    }
 
     private async Task<User?> LoadUserAsync(Guid userId, CancellationToken cancellationToken)
     {
@@ -223,6 +312,26 @@ public class ProfileService(
         }
 
         return "Bantera user";
+    }
+
+    private static bool HasRequiredAvatarPromptFields(User user)
+    {
+        return !string.IsNullOrWhiteSpace(user.Name)
+            && !string.IsNullOrWhiteSpace(user.NativeLanguage)
+            && !string.IsNullOrWhiteSpace(user.LearningLanguage);
+    }
+
+    private static string BuildGeneratedAvatarPrompt(
+        string name,
+        string nativeLanguage,
+        string learningLanguage)
+    {
+        return
+            $"Create a polished square profile avatar for Bantera. The person is named \"{name}\", " +
+            $"a native {nativeLanguage} speaker learning {learningLanguage}. Friendly modern digital illustration, " +
+            "head-and-shoulders avatar, warm approachable expression, subtle language-learning symbols such as speech bubbles or a small book, " +
+            "tasteful hints of both languages without flags or stereotypes, clean light background, centered face, high contrast, app-profile quality. " +
+            "No words, no letters, no logo, no watermark, no celebrity likeness.";
     }
 
     private string? BuildAvatarUrl(User user, HttpContext httpContext)
@@ -299,4 +408,12 @@ public class ProfileService(
 
         return $"avatars/{userId}/{Guid.NewGuid():N}.{extension}";
     }
+}
+
+public enum AvatarGenerationReadiness
+{
+    Ready,
+    AlreadyExists,
+    MissingRequiredProfile,
+    NotFound
 }

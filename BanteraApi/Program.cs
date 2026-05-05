@@ -43,6 +43,8 @@ builder.Services.Configure<R2Settings>(builder.Configuration.GetSection(R2Settin
 builder.Services.AddSingleton<R2StorageService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ProfileService>();
+builder.Services.AddSingleton<GeneratedAvatarQueue>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<GeneratedAvatarQueue>());
 builder.Services.AddScoped<VideoService>();
 builder.Services.AddScoped<AccountDeletionService>();
 builder.Services.Configure<ApnsSettings>(builder.Configuration.GetSection(ApnsSettings.Section));
@@ -556,6 +558,45 @@ app.MapPost("/api/me/profile-image", async (
     "Uploads a new profile image to R2 for the current user and returns the updated profile."))
 .Accepts<IFormFile>("multipart/form-data")
 .Produces<UserProfileResponse>(200)
+.Produces<ApiError>(400)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
+app.MapPost("/api/me/profile-image/generate", async (
+    System.Security.Claims.ClaimsPrincipal user,
+    ProfileService profileService,
+    GeneratedAvatarQueue generatedAvatarQueue,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return Results.Json(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            statusCode: 401);
+
+    var readiness = await profileService.GetAvatarGenerationReadinessAsync(userId.Value, cancellationToken);
+    IResult result = readiness switch
+    {
+        AvatarGenerationReadiness.AlreadyExists => Results.Ok(new { status = "already_exists" }),
+        AvatarGenerationReadiness.Ready when generatedAvatarQueue.Enqueue(userId.Value) =>
+            Results.Json(new { status = "queued" }, statusCode: StatusCodes.Status202Accepted),
+        AvatarGenerationReadiness.Ready =>
+            Results.Json(new { status = "queued" }, statusCode: StatusCodes.Status202Accepted),
+        AvatarGenerationReadiness.NotFound => Results.Json(
+            new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
+            statusCode: 401),
+        _ => Results.Json(
+            new ApiError(ErrorCodes.InvalidProfile, "Complete name, native language, and learning language before generating a profile image."),
+            statusCode: 400)
+    };
+    return result;
+})
+.WithName("GenerateMyProfileImage")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Generate current profile image",
+    "Queues an AI-generated profile image for the current user when no custom profile image exists."))
+.Produces(202)
+.Produces(200)
 .Produces<ApiError>(400)
 .Produces<ApiError>(401)
 .RequireAuthorization();
