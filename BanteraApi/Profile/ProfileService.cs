@@ -184,8 +184,13 @@ public class ProfileService(
 
     public async Task<bool> GenerateMissingAvatarAsync(
         Guid userId,
+        string avatarGender,
         CancellationToken cancellationToken = default)
     {
+        var normalizedAvatarGender = NormalizeAvatarGender(avatarGender);
+        if (normalizedAvatarGender is null)
+            return false;
+
         var user = await LoadUserAsync(userId, cancellationToken);
         if (user is null)
             return false;
@@ -199,7 +204,11 @@ public class ProfileService(
         var name = ResolveName(user).Trim();
         var nativeLanguage = user.NativeLanguage!.Trim();
         var learningLanguage = user.LearningLanguage!.Trim();
-        var prompt = BuildGeneratedAvatarPrompt(name, nativeLanguage, learningLanguage);
+        var prompt = BuildGeneratedAvatarPrompt(
+            name,
+            nativeLanguage,
+            learningLanguage,
+            normalizedAvatarGender);
 
         var pngBytes = await cloudflareImageService.GenerateImageAsync(prompt, cancellationToken);
         using var image = Image.Load(pngBytes);
@@ -324,14 +333,26 @@ public class ProfileService(
     private static string BuildGeneratedAvatarPrompt(
         string name,
         string nativeLanguage,
-        string learningLanguage)
+        string learningLanguage,
+        string avatarGender)
     {
+        var genderDescription = avatarGender == "female"
+            ? "female-presenting"
+            : "male-presenting";
+
         return
             $"Create a polished square profile avatar for Bantera. The person is named \"{name}\", " +
-            $"a native {nativeLanguage} speaker learning {learningLanguage}. Friendly modern digital illustration, " +
+            $"shown as a {genderDescription} adult, a native {nativeLanguage} speaker learning {learningLanguage}. Friendly modern digital illustration, " +
             "head-and-shoulders avatar, warm approachable expression, subtle language-learning symbols such as speech bubbles or a small book, " +
-            "tasteful hints of both languages without flags or stereotypes, clean light background, centered face, high contrast, app-profile quality. " +
+            "clean light background, centered face, high contrast, app-profile quality. " +
+            "Do not infer nationality, ethnicity, skin tone, facial features, or birthplace from language. " +
             "No words, no letters, no logo, no watermark, no celebrity likeness.";
+    }
+
+    public static string? NormalizeAvatarGender(string? avatarGender)
+    {
+        var normalized = avatarGender?.Trim().ToLowerInvariant();
+        return normalized is "male" or "female" ? normalized : null;
     }
 
     private string? BuildAvatarUrl(User user, HttpContext httpContext)

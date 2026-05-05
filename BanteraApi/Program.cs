@@ -563,6 +563,7 @@ app.MapPost("/api/me/profile-image", async (
 .RequireAuthorization();
 
 app.MapPost("/api/me/profile-image/generate", async (
+    GenerateProfileImageRequest req,
     System.Security.Claims.ClaimsPrincipal user,
     ProfileService profileService,
     GeneratedAvatarQueue generatedAvatarQueue,
@@ -574,11 +575,19 @@ app.MapPost("/api/me/profile-image/generate", async (
             new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."),
             statusCode: 401);
 
+    var avatarGender = ProfileService.NormalizeAvatarGender(req.AvatarGender);
+    if (avatarGender is null)
+    {
+        return Results.Json(
+            new ApiError(ErrorCodes.InvalidProfile, "Choose male or female to generate a profile image."),
+            statusCode: 400);
+    }
+
     var readiness = await profileService.GetAvatarGenerationReadinessAsync(userId.Value, cancellationToken);
     IResult result = readiness switch
     {
         AvatarGenerationReadiness.AlreadyExists => Results.Ok(new { status = "already_exists" }),
-        AvatarGenerationReadiness.Ready when generatedAvatarQueue.Enqueue(userId.Value) =>
+        AvatarGenerationReadiness.Ready when generatedAvatarQueue.Enqueue(userId.Value, avatarGender) =>
             Results.Json(new { status = "queued" }, statusCode: StatusCodes.Status202Accepted),
         AvatarGenerationReadiness.Ready =>
             Results.Json(new { status = "queued" }, statusCode: StatusCodes.Status202Accepted),
