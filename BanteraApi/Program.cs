@@ -868,6 +868,23 @@ app.MapPut("/api/chat/push/apns-token", async (
 .Produces<ApiError>(401)
 .RequireAuthorization();
 
+app.MapPost("/api/chat/notifications/test", async (
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    await chatService.SendTestNotificationAsync(userId.Value, cancellationToken);
+    return Results.NoContent();
+})
+.WithName("SendTestChatNotification")
+.Produces(StatusCodes.Status204NoContent)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
 app.MapPost("/api/chat/blocks/{otherUserId:guid}", async (
     Guid otherUserId,
     System.Security.Claims.ClaimsPrincipal user,
@@ -1220,6 +1237,7 @@ app.MapPost("/api/me/audio/generate", async (
             req.ScenarioId,
             req.NativeLanguage,
             req.NativeLanguageCode,
+            false,
             cancellationToken);
         var flattenedShortCueTexts = BuildFlattenedShortCueTexts(dialogue.Lines);
 
@@ -1350,6 +1368,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             req.ScenarioId,
             req.NativeLanguage,
             req.NativeLanguageCode,
+            req.UseWebSearch,
             genToken);
         await SendSafe(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
         lastStep = "dialogue";
@@ -1836,6 +1855,134 @@ app.MapPost("/api/me/audio/generate/v2", async (
     }
 })
 .WithName("GenerateAiAudioV2")
+.RequireAuthorization();
+
+// V3 forces web search on for custom scenarios; delegates to v2 logic via shared request body flag.
+app.MapPost("/api/me/audio/generate/v3",
+    async (HttpRequest httpReq, HttpContext httpContext, System.Security.Claims.ClaimsPrincipal user,
+        GeminiService geminiService, RevAiAlignmentService revAiAlignmentService,
+        IOptions<RevAiSettings> revAiOptions, IOptions<AiAudioDiagnosticsOptions> aiAudioDiagnosticsOptions,
+        AiAudioDiagnosticFileWriter diagnosticFileWriter, R2StorageService r2StorageService,
+        VideoService videoService, AppDbContext db, CancellationToken cancellationToken) =>
+    {
+        GenerateAudioRequest? req;
+        try { req = await httpReq.ReadFromJsonAsync<GenerateAudioRequest>(cancellationToken: cancellationToken); }
+        catch { req = null; }
+        if (req is null)
+        {
+            httpContext.Response.StatusCode = 400;
+            await httpContext.Response.WriteAsJsonAsync(new ApiError("bad_request", "Invalid request body."), cancellationToken);
+            return;
+        }
+        req = req with { UseWebSearch = true };
+
+        var userId = TryGetUserId(user);
+        if (userId is null)
+        {
+            httpContext.Response.StatusCode = 401;
+            await httpContext.Response.WriteAsJsonAsync(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), cancellationToken);
+            return;
+        }
+
+        using var genCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var genToken = genCts.Token;
+
+        const int v3DailyLimit = 5;
+        var v3TodayUtc = DateTime.UtcNow.Date;
+        var v3TodayCount = await db.UserVideos
+            .CountAsync(v => v.UserId == userId.Value && v.IsAiGenerated && v.CreatedAt >= v3TodayUtc, genToken);
+        var v3CustomLimit = await db.Users
+            .Where(u => u.Id == userId.Value).Select(u => u.AiAudioDailyLimit).FirstOrDefaultAsync(genToken);
+        var v3Limit = v3CustomLimit ?? v3DailyLimit;
+        if (v3TodayCount >= v3Limit)
+        {
+            httpContext.Response.StatusCode = 429;
+            await httpContext.Response.WriteAsJsonAsync(
+                new ApiError(ErrorCodes.DailyLimitReached,
+                    $"You've reached your daily limit of {v3Limit} AI audio generation{(v3Limit == 1 ? "" : "s")}. Try again tomorrow."),
+                cancellationToken);
+            return;
+        }
+
+        httpContext.Response.ContentType = "text/event-stream";
+        httpContext.Response.Headers["Cache-Control"] = "no-cache";
+        httpContext.Response.Headers["X-Accel-Buffering"] = "no";
+
+        var v3SseOpts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        async Task SendV3(object payload)
+        {
+            var json = JsonSerializer.Serialize(payload, v3SseOpts);
+            await httpContext.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
+            await httpContext.Response.Body.FlushAsync(cancellationToken);
+        }
+        async Task SendSafeV3(object payload) { try { await SendV3(payload); } catch { } }
+
+        UserAudioJob? v3Job = null;
+        try
+        {
+            v3Job = new UserAudioJob { UserId = userId.Value, LanguageCode = req.LanguageCode, ScenarioId = req.ScenarioId };
+            db.UserAudioJobs.Add(v3Job);
+            await db.SaveChangesAsync(genToken);
+            await SendSafeV3(new { step = "started", jobId = v3Job.Id });
+
+            var v3Dialogue = await geminiService.GenerateDialogueAsync(
+                req.Language, req.LanguageCode, req.Scenario, req.DurationSeconds,
+                req.ScenarioId, req.NativeLanguage, req.NativeLanguageCode, req.UseWebSearch, genToken);
+            await SendSafeV3(new { step = "dialogue", lines = v3Dialogue.Lines.Select(l => l.Text).ToArray() });
+
+            var v3FlatCues = BuildFlattenedShortCueTexts(v3Dialogue.Lines);
+            var (v3Wav, v3DurMs) = await geminiService.GenerateAudioAsync(v3Dialogue, req.LanguageCode, genToken);
+            var v3ObjKey = $"videos/{userId.Value}/{Guid.NewGuid():N}.wav";
+            await r2StorageService.UploadObjectAsync(v3ObjKey, new MemoryStream(v3Wav), "audio/wav", genToken);
+            await SendSafeV3(new { step = "audio" });
+            await SendSafeV3(new { step = "aligning" });
+
+            IReadOnlyList<WordTimingRecord>? v3WordTiming = null;
+            IReadOnlyList<VideoTranscriptCueRecord>? v3Cues = null;
+            IReadOnlyList<VideoTranscriptCueRecord>? v3ShortCues = null;
+            if (RevAiAlignmentService.TryGetSupportedLanguageCode(req.LanguageCode, out var v3RevLang) && v3RevLang is not null)
+            {
+                var v3Transcript = string.Join("\n", v3Dialogue.Lines.Select(l => l.Text));
+                var v3PresignedUrl = r2StorageService.GeneratePresignedUrl(v3ObjKey, TimeSpan.FromHours(1));
+                try
+                {
+                    v3WordTiming = await revAiAlignmentService.AlignAsync(v3PresignedUrl, v3RevLang, v3Transcript, genToken);
+                    if (!RevAiCueAlignmentBuilder.TryBuildBoundary(v3Dialogue.Lines, v3WordTiming, out v3Cues, out _))
+                        if (!RevAiCueAlignmentBuilder.TryBuild(v3Dialogue.Lines, v3WordTiming, out v3Cues, out _))
+                            RevAiCueAlignmentBuilder.TryBuildTolerant(v3Dialogue.Lines, v3WordTiming, out v3Cues, out _);
+                    if (v3Cues is not null && v3FlatCues.Count > 0)
+                        if (!RevAiCueAlignmentBuilder.TryBuildShortCueBoundary(v3Dialogue.Lines, v3Cues, v3WordTiming, out v3ShortCues, out _))
+                            v3ShortCues = null;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    app.Logger.LogWarning(ex, "[V3] Rev.ai alignment failed for user {UserId}, locale {LanguageCode}", userId, req.LanguageCode);
+                }
+            }
+
+            var v3FinalCues = v3Cues ?? geminiService.EstimateCues(v3Dialogue.Lines, v3DurMs);
+            var v3Video = await videoService.SaveAiAudioV2Async(
+                userId.Value, v3Dialogue.Title, v3ObjKey, v3Wav.LongLength,
+                req.Language, req.LanguageCode,
+                v3Dialogue.Lines, v3WordTiming, v3FinalCues, v3ShortCues,
+                v3DurMs, httpContext, genToken);
+
+            if (v3Job is not null) { v3Job.CompletedAt = DateTime.UtcNow; try { await db.SaveChangesAsync(CancellationToken.None); } catch { } }
+            await SendSafeV3(new { step = "done", video = v3Video });
+        }
+        catch (ContentRejectedException ex)
+        {
+            if (v3Job is not null) { v3Job.CompletedAt = DateTime.UtcNow; try { await db.SaveChangesAsync(CancellationToken.None); } catch { } }
+            await SendSafeV3(new { step = "error", message = ex.Message });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            app.Logger.LogError(ex, "[V3] Audio generation failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}", userId, req.LanguageCode, req.ScenarioId);
+            if (v3Job is not null) { v3Job.CompletedAt = DateTime.UtcNow; try { await db.SaveChangesAsync(CancellationToken.None); } catch { } }
+            await SendSafeV3(new { step = "error", message = "Something went wrong while creating the practice audio. Please try again." });
+        }
+    })
+.WithName("GenerateAiAudioV3")
 .RequireAuthorization();
 
 app.MapGet("/api/me/audio/jobs/pending", async (

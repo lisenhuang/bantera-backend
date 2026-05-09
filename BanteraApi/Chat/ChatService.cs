@@ -524,6 +524,22 @@ public class ChatService(
         return true;
     }
 
+    public async Task SendTestNotificationAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var tokens = await db.UserPushTokens
+            .AsNoTracking()
+            .Where(t => t.UserId == userId)
+            .ToListAsync(cancellationToken);
+        await pushNotificationService.SendAsync(
+            tokens,
+            "Notifications enabled",
+            "You'll now receive chat message notifications.",
+            new Dictionary<string, string>(),
+            cancellationToken);
+    }
+
     private static string TokenSuffix(string token)
     {
         var normalized = token.Trim();

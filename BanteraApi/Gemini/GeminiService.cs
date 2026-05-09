@@ -250,6 +250,7 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         string? scenarioId = null,
         string? nativeLanguage = null,
         string? nativeLanguageCode = null,
+        bool useWebSearchForCustom = false,
         CancellationToken cancellationToken = default)
     {
         var accentInstruction = AccentInstructions.GetValueOrDefault(languageCode,
@@ -260,7 +261,8 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
             : durationSeconds == 60 ? "1 minute"
             : $"{durationSeconds / 60} minutes";
 
-        var useGoogleSearch = IsLatestNewsScenario(scenarioId);
+        var useGoogleSearch = IsLatestNewsScenario(scenarioId)
+            || (useWebSearchForCustom && !string.IsNullOrWhiteSpace(scenario));
         var textModel = useGoogleSearch
             ? Settings.LatestNewsTextModel
             : Settings.TextModel;
@@ -295,12 +297,25 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
             searchInstruction = $"Try to find up to {requestedNewsCount} real recent news {(requestedNewsCount == 1 ? "story" : "stories")} connected to {newsFocus}.";
         }
 
+        var isCustomWebSearch = useWebSearchForCustom && !IsLatestNewsScenario(scenarioId) && !string.IsNullOrWhiteSpace(scenario);
+
         var titleInstruction = useGoogleSearch
-            ? "- Also write a short title (max 10 words) that summarises the main news topic(s) discussed — e.g. \"Solar Storm Hits Power Grids Across Europe\" or \"Japan's Moon Rover Sends Back New Photos\". Do not use a generic conversational title."
+            ? (isCustomWebSearch
+                ? "- Also write a short, catchy title for this dialogue (max 8 words)."
+                : "- Also write a short title (max 10 words) that summarises the main news topic(s) discussed — e.g. \"Solar Storm Hits Power Grids Across Europe\" or \"Japan's Moon Rover Sends Back New Photos\". Do not use a generic conversational title.")
             : "- Also write a short, catchy title for this dialogue (max 8 words).";
 
-        var scenarioLine = useGoogleSearch
+        var scenarioLine = isCustomWebSearch
             ? $$"""
+The scenario is: {{scenario}}
+Use the Google Search tool to find real-world, factual context that is relevant to this scenario topic.
+- Look for interesting, current facts, trends, or details related to the scenario that two people might naturally discuss.
+- Base the dialogue on the searched facts to make it feel grounded and realistic.
+- Do NOT mention sources, URLs, publishers, or that you searched the web.
+- If no relevant factual context is found via search, proceed with a natural conversation based on the scenario alone.
+"""
+            : useGoogleSearch
+                ? $$"""
 Search from the internet to follow this instruction: {{searchInstruction}}
 - Each story used must have happened or been reported recently, between {{recentStartUtc:yyyy-MM-dd}} and {{todayUtc:yyyy-MM-dd}} UTC.
 - Try to use up to {{requestedNewsCount}} suitable {{(requestedNewsCount == 1 ? "story" : "stories")}}, but do not treat this count as a hard requirement.
@@ -314,9 +329,9 @@ Search from the internet to follow this instruction: {{searchInstruction}}
 - Base the dialogue on the searched facts, but do NOT mention sources, URLs, publishers, headlines, or that you searched the web.
 - Make the conversation sound like two ordinary people naturally discussing that recent news soon after hearing about it.
 """
-            : string.IsNullOrWhiteSpace(scenario)
-                ? "Choose a random, interesting everyday scenario (e.g. ordering coffee, catching up after a holiday, a job interview, grocery shopping, getting lost on holiday)."
-                : $"The scenario is: {scenario}";
+                : string.IsNullOrWhiteSpace(scenario)
+                    ? "Choose a random, interesting everyday scenario (e.g. ordering coffee, catching up after a holiday, a job interview, grocery shopping, getting lost on holiday)."
+                    : $"The scenario is: {scenario}";
 
         var prompt = $$"""
 You are a dialogue writer for conversational language learning.

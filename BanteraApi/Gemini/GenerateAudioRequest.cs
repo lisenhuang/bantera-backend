@@ -7,4 +7,5 @@ public record GenerateAudioRequest(
     int DurationSeconds,
     string? ScenarioId = null,
     string? NativeLanguage = null,
-    string? NativeLanguageCode = null);
+    string? NativeLanguageCode = null,
+    bool UseWebSearch = false);
