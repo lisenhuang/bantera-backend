@@ -128,14 +128,19 @@ public class ChatPushNotificationService(
 
     private string CreateProviderToken()
     {
-        using var ecdsa = ECDsa.Create();
+        var ecdsa = ECDsa.Create();
         ecdsa.ImportFromPem(NormalizePem(_settings.PrivateKeyPem!).ToCharArray());
 
         var signingKey = new ECDsaSecurityKey(ecdsa)
         {
             KeyId = _settings.KeyId,
         };
-        var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.EcdsaSha256);
+        var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.EcdsaSha256)
+        {
+            // Bypass the global provider cache so each call uses a fresh ECDsa instance.
+            // Without this, a cached provider can hold a reference to a previously disposed ECDsa.
+            CryptoProviderFactory = new CryptoProviderFactory { CacheSignatureProviders = false },
+        };
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var header = new JwtHeader(credentials)
         {
@@ -147,7 +152,14 @@ public class ChatPushNotificationService(
             { "iat", now },
         };
 
-        return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(header, payload));
+        try
+        {
+            return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(header, payload));
+        }
+        finally
+        {
+            ecdsa.Dispose();
+        }
     }
 
     private static string NormalizePem(string pem)
