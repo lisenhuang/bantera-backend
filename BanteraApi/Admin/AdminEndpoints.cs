@@ -93,6 +93,48 @@ public static class AdminEndpoints
                 : Results.NotFound(new ApiError("video_not_found", "Video not found."));
         })
         .WithName("AdminDeleteVideo");
+
+        // GET /api/admin/messages
+        group.MapGet("/messages", async (
+            AdminService admin,
+            [FromQuery] string? threadType,
+            [FromQuery] DateTime? from,
+            [FromQuery] DateTime? to,
+            [FromQuery] int limit = 20,
+            [FromQuery] int offset = 0) =>
+        {
+            limit = Math.Clamp(limit, 1, 100);
+            offset = Math.Max(offset, 0);
+            var result = await admin.ListChatMessagesAsync(threadType, from, to, limit, offset);
+            return Results.Ok(result);
+        })
+        .WithName("AdminListMessages");
+
+        // GET /api/admin/messages/{messageId}/audio
+        group.MapGet("/messages/{messageId:guid}/audio", async (
+            Guid messageId,
+            AdminService admin,
+            CancellationToken ct) =>
+        {
+            var audio = await admin.GetChatMessageAudioAsync(messageId, ct);
+            return audio is null
+                ? Results.NotFound(new ApiError("message_not_found", "Message not found."))
+                : Results.Stream(audio.Stream, audio.ContentType, enableRangeProcessing: true);
+        })
+        .WithName("AdminGetMessageAudio");
+
+        // DELETE /api/admin/messages/{messageId}
+        group.MapDelete("/messages/{messageId:guid}", async (
+            Guid messageId,
+            AdminService admin,
+            CancellationToken ct) =>
+        {
+            var ok = await admin.DeleteChatMessageAsync(messageId, ct);
+            return ok
+                ? Results.NoContent()
+                : Results.NotFound(new ApiError("message_not_found", "Message not found."));
+        })
+        .WithName("AdminDeleteMessage");
     }
 }
 

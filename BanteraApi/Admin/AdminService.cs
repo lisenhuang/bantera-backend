@@ -1,4 +1,5 @@
 using BanteraApi.Database;
+using BanteraApi.Storage;
 using Microsoft.EntityFrameworkCore;
 
 namespace BanteraApi.Admin;
@@ -49,6 +50,23 @@ public record AdminVideoListItem(
     long FileSizeBytes,
     DateTime CreatedAt);
 
+public record AdminUserBrief(Guid Id, string? Name, string? Email);
+
+public record AdminChatMessageListItem(
+    Guid Id,
+    Guid ThreadId,
+    string ThreadType,
+    AdminUserBrief Sender,
+    AdminUserBrief? Recipient,
+    string? GroupLanguageKey,
+    string? GroupLanguageDisplayName,
+    int DurationMs,
+    string SpokenLanguageCode,
+    string OriginalFileName,
+    string AudioContentType,
+    DateTime CreatedAt,
+    DateTime? ExpiresAt);
+
 public record AdminStats(
     int TotalUsers,
     int TotalVideos,
@@ -59,7 +77,7 @@ public record AdminStats(
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
-public class AdminService(AppDbContext db)
+public class AdminService(AppDbContext db, R2StorageService r2)
 {
     public async Task<AdminPagedResult<AdminUserListItem>> ListUsersAsync(
         string? search,
@@ -273,6 +291,111 @@ public class AdminService(AppDbContext db)
 
         db.UserVideos.Remove(video);
         await db.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<AdminPagedResult<AdminChatMessageListItem>> ListChatMessagesAsync(
+        string? threadType,
+        DateTime? from,
+        DateTime? to,
+        int limit,
+        int offset)
+    {
+        var query = db.ChatMessages
+            .Include(m => m.Thread)
+                .ThenInclude(t => t.Memberships)
+                    .ThenInclude(mb => mb.User)
+                        .ThenInclude(u => u.Identities)
+            .Include(m => m.SenderUser)
+                .ThenInclude(u => u.Identities)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(threadType))
+            query = query.Where(m => m.Thread.Type == threadType);
+        if (from.HasValue)
+            query = query.Where(m => m.CreatedAt >= from.Value);
+        if (to.HasValue)
+            query = query.Where(m => m.CreatedAt <= to.Value);
+
+        var total = await query.CountAsync();
+
+        var messages = await query
+            .OrderByDescending(m => m.CreatedAt)
+            .Skip(offset)
+            .Take(limit)
+            .ToListAsync();
+
+        var items = messages.Select(m =>
+        {
+            var senderEmail = m.SenderUser.Identities
+                .FirstOrDefault(i => i.Provider == "email")?.ProviderEmail;
+            var sender = new AdminUserBrief(m.SenderUserId, m.SenderUser.Name, senderEmail);
+
+            AdminUserBrief? recipient = null;
+            string? groupLanguageKey = null;
+            string? groupLanguageDisplayName = null;
+
+            if (m.Thread.Type == "dm")
+            {
+                var recipientMembership = m.Thread.Memberships
+                    .FirstOrDefault(mb => mb.UserId != m.SenderUserId);
+                if (recipientMembership is not null)
+                {
+                    var recipientEmail = recipientMembership.User.Identities
+                        .FirstOrDefault(i => i.Provider == "email")?.ProviderEmail;
+                    recipient = new AdminUserBrief(
+                        recipientMembership.UserId,
+                        recipientMembership.User.Name,
+                        recipientEmail);
+                }
+            }
+            else
+            {
+                groupLanguageKey = m.Thread.LanguageKey;
+                groupLanguageDisplayName = m.Thread.LanguageDisplayName;
+            }
+
+            return new AdminChatMessageListItem(
+                m.Id,
+                m.ThreadId,
+                m.Thread.Type,
+                sender,
+                recipient,
+                groupLanguageKey,
+                groupLanguageDisplayName,
+                m.DurationMs,
+                m.SpokenLanguageCode,
+                m.OriginalFileName,
+                m.AudioContentType,
+                m.CreatedAt,
+                m.ExpiresAt);
+        }).ToList();
+
+        return new AdminPagedResult<AdminChatMessageListItem>(items, total);
+    }
+
+    public async Task<StoredObjectResult?> GetChatMessageAudioAsync(
+        Guid messageId,
+        CancellationToken ct)
+    {
+        var message = await db.ChatMessages.FindAsync([messageId], ct);
+        if (message is null) return null;
+
+        return await r2.DownloadObjectAsync(message.AudioObjectKey, ct);
+    }
+
+    public async Task<bool> DeleteChatMessageAsync(Guid messageId, CancellationToken ct)
+    {
+        var message = await db.ChatMessages
+            .Include(m => m.Receipts)
+            .FirstOrDefaultAsync(m => m.Id == messageId, ct);
+        if (message is null) return false;
+
+        await r2.DeleteObjectAsync(message.AudioObjectKey, ct);
+
+        db.ChatMessageReceipts.RemoveRange(message.Receipts);
+        db.ChatMessages.Remove(message);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 }
