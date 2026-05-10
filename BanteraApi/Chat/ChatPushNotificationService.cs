@@ -20,7 +20,8 @@ public class ChatPushNotificationService(
         string title,
         string body,
         IReadOnlyDictionary<string, string> data,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DateTimeOffset? expiresAt = null)
     {
         var activeTokens = tokens
             .Where(t => !string.IsNullOrWhiteSpace(t.Token))
@@ -52,16 +53,11 @@ public class ChatPushNotificationService(
             request.Headers.TryAddWithoutValidation("apns-topic", _settings.BundleId);
             request.Headers.TryAddWithoutValidation("apns-push-type", "alert");
             request.Headers.TryAddWithoutValidation("apns-priority", "10");
-            request.Content = JsonContent.Create(new
-            {
-                aps = new
-                {
-                    alert = new { title, body },
-                    sound = "default",
-                },
-                threadId = data.TryGetValue("threadId", out var threadId) ? threadId : null,
-                threadType = data.TryGetValue("threadType", out var threadType) ? threadType : null,
-            });
+            if (expiresAt is not null)
+                request.Headers.TryAddWithoutValidation(
+                    "apns-expiration",
+                    expiresAt.Value.ToUnixTimeSeconds().ToString());
+            request.Content = JsonContent.Create(BuildPayload(title, body, data));
 
             try
             {
@@ -124,6 +120,29 @@ public class ChatPushNotificationService(
     {
         var normalized = token.Trim();
         return normalized.Length <= 8 ? normalized : normalized[^8..];
+    }
+
+    private static Dictionary<string, object?> BuildPayload(
+        string title,
+        string body,
+        IReadOnlyDictionary<string, string> data)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["aps"] = new
+            {
+                alert = new { title, body },
+                sound = "default",
+            },
+        };
+
+        foreach (var pair in data)
+        {
+            if (!string.IsNullOrWhiteSpace(pair.Key))
+                payload[pair.Key] = pair.Value;
+        }
+
+        return payload;
     }
 
     private string CreateProviderToken()

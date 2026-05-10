@@ -7,6 +7,7 @@ public class UserPushToken
     public string Platform { get; set; } = "ios";
     public string Token { get; set; } = string.Empty;
     public bool IsSandbox { get; set; }
+    public bool SupportsCalls { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime LastSeenAt { get; set; }

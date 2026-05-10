@@ -565,6 +565,11 @@ namespace BanteraApi.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<bool>("SupportsCalls")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("Token")
                         .IsRequired()
                         .HasMaxLength(255)

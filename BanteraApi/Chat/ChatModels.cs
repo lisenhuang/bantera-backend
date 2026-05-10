@@ -90,4 +90,5 @@ public sealed class RegisterPushTokenRequest
 {
     public string Token { get; set; } = string.Empty;
     public bool IsSandbox { get; set; }
+    public bool SupportsCalls { get; set; }
 }

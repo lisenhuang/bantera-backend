@@ -858,7 +858,12 @@ app.MapPut("/api/chat/push/apns-token", async (
     if (userId is null)
         return UnauthorizedResult();
 
-    var updated = await chatService.RegisterPushTokenAsync(userId.Value, request.Token, request.IsSandbox, cancellationToken);
+    var updated = await chatService.RegisterPushTokenAsync(
+        userId.Value,
+        request.Token,
+        request.IsSandbox,
+        request.SupportsCalls,
+        cancellationToken);
     return updated
         ? Results.NoContent()
         : Results.Json(new ApiError(ChatErrorCodes.ChatInvalidAudio, "Provide a valid APNs device token."), statusCode: 400);
@@ -2608,28 +2613,52 @@ static async Task HandleChatCallRealtimeEventAsync(
             return;
         }
 
-        if (!realtimeService.TryCreateCall(userId, recipientUserId, mediaKind!, out var session))
+        var caller = await chatService.GetChatUserAsync(userId, httpContext, cancellationToken);
+        if (caller is null)
+            return;
+
+        var isRecipientOnline = realtimeService.IsUserOnline(recipientUserId);
+        IReadOnlyList<UserPushToken> callCapableTokens = isRecipientOnline
+            ? []
+            : await chatService.ListCallCapablePushTokensForEnabledUserAsync(
+                recipientUserId,
+                cancellationToken);
+        if (!isRecipientOnline && callCapableTokens.Count == 0)
         {
-            var reason = realtimeService.IsUserOnline(recipientUserId) ? "busy" : "offline";
             await realtimeService.SendToUserAsync(
                 userId,
                 new
                 {
-                    type = reason == "busy" ? "call.busy" : "call.unavailable",
+                    type = "call.unavailable",
                     payload = new
                     {
                         recipientUserId,
-                        reason,
+                        reason = "offline",
                     }
                 },
                 cancellationToken);
             return;
         }
 
-        var caller = await chatService.GetChatUserAsync(userId, httpContext, cancellationToken);
-        if (caller is null)
+        if (!realtimeService.TryCreateCall(
+                userId,
+                recipientUserId,
+                mediaKind!,
+                out var session,
+                requireCalleeOnline: isRecipientOnline))
         {
-            realtimeService.TryEndCall(session.CallId, userId, out _);
+            await realtimeService.SendToUserAsync(
+                userId,
+                new
+                {
+                    type = "call.busy",
+                    payload = new
+                    {
+                        recipientUserId,
+                        reason = "busy",
+                    }
+                },
+                cancellationToken);
             return;
         }
 
@@ -2646,19 +2675,31 @@ static async Task HandleChatCallRealtimeEventAsync(
                 }
             },
             cancellationToken);
-        await realtimeService.SendToUserAsync(
-            recipientUserId,
-            new
-            {
-                type = "call.incoming",
-                payload = new
+        if (isRecipientOnline)
+        {
+            await realtimeService.SendToUserAsync(
+                recipientUserId,
+                new
                 {
-                    callId = session.CallId,
-                    mediaKind = session.MediaKind,
-                    caller,
-                }
-            },
-            cancellationToken);
+                    type = "call.incoming",
+                    payload = new
+                    {
+                        callId = session.CallId,
+                        mediaKind = session.MediaKind,
+                        caller,
+                    }
+                },
+                cancellationToken);
+        }
+        else
+        {
+            await chatService.SendOfflineCallNotificationAsync(
+                callCapableTokens,
+                caller,
+                session.CallId,
+                session.MediaKind,
+                cancellationToken);
+        }
         return;
     }
 
@@ -2671,7 +2712,17 @@ static async Task HandleChatCallRealtimeEventAsync(
     if (string.Equals(type, "call.accept", StringComparison.OrdinalIgnoreCase))
     {
         if (!realtimeService.TryAcceptCall(callId, userId, out var session))
+        {
+            await realtimeService.SendToUserAsync(
+                userId,
+                new
+                {
+                    type = "call.unavailable",
+                    payload = new { callId, reason = "expired" }
+                },
+                cancellationToken);
             return;
+        }
 
         await realtimeService.SendToUserAsync(
             session.CallerUserId,

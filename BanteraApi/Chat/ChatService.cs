@@ -480,6 +480,7 @@ public class ChatService(
         Guid userId,
         string token,
         bool isSandbox,
+        bool supportsCalls,
         CancellationToken cancellationToken = default)
     {
         var normalized = token.Trim();
@@ -502,6 +503,7 @@ public class ChatService(
                 Token = normalized,
                 Platform = "ios",
                 IsSandbox = isSandbox,
+                SupportsCalls = supportsCalls,
                 CreatedAt = now,
                 UpdatedAt = now,
                 LastSeenAt = now,
@@ -510,18 +512,62 @@ public class ChatService(
         else
         {
             existing.IsSandbox = isSandbox;
+            existing.SupportsCalls = supportsCalls;
             existing.LastSeenAt = now;
             existing.UpdatedAt = now;
         }
 
         await db.SaveChangesAsync(cancellationToken);
         logger.LogInformation(
-            "[ChatPush] APNs token {Action}. UserId={UserId} IsSandbox={IsSandbox} TokenSuffix={TokenSuffix}",
+            "[ChatPush] APNs token {Action}. UserId={UserId} IsSandbox={IsSandbox} SupportsCalls={SupportsCalls} TokenSuffix={TokenSuffix}",
             wasExisting ? "updated" : "registered",
             userId,
             isSandbox,
+            supportsCalls,
             TokenSuffix(normalized));
         return true;
+    }
+
+    public async Task<IReadOnlyList<UserPushToken>> ListCallCapablePushTokensForEnabledUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return await db.UserPushTokens
+            .AsNoTracking()
+            .Where(t => t.UserId == userId && t.SupportsCalls && t.User.ChatNotificationsEnabled)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task SendOfflineCallNotificationAsync(
+        IReadOnlyList<UserPushToken> tokens,
+        ChatUserResponse caller,
+        Guid callId,
+        string mediaKind,
+        CancellationToken cancellationToken = default)
+    {
+        if (tokens.Count == 0)
+            return;
+
+        var title = mediaKind == ChatCallMediaKinds.Video
+            ? "Incoming video call"
+            : "Incoming audio call";
+        var body = caller.Name;
+
+        await pushNotificationService.SendAsync(
+            tokens,
+            title,
+            body,
+            new Dictionary<string, string>
+            {
+                ["type"] = "incoming_call",
+                ["callId"] = callId.ToString(),
+                ["callerUserId"] = caller.Id.ToString(),
+                ["callerName"] = caller.Name,
+                ["callerAvatarUrl"] = caller.AvatarUrl ?? string.Empty,
+                ["mediaKind"] = mediaKind,
+            },
+            cancellationToken,
+            expiresAt: DateTimeOffset.UtcNow.AddSeconds(45));
     }
 
     public async Task SendTestNotificationAsync(

@@ -267,6 +267,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
             e.Property(x => x.Platform).HasMaxLength(20).IsRequired();
             e.Property(x => x.Token).HasMaxLength(255).IsRequired();
+            e.Property(x => x.SupportsCalls).IsRequired().HasDefaultValue(false);
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
             e.Property(x => x.LastSeenAt).IsRequired();

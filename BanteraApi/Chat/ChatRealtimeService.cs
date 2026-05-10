@@ -36,13 +36,18 @@ public class ChatRealtimeService(ILogger<ChatRealtimeService> logger)
             && bucket.Values.Any(socket => socket.State == WebSocketState.Open);
     }
 
-    public bool TryCreateCall(Guid callerUserId, Guid calleeUserId, string mediaKind, out ChatCallSession session)
+    public bool TryCreateCall(
+        Guid callerUserId,
+        Guid calleeUserId,
+        string mediaKind,
+        out ChatCallSession session,
+        bool requireCalleeOnline = true)
     {
         session = null!;
         if (!ChatCallMediaKinds.IsSupported(mediaKind))
             return false;
 
-        if (!IsUserOnline(calleeUserId))
+        if (requireCalleeOnline && !IsUserOnline(calleeUserId))
             return false;
 
         if (HasActiveCallFor(callerUserId) || HasActiveCallFor(calleeUserId))
