@@ -2382,7 +2382,7 @@ var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
 var failures = new List<string>();
 var apnsSettings = app.Services.GetRequiredService<IOptions<ApnsSettings>>().Value;
 startupLogger.LogInformation(
-    "[Startup] APNs configured. EnvironmentMode={EnvironmentMode} AutoSandboxWhenTokenIsSandboxTrue={SandboxEndpoint} AutoProductionWhenTokenIsSandboxFalse={ProductionEndpoint} BundleId={BundleId} HasConfiguration={HasConfiguration}",
+    "[Startup] APNs configured. Routing=TokenSandbox EnvironmentModeIgnored={EnvironmentMode} TokenSandboxTrueEndpoint={SandboxEndpoint} TokenSandboxFalseEndpoint={ProductionEndpoint} BundleId={BundleId} HasConfiguration={HasConfiguration}",
     apnsSettings.EnvironmentMode,
     ApnsSettings.SandboxEndpoint,
     ApnsSettings.ProductionEndpoint,

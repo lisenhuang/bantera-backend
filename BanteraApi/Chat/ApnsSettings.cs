@@ -37,11 +37,6 @@ public sealed class ApnsSettings
 
     public bool EffectiveSandbox(bool tokenIsSandbox)
     {
-        return EnvironmentMode switch
-        {
-            EnvironmentSandbox => true,
-            EnvironmentProduction => false,
-            _ => tokenIsSandbox,
-        };
+        return tokenIsSandbox;
     }
 }

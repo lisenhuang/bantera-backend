@@ -69,7 +69,7 @@ public class ChatPushNotificationService(
                 if (response.IsSuccessStatusCode)
                 {
                     logger.LogInformation(
-                        "[ChatPush] APNs send succeeded. Status={Status} EnvironmentMode={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType}",
+                        "[ChatPush] APNs send succeeded. Status={Status} Routing=TokenSandbox EnvironmentModeIgnored={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType}",
                         (int)response.StatusCode,
                         _settings.EnvironmentMode,
                         pushToken.IsSandbox,
@@ -83,7 +83,7 @@ public class ChatPushNotificationService(
 
                 var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 logger.LogWarning(
-                    "[ChatPush] APNs send failed. Status={Status} EnvironmentMode={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType} Body={Body}",
+                    "[ChatPush] APNs send failed. Status={Status} Routing=TokenSandbox EnvironmentModeIgnored={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType} Body={Body}",
                     (int)response.StatusCode,
                     _settings.EnvironmentMode,
                     pushToken.IsSandbox,
@@ -98,7 +98,7 @@ public class ChatPushNotificationService(
             {
                 logger.LogWarning(
                     ex,
-                    "[ChatPush] APNs send threw. EnvironmentMode={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType}",
+                    "[ChatPush] APNs send threw. Routing=TokenSandbox EnvironmentModeIgnored={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType}",
                     _settings.EnvironmentMode,
                     pushToken.IsSandbox,
                     effectiveSandbox,
