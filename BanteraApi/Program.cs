@@ -55,6 +55,7 @@ builder.Services.AddHttpClient<ChatPushNotificationService>(client =>
     client.Timeout = TimeSpan.FromSeconds(20);
 });
 builder.Services.AddHostedService<ChatCleanupService>();
+builder.Services.AddHostedService<ChatCallCleanupService>();
 
 builder.Services.Configure<CloudflareSettings>(builder.Configuration.GetSection("Cloudflare"));
 builder.Services.AddHttpClient("cloudflare", c =>
@@ -985,6 +986,23 @@ app.MapGet("/api/chat/blocks", async (
 .Produces<ApiError>(401)
 .RequireAuthorization();
 
+app.MapGet("/api/chat/calls/ice-servers", (
+    System.Security.Claims.ClaimsPrincipal user) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    return Results.Ok(ChatRealtimeService.BuildDefaultIceServersResponse());
+})
+.WithName("GetChatCallIceServers")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Get chat call ICE servers",
+    "Returns ICE server configuration for one-to-one WebRTC chat calls."))
+.Produces<ChatIceServersResponse>(200)
+.Produces<ApiError>(401)
+.RequireAuthorization();
+
 app.Map("/ws/chat", async (
     HttpContext httpContext,
     ChatRealtimeService realtimeService,
@@ -1064,30 +1082,42 @@ app.Map("/ws/chat", async (
                 continue;
             }
 
-            if (!string.Equals(type, "dm.recording.started", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(type, "dm.recording.stopped", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(type, "dm.recording.started", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(type, "dm.recording.stopped", StringComparison.OrdinalIgnoreCase))
             {
+                if (!hasPayload
+                    || !payloadProperty.TryGetProperty("threadId", out var threadIdProperty)
+                    || !Guid.TryParse(threadIdProperty.GetString(), out var threadId))
+                {
+                    continue;
+                }
+
+                await chatService.ForwardRecordingStatusAsync(
+                    userId.Value,
+                    threadId,
+                    string.Equals(type, "dm.recording.started", StringComparison.OrdinalIgnoreCase),
+                    cancellationToken);
                 continue;
             }
 
-            if (!hasPayload
-                || !payloadProperty.TryGetProperty("threadId", out var threadIdProperty)
-                || !Guid.TryParse(threadIdProperty.GetString(), out var threadId))
+            if (hasPayload)
             {
-                continue;
+                await HandleChatCallRealtimeEventAsync(
+                    type,
+                    payloadProperty,
+                    userId.Value,
+                    httpContext,
+                    realtimeService,
+                    chatService,
+                    cancellationToken);
             }
-
-            await chatService.ForwardRecordingStatusAsync(
-                userId.Value,
-                threadId,
-                string.Equals(type, "dm.recording.started", StringComparison.OrdinalIgnoreCase),
-                cancellationToken);
         }
     }
     finally
     {
         realtimeService.Unregister(userId.Value, connectionId);
         await CloseWebSocketQuietlyAsync(socket);
+        await realtimeService.HandleUserDisconnectedAsync(userId.Value, CancellationToken.None);
         await realtimeService.SendToUsersAsync(
             realtimeService.SnapshotOnlineUserIds(),
             new
@@ -2528,6 +2558,200 @@ static async Task CloseWebSocketQuietlyAsync(WebSocket socket)
         {
             // Ignore close races during shutdown/disconnect.
         }
+    }
+}
+
+static async Task HandleChatCallRealtimeEventAsync(
+    string? type,
+    JsonElement payload,
+    Guid userId,
+    HttpContext httpContext,
+    ChatRealtimeService realtimeService,
+    ChatService chatService,
+    CancellationToken cancellationToken)
+{
+    if (string.IsNullOrWhiteSpace(type) || payload.ValueKind != JsonValueKind.Object)
+        return;
+
+    if (string.Equals(type, "call.invite", StringComparison.OrdinalIgnoreCase))
+    {
+        if (!payload.TryGetProperty("recipientUserId", out var recipientProperty)
+            || !Guid.TryParse(recipientProperty.GetString(), out var recipientUserId)
+            || !payload.TryGetProperty("mediaKind", out var mediaProperty))
+        {
+            return;
+        }
+
+        var mediaKind = mediaProperty.GetString()?.Trim().ToLowerInvariant();
+        if (!ChatCallMediaKinds.IsSupported(mediaKind))
+            return;
+
+        var (callee, errorCode) = await chatService.ValidateDirectCallTargetAsync(
+            userId,
+            recipientUserId,
+            httpContext,
+            cancellationToken);
+        if (callee is null)
+        {
+            await realtimeService.SendToUserAsync(
+                userId,
+                new
+                {
+                    type = "call.unavailable",
+                    payload = new
+                    {
+                        recipientUserId,
+                        reason = errorCode ?? ChatErrorCodes.ChatForbidden,
+                    }
+                },
+                cancellationToken);
+            return;
+        }
+
+        if (!realtimeService.TryCreateCall(userId, recipientUserId, mediaKind!, out var session))
+        {
+            var reason = realtimeService.IsUserOnline(recipientUserId) ? "busy" : "offline";
+            await realtimeService.SendToUserAsync(
+                userId,
+                new
+                {
+                    type = reason == "busy" ? "call.busy" : "call.unavailable",
+                    payload = new
+                    {
+                        recipientUserId,
+                        reason,
+                    }
+                },
+                cancellationToken);
+            return;
+        }
+
+        var caller = await chatService.GetChatUserAsync(userId, httpContext, cancellationToken);
+        if (caller is null)
+        {
+            realtimeService.TryEndCall(session.CallId, userId, out _);
+            return;
+        }
+
+        await realtimeService.SendToUserAsync(
+            userId,
+            new
+            {
+                type = "call.outgoing.created",
+                payload = new
+                {
+                    callId = session.CallId,
+                    recipientUserId,
+                    mediaKind = session.MediaKind,
+                }
+            },
+            cancellationToken);
+        await realtimeService.SendToUserAsync(
+            recipientUserId,
+            new
+            {
+                type = "call.incoming",
+                payload = new
+                {
+                    callId = session.CallId,
+                    mediaKind = session.MediaKind,
+                    caller,
+                }
+            },
+            cancellationToken);
+        return;
+    }
+
+    if (!payload.TryGetProperty("callId", out var callIdProperty)
+        || !Guid.TryParse(callIdProperty.GetString(), out var callId))
+    {
+        return;
+    }
+
+    if (string.Equals(type, "call.accept", StringComparison.OrdinalIgnoreCase))
+    {
+        if (!realtimeService.TryAcceptCall(callId, userId, out var session))
+            return;
+
+        await realtimeService.SendToUserAsync(
+            session.CallerUserId,
+            new
+            {
+                type = "call.accepted",
+                payload = new { callId = session.CallId }
+            },
+            cancellationToken);
+        return;
+    }
+
+    if (string.Equals(type, "call.reject", StringComparison.OrdinalIgnoreCase))
+    {
+        if (!realtimeService.TryRejectCall(callId, userId, out var session))
+            return;
+
+        await realtimeService.SendToUserAsync(
+            session.CallerUserId,
+            new
+            {
+                type = "call.rejected",
+                payload = new { callId = session.CallId }
+            },
+            cancellationToken);
+        return;
+    }
+
+    if (string.Equals(type, "call.cancel", StringComparison.OrdinalIgnoreCase))
+    {
+        if (!realtimeService.TryCancelCall(callId, userId, out var session))
+            return;
+
+        await realtimeService.SendToUserAsync(
+            session.CalleeUserId,
+            new
+            {
+                type = "call.cancelled",
+                payload = new { callId = session.CallId }
+            },
+            cancellationToken);
+        return;
+    }
+
+    if (string.Equals(type, "call.end", StringComparison.OrdinalIgnoreCase))
+    {
+        if (!realtimeService.TryEndCall(callId, userId, out var session))
+            return;
+
+        await realtimeService.SendToUserAsync(
+            session.OtherUserId(userId),
+            new
+            {
+                type = "call.ended",
+                payload = new
+                {
+                    callId = session.CallId,
+                    reason = "remote_end",
+                }
+            },
+            cancellationToken);
+        return;
+    }
+
+    if (!realtimeService.TryGetCall(callId, userId, out var activeCall))
+        return;
+
+    if (string.Equals(type, "call.signal.offer", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(type, "call.signal.answer", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(type, "call.signal.ice", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(type, "call.media.update", StringComparison.OrdinalIgnoreCase))
+    {
+        await realtimeService.SendToUserAsync(
+            activeCall.OtherUserId(userId),
+            new
+            {
+                type,
+                payload = JsonSerializer.Deserialize<object>(payload.GetRawText()),
+            },
+            cancellationToken);
     }
 }
 

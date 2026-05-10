@@ -666,6 +666,46 @@ public class ChatService(
         return (true, null);
     }
 
+    public async Task<(ChatUserResponse? User, string? ErrorCode)> ValidateDirectCallTargetAsync(
+        Guid userId,
+        Guid otherUserId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == otherUserId)
+            return (null, ChatErrorCodes.ChatForbidden);
+
+        var callerExists = await db.Users
+            .AsNoTracking()
+            .AnyAsync(u => u.Id == userId && u.DeletedAt == null, cancellationToken);
+        if (!callerExists)
+            return (null, ChatErrorCodes.ChatNotFound);
+
+        var callee = await db.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == otherUserId && u.DeletedAt == null, cancellationToken);
+        if (callee is null)
+            return (null, ChatErrorCodes.ChatNotFound);
+
+        if (await AreUsersBlockedEitherDirectionAsync(userId, otherUserId, cancellationToken))
+            return (null, ChatErrorCodes.ChatBlocked);
+
+        return (BuildUserResponse(callee, httpContext, realtimeService.IsUserOnline(callee.Id)), null);
+    }
+
+    public async Task<ChatUserResponse?> GetChatUserAsync(
+        Guid userId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await db.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == userId && u.DeletedAt == null, cancellationToken);
+        return user is null
+            ? null
+            : BuildUserResponse(user, httpContext, realtimeService.IsUserOnline(user.Id));
+    }
+
     public async Task<bool> ForwardRecordingStatusAsync(
         Guid userId,
         Guid threadId,
