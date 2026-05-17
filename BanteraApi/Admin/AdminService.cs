@@ -1,5 +1,8 @@
 using BanteraApi.Database;
+using BanteraApi.Database.Entities;
 using BanteraApi.Storage;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 
 namespace BanteraApi.Admin;
@@ -18,7 +21,8 @@ public record AdminUserListItem(
     string? LearningLanguage,
     DateTime CreatedAt,
     DateTime? LastLoginAt,
-    int VideoCount);
+    int VideoCount,
+    string? AvatarUrl);
 
 public record AdminIdentityInfo(string Provider, string? ProviderEmail, DateTime CreatedAt);
 
@@ -36,7 +40,9 @@ public record AdminUserDetail(
     DateTime CreatedAt,
     DateTime? LastLoginAt,
     IReadOnlyList<AdminIdentityInfo> Identities,
-    AdminUserStats Stats);
+    AdminUserStats Stats,
+    string? AvatarUrl,
+    bool AlwaysOnline);
 
 public record AdminVideoListItem(
     Guid Id,
@@ -77,8 +83,24 @@ public record AdminStats(
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
-public class AdminService(AppDbContext db, R2StorageService r2)
+public class AdminService(
+    AppDbContext db,
+    R2StorageService r2,
+    LinkGenerator linkGenerator,
+    IHttpContextAccessor httpContextAccessor)
 {
+    private string? BuildAvatarUrl(Guid userId, string? avatarObjectKey, DateTime? avatarUpdatedAt)
+    {
+        if (string.IsNullOrWhiteSpace(avatarObjectKey)) return null;
+        var httpContext = httpContextAccessor.HttpContext;
+        if (httpContext is null) return null;
+        return linkGenerator.GetUriByName(
+            httpContext,
+            "GetUserAvatar",
+            values: new { userId, v = avatarUpdatedAt?.Ticks });
+    }
+
+
     public async Task<AdminPagedResult<AdminUserListItem>> ListUsersAsync(
         string? search,
         string? sort,
@@ -134,10 +156,11 @@ public class AdminService(AppDbContext db, R2StorageService r2)
             _                        => query.OrderByDescending(x => x.User.CreatedAt),
         };
 
-        var items = await query
+        var rows = await query
             .Skip(offset)
             .Take(limit)
-            .Select(x => new AdminUserListItem(
+            .Select(x => new
+            {
                 x.User.Id,
                 x.User.Name,
                 x.Email,
@@ -147,8 +170,26 @@ public class AdminService(AppDbContext db, R2StorageService r2)
                 x.User.LearningLanguage,
                 x.User.CreatedAt,
                 x.User.LastLoginAt,
-                x.VideoCount))
+                x.VideoCount,
+                x.User.AvatarObjectKey,
+                x.User.AvatarUpdatedAt,
+            })
             .ToListAsync();
+
+        var items = rows
+            .Select(x => new AdminUserListItem(
+                x.Id,
+                x.Name,
+                x.Email,
+                x.Role,
+                x.Status,
+                x.NativeLanguage,
+                x.LearningLanguage,
+                x.CreatedAt,
+                x.LastLoginAt,
+                x.VideoCount,
+                BuildAvatarUrl(x.Id, x.AvatarObjectKey, x.AvatarUpdatedAt)))
+            .ToList();
 
         return new AdminPagedResult<AdminUserListItem>(items, total);
     }
@@ -179,7 +220,9 @@ public class AdminService(AppDbContext db, R2StorageService r2)
             user.CreatedAt,
             user.LastLoginAt,
             identities,
-            new AdminUserStats(videoCount, videoCount));
+            new AdminUserStats(videoCount, videoCount),
+            BuildAvatarUrl(user.Id, user.AvatarObjectKey, user.AvatarUpdatedAt),
+            user.AlwaysOnline);
     }
 
     public async Task<bool> PatchUserAsync(
@@ -187,7 +230,8 @@ public class AdminService(AppDbContext db, R2StorageService r2)
         string? role,
         string? status,
         int? aiAudioDailyLimit,
-        bool clearAiLimit)
+        bool clearAiLimit,
+        bool? alwaysOnline)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId && u.DeletedAt == null);
         if (user is null) return false;
@@ -196,6 +240,7 @@ public class AdminService(AppDbContext db, R2StorageService r2)
         if (status is not null) user.Status = status;
         if (clearAiLimit) user.AiAudioDailyLimit = null;
         else if (aiAudioDailyLimit.HasValue) user.AiAudioDailyLimit = aiAudioDailyLimit.Value;
+        if (alwaysOnline.HasValue) user.AlwaysOnline = alwaysOnline.Value;
 
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();

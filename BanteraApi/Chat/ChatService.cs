@@ -69,7 +69,7 @@ public class ChatService(
         var onlineUsers = await db.Users
             .AsNoTracking()
             .Where(u => u.Id != userId && u.DeletedAt == null && u.Status == "active")
-            .Where(u => onlineIds.Contains(u.Id))
+            .Where(u => u.AlwaysOnline || onlineIds.Contains(u.Id))
             .ToListAsync(cancellationToken);
 
         var filteredOnlineUsers = onlineUsers
@@ -231,7 +231,7 @@ public class ChatService(
             new { type = "message.created", payload = new { threadId = thread.Id, messageId = message.Id } },
             cancellationToken);
 
-        if (recipient.ChatNotificationsEnabled && !recipientMembership.IsMuted && !realtimeService.IsUserOnline(otherUserId))
+        if (recipient.ChatNotificationsEnabled && !recipientMembership.IsMuted && !IsUserVisibleOnline(recipient))
         {
             var tokens = await db.UserPushTokens
                 .AsNoTracking()
@@ -349,7 +349,7 @@ public class ChatService(
             .Where(u => u.Id != userId)
             .Where(u => u.ChatNotificationsEnabled)
             .Where(u => membershipMap.TryGetValue(u.Id, out var membership) && !membership.IsMuted)
-            .Where(u => !realtimeService.IsUserOnline(u.Id))
+            .Where(u => !IsUserVisibleOnline(u))
             .Select(u => u.Id)
             .ToList();
 
@@ -652,7 +652,7 @@ public class ChatService(
             .ToListAsync(cancellationToken);
 
         return blockedUsers
-            .Select(u => BuildUserResponse(u, httpContext, realtimeService.IsUserOnline(u.Id)))
+            .Select(u => BuildUserResponse(u, httpContext, IsUserVisibleOnline(u)))
             .ToList();
     }
 
@@ -736,7 +736,7 @@ public class ChatService(
         if (await AreUsersBlockedEitherDirectionAsync(userId, otherUserId, cancellationToken))
             return (null, ChatErrorCodes.ChatBlocked);
 
-        return (BuildUserResponse(callee, httpContext, realtimeService.IsUserOnline(callee.Id)), null);
+        return (BuildUserResponse(callee, httpContext, IsUserVisibleOnline(callee)), null);
     }
 
     public async Task<ChatUserResponse?> GetChatUserAsync(
@@ -749,7 +749,7 @@ public class ChatService(
             .FirstOrDefaultAsync(u => u.Id == userId && u.DeletedAt == null, cancellationToken);
         return user is null
             ? null
-            : BuildUserResponse(user, httpContext, realtimeService.IsUserOnline(user.Id));
+            : BuildUserResponse(user, httpContext, IsUserVisibleOnline(user));
     }
 
     public async Task<bool> ForwardRecordingStatusAsync(
@@ -1022,7 +1022,7 @@ public class ChatService(
         var otherUser = BuildUserResponse(
             otherMembership.User,
             httpContext,
-            realtimeService.IsUserOnline(otherMembership.UserId));
+            IsUserVisibleOnline(otherMembership.User));
 
         return new ChatThreadSummaryResponse(
             thread.Id,
@@ -1048,7 +1048,7 @@ public class ChatService(
         HttpContext httpContext)
     {
         var sender = message.SenderUser;
-        var senderUser = BuildUserResponse(sender, httpContext, realtimeService.IsUserOnline(sender.Id));
+        var senderUser = BuildUserResponse(sender, httpContext, IsUserVisibleOnline(sender));
         return new ChatMessageResponse(
             message.Id,
             message.ThreadId,
@@ -1076,6 +1076,11 @@ public class ChatService(
             ChatLanguageResolver.Resolve(user.NativeLanguage)?.OriginalCode,
             ChatLanguageResolver.Resolve(user.NativeLanguage)?.ExactDisplayName,
             isOnline);
+    }
+
+    private bool IsUserVisibleOnline(User user)
+    {
+        return user.AlwaysOnline || realtimeService.IsUserOnline(user.Id);
     }
 
     private static string ResolveUserName(User user)

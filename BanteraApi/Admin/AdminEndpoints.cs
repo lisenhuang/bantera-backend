@@ -49,7 +49,7 @@ public static class AdminEndpoints
             PatchUserRequest req,
             AdminService admin) =>
         {
-            var ok = await admin.PatchUserAsync(userId, req.Role, req.Status, req.AiAudioDailyLimit, req.ClearAiLimit);
+            var ok = await admin.PatchUserAsync(userId, req.Role, req.Status, req.AiAudioDailyLimit, req.ClearAiLimit, req.AlwaysOnline);
             return ok
                 ? Results.Ok(new { updated = true })
                 : Results.NotFound(new ApiError("user_not_found", "User not found."));
@@ -142,4 +142,5 @@ public record PatchUserRequest(
     string? Role,
     string? Status,
     int? AiAudioDailyLimit,
-    bool ClearAiLimit = false);
+    bool ClearAiLimit = false,
+    bool? AlwaysOnline = null);

@@ -35,6 +35,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.AvatarObjectKey).HasMaxLength(255);
             e.Property(x => x.Role).HasMaxLength(20).IsRequired();
             e.Property(x => x.Status).HasMaxLength(50).IsRequired();
+            e.Property(x => x.AlwaysOnline).HasDefaultValue(false).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
         });

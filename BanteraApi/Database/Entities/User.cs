@@ -13,6 +13,7 @@ public class User
     public DateTime? AvatarUpdatedAt { get; set; }
     public string Role { get; set; } = "user";
     public string Status { get; set; } = "active";
+    public bool AlwaysOnline { get; set; } = false;
     public DateTime? LastLoginAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

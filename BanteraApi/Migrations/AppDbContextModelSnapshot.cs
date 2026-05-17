@@ -295,6 +295,11 @@ namespace BanteraApi.Migrations
                     b.Property<int?>("AiAudioDailyLimit")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("AlwaysOnline")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("AvatarObjectKey")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");

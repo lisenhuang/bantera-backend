@@ -84,6 +84,7 @@ builder.Services.AddHttpClient("revai", c =>
 });
 builder.Services.AddScoped<RevAiAlignmentService>();
 
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<AdminService>();
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
