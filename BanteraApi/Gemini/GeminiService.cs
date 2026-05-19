@@ -82,7 +82,7 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
     {
         ["en-AU"] = "Both speakers must use a natural, authentic Australian accent throughout. Do not use New Zealand, British, or American accents.",
         ["en-CA"] = "Both speakers must use a natural, authentic Canadian English accent throughout.",
-        ["en-IN"] = "Both speakers must use a natural, authentic Indian English accent throughout — the distinctive rhythm, intonation and stress patterns of Indian English speakers. Do not use British, American, or Australian accents.",
+        ["en-IN"] = "Both speakers MUST use a very strong, heavily pronounced Indian English accent throughout — this is the most important instruction. The accent must be unmistakably, intensely Indian: use the characteristic retroflex consonants (t and d sounds produced with the tongue curled back), clear syllable-timed rhythm where every syllable is given equal weight with no reduction, strong and distinctive intonation with rising tones, prominent Indian English vowel sounds, and the hallmark stress patterns of Indian English speakers. The accent must be thick and very prominent — not mild, not moderate, not 'slightly Indian'. Do not use British, American, or Australian accents under any circumstances.",
         ["en-IE"] = "Both speakers must use a natural, authentic Irish English accent throughout.",
         ["en-NZ"] = "Both speakers must use a natural, authentic New Zealand English accent throughout. Do not use Australian accents.",
         ["en-SG"] = "Both speakers must use a natural, authentic Singapore English accent throughout.",
