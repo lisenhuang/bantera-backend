@@ -371,25 +371,21 @@ app.MapPost("/api/auth/refresh", async (RefreshRequest req, AuthService auth) =>
     var (response, errorCode) = await auth.RefreshAsync(req.RefreshToken);
     if (response is null)
         return Results.Json(
-            new ApiError(errorCode, "Refresh token is expired or has already been used. Please log in again."),
+            new ApiError(errorCode, "Session expired. Please log in again."),
             statusCode: 401);
 
     return Results.Ok(response);
 })
 .WithName("RefreshToken")
 .WithMetadata(new SwaggerOperationAttribute(
-    "Refresh token pair",
+    "Refresh access token",
     """
-    Exchanges a valid refresh token for a **new** access token + refresh token pair.
-    The old refresh token is immediately **revoked** (rotation).
-
-    **Refresh token rotation rules:**
-    - Each refresh issues a brand-new refresh token
-    - The previous refresh token is invalidated — never reuse it
-    - Store the latest refresh token returned by every call to this endpoint
+    Exchanges a valid refresh token for a fresh access token.
+    The refresh token is **not rotated** — the same refresh token is returned and
+    remains valid for a rolling 90-day window from last use.
 
     **Error codes:**
-    - `session_expired` → refresh token is expired or already used → redirect to login
+    - `session_expired` → refresh token is expired or revoked → redirect to login
     """))
 .Produces<LoginResponse>(200)
 .Produces<ApiError>(401)

@@ -137,8 +137,10 @@ public class AuthService(
     }
 
     /// <summary>
-    /// Validates a refresh token, rotates it (old is revoked, new is issued), and
-    /// returns a fresh access + refresh token pair.
+    /// Validates a refresh token and returns a fresh access token.
+    /// The refresh token itself is NOT rotated — the same token is returned so
+    /// clients are never forced to re-login due to a lost-write race condition.
+    /// The session expiry is extended on each successful call (rolling window).
     /// Returns null with <see cref="ErrorCodes.SessionExpired"/> if the session is
     /// expired or revoked.
     /// </summary>
@@ -169,6 +171,10 @@ public class AuthService(
 
             session = legacySessions.FirstOrDefault(s =>
                 jwt.VerifyRefreshToken(plainRefreshToken, s.RefreshTokenHash));
+
+            // Back-fill the lookup index so future refreshes use the fast path.
+            if (session is not null)
+                session.RefreshTokenLookup = lookup;
         }
 
         if (session is null)
@@ -177,23 +183,14 @@ public class AuthService(
         if (session.User.Status != "active")
             return (null, ErrorCodes.SessionExpired);
 
-        // Revoke the old session
-        session.RevokedAt = DateTime.UtcNow;
-
-        // Issue new tokens
+        // Issue a new access token. The refresh token is intentionally NOT rotated —
+        // rotation caused lost-write races where iOS could kill the app after the
+        // server committed the new token but before the client saved it, permanently
+        // locking the user out until they re-authenticated.
         var accessToken = jwt.GenerateAccessToken(session.UserId, session.User.Role);
-        var newPlainRefreshToken = jwt.GenerateRefreshToken();
 
-        db.UserSessions.Add(new UserSession
-        {
-            UserId = session.UserId,
-            RefreshTokenHash = jwt.HashRefreshToken(newPlainRefreshToken),
-            RefreshTokenLookup = JwtService.ComputeRefreshTokenLookup(newPlainRefreshToken),
-            DeviceName = session.DeviceName,
-            ExpiresAt = DateTime.UtcNow.AddDays(_settings.RefreshTokenExpiryDays),
-            CreatedAt = DateTime.UtcNow,
-        });
-
+        // Extend the session window on each use (rolling 90-day expiry).
+        session.ExpiresAt = DateTime.UtcNow.AddDays(_settings.RefreshTokenExpiryDays);
         session.User.LastLoginAt = DateTime.UtcNow;
         session.User.UpdatedAt = DateTime.UtcNow;
 
@@ -203,7 +200,7 @@ public class AuthService(
             AccessToken: accessToken,
             TokenType: "Bearer",
             ExpiresIn: _settings.AccessTokenExpiryMinutes * 60,
-            RefreshToken: newPlainRefreshToken
+            RefreshToken: plainRefreshToken
         ), string.Empty);
     }
 
