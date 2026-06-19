@@ -144,6 +144,56 @@ public class GoogleWebAuthService(
     private string AppRedirect(string key, string value)
         => QueryHelpers.AddQueryString(_settings.AppRedirectUri, key, value);
 
+    /// <summary>
+    /// Wraps the app deep-link in a tiny HTML page served from our own domain. The page
+    /// immediately bounces to the <c>bantera://</c> deep link — which is what completes the
+    /// native flutter_web_auth_2 flow and closes the Auth Tab — and, as a fallback if the
+    /// automatic hand-off is ever blocked, shows a friendly "you can close this tab" message
+    /// plus a manual button. A browser tab generally cannot close itself via JS, so the
+    /// native deep-link return is the real close mechanism; this page is graceful UX only.
+    /// </summary>
+    public static string BuildCallbackHtml(string appUrl)
+    {
+        var hrefAttr = System.Text.Encodings.Web.HtmlEncoder.Default.Encode(appUrl);
+        var jsString = JsonSerializer.Serialize(appUrl);
+        return $$"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta http-equiv="refresh" content="0;url={{hrefAttr}}">
+            <title>Bantera</title>
+            <style>
+              html,body{height:100%;margin:0}
+              body{display:flex;align-items:center;justify-content:center;
+                font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+                background:#0f1115;color:#f5f5f7;text-align:center;padding:24px}
+              .card{max-width:340px}
+              h1{font-size:20px;margin:0 0 8px}
+              p{font-size:15px;line-height:1.5;color:#b8b8c0;margin:0 0 20px}
+              a.btn{display:inline-block;padding:12px 22px;border-radius:999px;
+                background:#6c5ce7;color:#fff;text-decoration:none;font-weight:600;font-size:15px}
+            </style>
+            </head>
+            <body>
+              <div class="card">
+                <h1>✅ You're signed in</h1>
+                <p>You can close this tab and return to Bantera.</p>
+                <a class="btn" href="{{hrefAttr}}">Open Bantera</a>
+              </div>
+              <script>
+                // Hand control back to the app. This navigation to the bantera:// scheme is
+                // what flutter_web_auth_2 intercepts to finish login and close the tab.
+                window.location.replace({{jsString}});
+                // Best effort only — an Auth/Custom Tab usually cannot be closed by its own JS.
+                setTimeout(function(){ try { window.close(); } catch (e) {} }, 1500);
+              </script>
+            </body>
+            </html>
+            """;
+    }
+
     private static string StateKey(string state) => $"google_oauth_state:{state}";
     private static string CodeKey(string code) => $"google_oauth_code:{code}";
 

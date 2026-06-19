@@ -384,15 +384,19 @@ app.MapGet("/api/auth/google/start", (GoogleWebAuthService google) =>
     "Opened in a Custom Tab by the Android app. Redirects the browser to Google's consent screen."))
 .AllowAnonymous();
 
-app.MapGet("/api/auth/google/callback", async (string? code, string? state, string? error, GoogleWebAuthService google, CancellationToken cancellationToken) =>
+app.MapGet("/api/auth/google/callback", async (string? code, string? state, string? error, GoogleWebAuthService google, HttpResponse response, CancellationToken cancellationToken) =>
 {
     var appUrl = await google.HandleCallbackAsync(code, state, error, cancellationToken);
-    return Results.Redirect(appUrl);
+    // Serve a small page on our own domain that bounces to the bantera:// deep link
+    // (completing the native flow + closing the Auth Tab) and shows a "you can close
+    // this tab" fallback. Never cache it — it carries a one-time code.
+    response.Headers.CacheControl = "no-store";
+    return Results.Content(GoogleWebAuthService.BuildCallbackHtml(appUrl), "text/html; charset=utf-8");
 })
 .WithName("GoogleAuthCallback")
 .WithMetadata(new SwaggerOperationAttribute(
     "Google sign-in callback",
-    "Google redirects here. The backend exchanges the code and deep-links a one-time code back to the app."))
+    "Google redirects here. The backend exchanges the code and returns a page that deep-links a one-time code back to the app."))
 .AllowAnonymous();
 
 app.MapPost("/api/auth/google/exchange", (GoogleExchangeRequest req, GoogleWebAuthService google) =>
