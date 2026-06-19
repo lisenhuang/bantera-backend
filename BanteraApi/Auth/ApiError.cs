@@ -37,6 +37,12 @@ public static class ErrorCodes
     /// <summary>The Apple identity token audience does not match this app's configured identifier.</summary>
     public const string AppleAudienceMismatch = "apple_audience_mismatch";
 
+    /// <summary>Google ID token could not be validated.</summary>
+    public const string InvalidGoogleToken = "invalid_google_token";
+
+    /// <summary>The Google ID token audience does not match this app's configured client ID.</summary>
+    public const string GoogleAudienceMismatch = "google_audience_mismatch";
+
     /// <summary>Provided profile data failed validation.</summary>
     public const string InvalidProfile = "invalid_profile";
 

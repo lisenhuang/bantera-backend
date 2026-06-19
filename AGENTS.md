@@ -19,6 +19,13 @@ Every time any code is modified in this codebase, bump the version in `BanteraAp
 - Do not remove, repurpose, or silently break existing API behavior if released app clients may still depend on it.
 - If a change cannot be made backward-compatible, introduce a new versioned API surface such as `/api/v2/...` and keep the previous API available until existing app clients can migrate.
 
+## Deployment & server configuration
+
+- The backend is **published** — it runs in production (Docker on the server, behind a Cloudflare Tunnel). Treat it as live: merged changes reach real users on the next deploy.
+- **Production config and secrets are supplied as environment variables on the server**, using .NET's `Section__Key` convention (double underscore `__` maps to the config `:` separator) — e.g. `Jwt__Secret`, `GoogleSignIn__ClientSecret`, `GoogleSignIn__ClientId`. Env vars override `appsettings.json` at runtime.
+- The committed `appsettings.json` holds non-secret defaults and **placeholders** for secrets; `appsettings.Development.json` is local-dev only and is **not** loaded in production.
+- When you add a config key or secret that production needs: add it to `appsettings.json` (a placeholder for secrets, the real value for non-secrets like client IDs) so structure + local dev work, and call out in your hand-off that the matching `Section__Key` env var must be set on the server — otherwise the feature is inert in prod.
+
 ## User-facing error messages
 
 - Do not expose Gemini, AI provider, model, key/configuration, or other raw technical backend failure details in API responses shown to users.

@@ -37,6 +37,9 @@ builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection(JwtSett
 builder.Services.AddSingleton<JwtService>();
 builder.Services.Configure<AppleSignInSettings>(builder.Configuration.GetSection(AppleSignInSettings.Section));
 builder.Services.AddHttpClient<AppleIdentityTokenValidator>();
+builder.Services.Configure<GoogleSignInSettings>(builder.Configuration.GetSection(GoogleSignInSettings.Section));
+builder.Services.AddHttpClient<GoogleIdentityTokenValidator>();
+builder.Services.AddHttpClient<GoogleWebAuthService>();
 builder.Services.AddScoped<AuthService>();
 
 builder.Services.Configure<R2Settings>(builder.Configuration.GetSection(R2Settings.Section));
@@ -361,6 +364,55 @@ app.MapPost("/api/auth/apple", async (AppleLoginRequest req, AuthService auth, C
     **Account linking rule:**
     - Matching email alone does **not** link an existing email/password account
     - Apple creates or uses a separate `provider = apple` identity keyed by Apple's subject claim
+    """))
+.Produces<LoginResponse>(200)
+.Produces<ApiError>(401)
+.AllowAnonymous();
+
+// ── Google Sign-In (Android, server-mediated web flow) ──────────────────────
+// The app opens /start in a Custom Tab; Google redirects to /callback; the backend
+// exchanges the code (secret stays server-side), then deep-links a one-time code
+// back to the app, which redeems it at /exchange. No app SHA-1 / Android OAuth
+// client needed — the audience is the Web client only.
+app.MapGet("/api/auth/google/start", (GoogleWebAuthService google) =>
+{
+    return Results.Redirect(google.BuildAuthorizationUrl());
+})
+.WithName("GoogleAuthStart")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Start Google sign-in (web flow)",
+    "Opened in a Custom Tab by the Android app. Redirects the browser to Google's consent screen."))
+.AllowAnonymous();
+
+app.MapGet("/api/auth/google/callback", async (string? code, string? state, string? error, GoogleWebAuthService google, CancellationToken cancellationToken) =>
+{
+    var appUrl = await google.HandleCallbackAsync(code, state, error, cancellationToken);
+    return Results.Redirect(appUrl);
+})
+.WithName("GoogleAuthCallback")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Google sign-in callback",
+    "Google redirects here. The backend exchanges the code and deep-links a one-time code back to the app."))
+.AllowAnonymous();
+
+app.MapPost("/api/auth/google/exchange", (GoogleExchangeRequest req, GoogleWebAuthService google) =>
+{
+    var response = google.Redeem(req.Code);
+    return response is null
+        ? Results.Json(
+            new ApiError(ErrorCodes.InvalidGoogleToken, "Google sign-in could not be verified. Please try again."),
+            statusCode: 401)
+        : Results.Ok(response);
+})
+.WithName("GoogleAuthExchange")
+.WithMetadata(new SwaggerOperationAttribute(
+    "Exchange Google one-time code",
+    """
+    The app posts the one-time code from the callback deep link and receives the Bantera token pair.
+
+    **Account linking rule:**
+    - Matching email alone does **not** link an existing email/password or Apple account
+    - Google creates or uses a separate `provider = google` identity keyed by Google's subject claim
     """))
 .Produces<LoginResponse>(200)
 .Produces<ApiError>(401)

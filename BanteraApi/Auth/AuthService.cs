@@ -9,6 +9,7 @@ public class AuthService(
     AppDbContext db,
     JwtService jwt,
     AppleIdentityTokenValidator appleTokenValidator,
+    GoogleIdentityTokenValidator googleTokenValidator,
     IOptions<JwtSettings> options)
 {
     private readonly JwtSettings _settings = options.Value;
@@ -123,6 +124,74 @@ public class AuthService(
             if (string.IsNullOrWhiteSpace(identity.ProviderEmail))
             {
                 identity.ProviderEmail = NormalizeOptionalEmail(validation.Email ?? request.Email);
+            }
+
+            if (identity.EmailVerifiedAt is null && validation.EmailVerified)
+            {
+                identity.EmailVerifiedAt = now;
+            }
+
+            identity.UpdatedAt = now;
+        }
+
+        return (await IssueSessionAsync(identity.User), string.Empty);
+    }
+
+    public async Task<(LoginResponse? Response, string ErrorCode)> LoginWithGoogleAsync(
+        string idToken,
+        CancellationToken cancellationToken = default)
+    {
+        var validation = await googleTokenValidator.ValidateAsync(
+            idToken,
+            cancellationToken);
+
+        if (!validation.IsValid || string.IsNullOrWhiteSpace(validation.Subject))
+            return (null, validation.ErrorCode ?? ErrorCodes.InvalidGoogleToken);
+
+        var identity = await db.UserIdentities
+            .Include(i => i.User)
+            .FirstOrDefaultAsync(i =>
+                i.Provider == "google" &&
+                i.ProviderUserId == validation.Subject,
+                cancellationToken);
+
+        var now = DateTime.UtcNow;
+        if (identity is null)
+        {
+            var user = new User
+            {
+                Name = ResolveGoogleName(
+                    validation.Name,
+                    validation.GivenName,
+                    validation.FamilyName,
+                    validation.Email),
+                Status = "active",
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+
+            identity = new UserIdentity
+            {
+                User = user,
+                Provider = "google",
+                ProviderUserId = validation.Subject,
+                ProviderEmail = NormalizeOptionalEmail(validation.Email),
+                EmailVerifiedAt = validation.EmailVerified ? now : null,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+
+            db.Users.Add(user);
+            db.UserIdentities.Add(identity);
+        }
+        else
+        {
+            if (identity.User.Status != "active")
+                return (null, ErrorCodes.Unauthorized);
+
+            if (string.IsNullOrWhiteSpace(identity.ProviderEmail))
+            {
+                identity.ProviderEmail = NormalizeOptionalEmail(validation.Email);
             }
 
             if (identity.EmailVerifiedAt is null && validation.EmailVerified)
@@ -254,6 +323,25 @@ public class AuthService(
 
     private static string ResolveAppleName(string? givenName, string? familyName, string? email)
     {
+        var combinedName = string.Join(
+            " ",
+            new[] { givenName?.Trim(), familyName?.Trim() }
+                .Where(x => !string.IsNullOrWhiteSpace(x)));
+
+        if (!string.IsNullOrWhiteSpace(combinedName))
+            return combinedName;
+
+        if (!string.IsNullOrWhiteSpace(email))
+            return DefaultNameFromEmail(NormalizeEmail(email));
+
+        return "Bantera user";
+    }
+
+    private static string ResolveGoogleName(string? name, string? givenName, string? familyName, string? email)
+    {
+        if (!string.IsNullOrWhiteSpace(name))
+            return name.Trim();
+
         var combinedName = string.Join(
             " ",
             new[] { givenName?.Trim(), familyName?.Trim() }

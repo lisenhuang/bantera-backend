@@ -1,0 +1,16 @@
+{
+  // Prompts for VSCode's built-in "Generate Commit Message" (sparkle) button.
+  // These force the AI to write detailed, well-structured commit messages.
+  "github.copilot.chat.commitMessageGeneration.instructions": [
+    { "text": "Always write a detailed commit message, never a single one-line summary." },
+    { "text": "Use the Conventional Commits format for the subject: `type(scope): summary`, where type is one of feat, fix, docs, refactor, perf, test, build, ci, chore." },
+    { "text": "Keep the subject line under 50 characters, in the imperative mood (e.g. 'add', not 'added'), with no trailing period." },
+    { "text": "Always include a body, separated from the subject by one blank line, with lines wrapped at 72 characters." },
+    { "text": "In the body, explain WHAT changed and WHY it changed (the motivation), not how. When the diff touches several areas, use a '- ' bullet per distinct change." },
+    { "text": "This is a .NET backend API: prefer scopes like api, auth, db, migrations, config, or the affected controller/service name, and call out any breaking API changes explicitly." }
+  ],
+  // Show the full diff in the commit editor (git commit --verbose) so messages
+  // written by hand are just as detailed.
+  "git.verboseCommit": true,
+  "git.useEditorAsCommitInput": true
+}
