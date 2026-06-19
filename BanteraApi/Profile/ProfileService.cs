@@ -18,7 +18,8 @@ public class ProfileService(
     CloudflareImageService cloudflareImageService,
     LinkGenerator linkGenerator,
     ILogger<ProfileService> logger,
-    IMemoryCache memoryCache)
+    IMemoryCache memoryCache,
+    IHttpClientFactory httpClientFactory)
 {
     private static readonly HashSet<string> SupportedImageContentTypes =
     [
@@ -228,6 +229,50 @@ public class ProfileService(
 
         return true;
     }
+
+    /// Best-effort: download an external avatar (e.g. a Google profile picture)
+    /// and store it in R2 as the user's avatar. Skips if the user already has one.
+    /// Never throws — failures leave the user without an avatar (falls back to the
+    /// usual placeholder / generated-avatar flow).
+    public async Task TrySetAvatarFromUrlAsync(
+        Guid userId,
+        string imageUrl,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var user = await LoadUserAsync(userId, cancellationToken);
+            if (user is null || !string.IsNullOrWhiteSpace(user.AvatarObjectKey))
+                return;
+
+            using var client = httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
+
+            var bytes = await client.GetByteArrayAsync(UpscaleAvatarUrl(imageUrl), cancellationToken);
+            if (bytes.Length == 0 || bytes.Length > MaxAvatarBytes)
+                return;
+
+            using var image = Image.Load(bytes);
+            await using var jpegStream = new MemoryStream();
+            await image.SaveAsJpegAsync(jpegStream, new JpegEncoder { Quality = 85 }, cancellationToken);
+            jpegStream.Position = 0;
+
+            await db.Entry(user).ReloadAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(user.AvatarObjectKey))
+                return;
+
+            await StoreAvatarAsync(user, jpegStream, "image/jpeg", cancellationToken);
+            logger.LogInformation("Set default avatar from external URL. UserId={UserId}", userId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not set default avatar from external URL. UserId={UserId}", userId);
+        }
+    }
+
+    // Google avatar URLs accept a size suffix like =s96-c; request a larger one.
+    private static string UpscaleAvatarUrl(string url) =>
+        System.Text.RegularExpressions.Regex.Replace(url, @"=s\d+(-c)?$", "=s256$1");
 
     public async Task<StoredObjectResult?> GetAvatarAsync(
         Guid userId,

@@ -119,7 +119,8 @@ public class GoogleIdentityTokenValidator(
             ParseBooleanClaim(principal.FindFirstValue("email_verified")),
             principal.FindFirstValue("name"),
             principal.FindFirstValue("given_name"),
-            principal.FindFirstValue("family_name"));
+            principal.FindFirstValue("family_name"),
+            principal.FindFirstValue("picture"));
     }
 
     private static bool ParseBooleanClaim(string? value)
@@ -143,7 +144,8 @@ public sealed record GoogleTokenValidationResult(
     bool EmailVerified,
     string? Name,
     string? GivenName,
-    string? FamilyName)
+    string? FamilyName,
+    string? Picture)
 {
     public static GoogleTokenValidationResult Success(
         string subject,
@@ -151,9 +153,10 @@ public sealed record GoogleTokenValidationResult(
         bool emailVerified,
         string? name,
         string? givenName,
-        string? familyName) =>
-        new(true, null, subject, email, emailVerified, name, givenName, familyName);
+        string? familyName,
+        string? picture) =>
+        new(true, null, subject, email, emailVerified, name, givenName, familyName, picture);
 
     public static GoogleTokenValidationResult Fail(string errorCode) =>
-        new(false, errorCode, null, null, false, null, null, null);
+        new(false, errorCode, null, null, false, null, null, null, null);
 }

@@ -26,6 +26,16 @@ Every time any code is modified in this codebase, bump the version in `BanteraAp
 - The committed `appsettings.json` holds non-secret defaults and **placeholders** for secrets; `appsettings.Development.json` is local-dev only and is **not** loaded in production.
 - When you add a config key or secret that production needs: add it to `appsettings.json` (a placeholder for secrets, the real value for non-secrets like client IDs) so structure + local dev work, and call out in your hand-off that the matching `Section__Key` env var must be set on the server — otherwise the feature is inert in prod.
 
+## Deploy-safety sign-off
+
+- After finishing any backend code change, **explicitly tell the user whether it is safe to deploy to production without impacting the currently published (old) app** — give a clear go / no-go, never leave it unsaid.
+- Base the verdict on:
+  1. **Backward compatibility** — existing endpoints, request/response shapes, auth flows, and error payloads must be unchanged or purely additive. Old released clients must keep working.
+  2. **DB migrations** — flag any schema change and whether it is backward-compatible with the running app.
+  3. **Config / secrets** — list any new env vars (`Section__Key`) the server must set *before* the deploy, or the feature is inert / errors.
+  4. **Runtime / startup risk** — call out anything only provable at runtime (e.g. new DI dependencies on a shared service like `AuthService`) and the smoke test that confirms it.
+- If a change is **not** backward-compatible, say so plainly and state exactly what the old app would break — before any deploy happens.
+
 ## User-facing error messages
 
 - Do not expose Gemini, AI provider, model, key/configuration, or other raw technical backend failure details in API responses shown to users.

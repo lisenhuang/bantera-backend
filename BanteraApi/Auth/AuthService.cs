@@ -1,5 +1,6 @@
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
+using BanteraApi.Profile;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -10,6 +11,7 @@ public class AuthService(
     JwtService jwt,
     AppleIdentityTokenValidator appleTokenValidator,
     GoogleIdentityTokenValidator googleTokenValidator,
+    ProfileService profileService,
     IOptions<JwtSettings> options)
 {
     private readonly JwtSettings _settings = options.Value;
@@ -155,6 +157,7 @@ public class AuthService(
                 i.ProviderUserId == validation.Subject,
                 cancellationToken);
 
+        var isNewUser = identity is null;
         var now = DateTime.UtcNow;
         if (identity is null)
         {
@@ -202,7 +205,18 @@ public class AuthService(
             identity.UpdatedAt = now;
         }
 
-        return (await IssueSessionAsync(identity.User), string.Empty);
+        var response = await IssueSessionAsync(identity.User);
+
+        // New Google users get their Google profile photo as a default avatar.
+        if (isNewUser && !string.IsNullOrWhiteSpace(validation.Picture))
+        {
+            await profileService.TrySetAvatarFromUrlAsync(
+                identity.User.Id,
+                validation.Picture!,
+                cancellationToken);
+        }
+
+        return (response, string.Empty);
     }
 
     /// <summary>
