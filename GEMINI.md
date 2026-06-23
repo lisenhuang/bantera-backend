@@ -2,4 +2,4 @@
 
 Please follow the shared project rules below:
 
-@./AGENTS.md
+@./CLAUDE.md
