@@ -45,15 +45,15 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
 
     private static readonly Dictionary<string, string> AccentInstructions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["en-AU"] = "Write the dialogue STRICTLY in Australian English. The speakers MUST sound authentically Australian — use Australian vocabulary and idioms (e.g. 'arvo', 'brekkie', 'no worries', 'mate', 'servo', 'bottle-o'). Do NOT use New Zealand, British, or American English.",
-        ["en-CA"] = "Write the dialogue STRICTLY in Canadian English. The speakers MUST sound authentically Canadian — use Canadian vocabulary and idioms (e.g. 'toque', 'loonie', 'double-double', 'eh', 'hydro'). Do NOT use American or British English.",
-        ["en-IN"] = "Write the dialogue STRICTLY in Indian English. The speakers MUST sound authentically Indian — use Indian English vocabulary, phrasing and idioms natural to India (e.g. 'prepone', 'do the needful', 'out of station', 'revert back', 'itself'). Sentence rhythm should reflect Indian English patterns. Do NOT use British, American, or Australian English.",
-        ["en-IE"] = "Write the dialogue STRICTLY in Irish English. The speakers MUST sound authentically Irish — use Irish vocabulary and idioms (e.g. 'grand', 'craic', 'gas', 'your man', 'deadly'). Do NOT use British or American English.",
-        ["en-NZ"] = "Write the dialogue STRICTLY in New Zealand English. The speakers MUST sound authentically Kiwi — use New Zealand vocabulary and idioms (e.g. 'sweet as', 'chur', 'bach', 'dairy', 'togs', 'jandals', 'kia ora', 'choice'). This is NOT Australian English. Do NOT use Australian slang or idioms.",
-        ["en-SG"] = "Write the dialogue STRICTLY in Singapore English. The speakers MUST sound naturally Singaporean while remaining clear and conversational. Use vocabulary and phrasing common in Singapore when it fits naturally, but avoid making every line slang-heavy.",
-        ["en-ZA"] = "Write the dialogue STRICTLY in South African English. The speakers MUST sound naturally South African, with vocabulary and phrasing that fit South Africa. Do NOT use British, Australian, or American idioms as the dominant voice.",
-        ["en-GB"] = "Write the dialogue STRICTLY in British English. The speakers MUST sound authentically British — use British vocabulary, spellings, and idioms (e.g. 'brilliant', 'cheers', 'biscuit', 'flat', 'rubbish', 'queue'). Do NOT use American or Australian English.",
-        ["en-US"] = "Write the dialogue STRICTLY in US American English. The speakers MUST sound authentically American — use American vocabulary, spellings, and idioms (e.g. 'gotten', 'sidewalk', 'faucet', 'trash can', 'apartment'). Do NOT use British, Australian, or any other English variant.",
+        ["en-AU"] = "Write the dialogue STRICTLY in Australian English, using Australian spelling and everyday Australian wording. Keep the language plain and widely understood — do NOT lean on Australian slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use New Zealand, British, or American English.",
+        ["en-CA"] = "Write the dialogue STRICTLY in Canadian English, using Canadian spelling and everyday Canadian wording. Keep the language plain and widely understood — do NOT lean on Canadian slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use American or British English.",
+        ["en-IN"] = "Write the dialogue STRICTLY in Indian English, using everyday wording and sentence rhythm that read naturally in India. Keep the language plain and widely understood — do NOT lean on Indian English idioms or stock phrases, and do not make regional expressions a feature of the conversation. Do NOT use British, American, or Australian English.",
+        ["en-IE"] = "Write the dialogue STRICTLY in Irish English, using everyday wording that reads naturally in Ireland. Keep the language plain and widely understood — do NOT lean on Irish slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use British or American English.",
+        ["en-NZ"] = "Write the dialogue STRICTLY in New Zealand English, using everyday wording that reads naturally in New Zealand. Keep the language plain and widely understood — do NOT lean on Kiwi slang or idioms, and do not make regional expressions a feature of the conversation. This is NOT Australian English.",
+        ["en-SG"] = "Write the dialogue STRICTLY in Singapore English, using everyday wording that reads naturally in Singapore. Keep the language plain, clear, and conversational — do NOT lean on Singlish slang or sentence-final particles, and do not make regional expressions a feature of the conversation.",
+        ["en-ZA"] = "Write the dialogue STRICTLY in South African English, using everyday wording that reads naturally in South Africa. Keep the language plain and widely understood — do NOT lean on South African slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use British, Australian, or American wording as the dominant voice.",
+        ["en-GB"] = "Write the dialogue STRICTLY in British English, using British spelling and everyday British wording. Keep the language plain and widely understood — do NOT lean on British slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use American or Australian English.",
+        ["en-US"] = "Write the dialogue STRICTLY in US American English, using American spelling and everyday American wording. Keep the language plain and widely understood — do NOT lean on American slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use British, Australian, or any other English variant.",
         ["yue-CN"] = "Write the dialogue entirely in natural Cantonese as used in China mainland. Use Chinese characters, keep it conversational, and do not switch into Mandarin phrasing.",
         ["zh-CN"] = "Write the dialogue entirely in Mandarin Chinese for China mainland (简体中文). Keep it natural and conversational.",
         ["zh-HK"] = "Write the dialogue entirely in natural Chinese for Hong Kong (繁體中文), using wording that fits Hong Kong usage.",
@@ -346,6 +346,7 @@ CONTENT POLICY (follow strictly):
 - If you accept the scenario, the title and every line must stay fully clear of those topics.
 
 {{accentInstruction}}
+Use plain, everyday wording that any speaker of this language would understand. The regional flavour must come from spelling, grammar, and ordinary word choice — NOT from slang, idioms, or catchphrases. Do not showcase, stack, or stereotype regional expressions; use one only if the line would sound unnatural without it.
 {{scenarioLine}}
 
 Target audio duration: approximately {{durationLabel}}.
@@ -376,7 +377,7 @@ Generate a natural, realistic spoken dialogue between exactly TWO people.
 - If splitting would create an incomplete, dependent, or awkward chunk, keep the neighboring words together or keep the full line as one cue.
 - Keep names, abbreviations, decimals, technical terms, and tightly connected technical phrases together.
 - It is valid and preferred to return one short cue equal to the full line text when that is the most natural practice unit.
-- Example that must stay as one cue: "I reckon everyone in Wellington decided they needed a flat white at the same time."
+- Example that must stay as one cue: "I think everyone in the office decided they needed a coffee at exactly the same time."
 - Example of good split: "I usually check the logs first, then I ask the team what changed recently." -> ["I usually check the logs first,", "then I ask the team what changed recently."]
 
 For each speaker, determine:
