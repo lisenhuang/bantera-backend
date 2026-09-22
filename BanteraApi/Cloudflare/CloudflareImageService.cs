@@ -33,7 +33,10 @@ public class CloudflareImageService(
         var client = httpClientFactory.CreateClient("cloudflare");
         var url = $"/client/v4/accounts/{Settings.AccountId}/ai/run/{Model}";
 
-        var body = new { prompt, num_steps = 50, width = 512, height = 512 };
+        // FLUX-1-schnell accepts only `prompt` and `steps` (max 8). Cloudflare now
+        // rejects unknown fields (num_steps/width/height) with a 400 instead of
+        // ignoring them, so send exactly what the model's schema allows.
+        var body = new { prompt, steps = 8 };
         var request = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Headers = { { "Authorization", $"Bearer {Settings.ApiToken}" } },
