@@ -57,4 +57,7 @@ public static class ErrorCodes
 
     /// <summary>User has reached their daily AI audio generation limit.</summary>
     public const string DailyLimitReached = "daily_limit_reached";
+
+    /// <summary>The MCP OAuth authorization request has expired or was already used.</summary>
+    public const string OAuthRequestNotFound = "oauth_request_not_found";
 }

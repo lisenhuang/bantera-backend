@@ -5,6 +5,7 @@ using System.Threading.RateLimiting;
 using System.Data;
 using BanteraApi;
 using BanteraApi.Account;
+using BanteraApi.Activity;
 using BanteraApi.Admin;
 using BanteraApi.Auth;
 using BanteraApi.Chat;
@@ -13,11 +14,16 @@ using BanteraApi.Database;
 using BanteraApi.Database.Entities;
 using BanteraApi.Diagnostics;
 using BanteraApi.Gemini;
+using BanteraApi.Mcp;
+using BanteraApi.Mcp.Tools;
 using BanteraApi.Profile;
 using BanteraApi.RevAi;
 using BanteraApi.Storage;
 using BanteraApi.Videos;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using ModelContextProtocol.AspNetCore;
+using ModelContextProtocol.AspNetCore.Authentication;
+using ModelContextProtocol.Authentication;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
@@ -90,6 +96,30 @@ builder.Services.AddScoped<RevAiAlignmentService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<AdminService>();
 
+// ── Admin MCP server (OAuth 2.1 authorization server + resource server) ───────
+builder.Services.Configure<McpSettings>(builder.Configuration.GetSection(McpSettings.Section));
+builder.Services.AddSingleton<McpTokenService>();
+builder.Services.AddScoped<OAuthClientStore>();
+builder.Services.AddScoped<AuthCodeService>();
+builder.Services.AddScoped<OAuthRefreshTokenService>();
+builder.Services.AddScoped<McpToolContext>();
+builder.Services.AddScoped<McpAuditLogger>();
+builder.Services.AddHostedService<McpOAuthCleanupService>();
+
+// Daily activity tracking, which backs DAU/WAU/MAU.
+builder.Services.AddSingleton<UserActivityRecorder>();
+
+builder.Services.AddMcpServer()
+    .WithHttpTransport(o => o.SessionMode = HttpServerSessionMode.Stateless)
+    .WithTools<SchemaTools>()
+    .WithTools<AnalyticsTools>()
+    .WithTools<ContentTools>()
+    .WithTools<ChatTools>()
+    .WithTools<PushTools>()
+    .WithTools<UserTools>()
+    .WithTools<AdminWriteTools>()
+    .AddAuthorizationFilters();
+
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 // Reads real client IP from CF-Connecting-IP (Cloudflare), X-Forwarded-For, or RemoteIpAddress.
 static string GetClientIp(HttpContext ctx) =>
@@ -108,6 +138,36 @@ builder.Services.AddRateLimiter(opts =>
             Window = TimeSpan.FromMinutes(15),
             QueueLimit = 0,
         }));
+
+    // MCP OAuth endpoints. Registration and authorization are human-paced; the token
+    // endpoint is called more often because Claude refreshes proactively before expiry.
+    opts.AddPolicy("oauth-register", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: GetClientIp(ctx),
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromHours(1),
+            QueueLimit = 0,
+        }));
+
+    opts.AddPolicy("oauth-authorize", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: GetClientIp(ctx),
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 30,
+            Window = TimeSpan.FromMinutes(15),
+            QueueLimit = 0,
+        }));
+
+    opts.AddPolicy("oauth-token", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: GetClientIp(ctx),
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 60,
+            Window = TimeSpan.FromMinutes(5),
+            QueueLimit = 0,
+        }));
+
     opts.RejectionStatusCode = 429;
 });
 
@@ -121,6 +181,21 @@ builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 
 // ── JWT Auth ──────────────────────────────────────────────────────────────────
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret is not configured.");
+
+// MCP tokens are signed with their own key so that the two token types cannot be
+// interchanged even if a future change confuses the schemes.
+var mcpSigningKey = builder.Configuration["Mcp:SigningKey"]
+    ?? throw new InvalidOperationException("Mcp:SigningKey is not configured.");
+var mcpIssuer = builder.Configuration["Mcp:Issuer"]
+    ?? throw new InvalidOperationException("Mcp:Issuer is not configured.");
+var mcpResourceUrl = builder.Configuration["Mcp:ResourceUrl"]
+    ?? throw new InvalidOperationException("Mcp:ResourceUrl is not configured.");
+
+if (mcpSigningKey.Length < 32)
+    throw new InvalidOperationException("Mcp:SigningKey must be at least 32 characters.");
+
+if (string.Equals(mcpSigningKey, jwtSecret, StringComparison.Ordinal))
+    throw new InvalidOperationException("Mcp:SigningKey must be different from Jwt:Secret.");
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -160,10 +235,51 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 await context.Response.WriteAsJsonAsync(error);
             }
         };
+    })
+    // ── MCP bearer scheme ─────────────────────────────────────────────────────
+    // Deliberately separate from the app scheme above: a different signing key and a
+    // different audience mean an app token can never be used on /mcp, and an MCP token
+    // can never be used on /api/*. The default scheme stays "Bearer", so every existing
+    // endpoint keeps exactly the behaviour (and 401 body) it has today.
+    .AddJwtBearer(McpAuthDefaults.BearerScheme, options =>
+    {
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = McpTokenService.BuildValidationParameters(
+            mcpIssuer, mcpResourceUrl, mcpSigningKey);
+    })
+    // Serves /.well-known/oauth-protected-resource/mcp and emits the WWW-Authenticate
+    // challenge that tells an MCP client where to authenticate.
+    .AddMcp(options =>
+    {
+        options.ForwardAuthenticate = McpAuthDefaults.BearerScheme;
+        options.ResourceMetadataUri = new Uri("/.well-known/oauth-protected-resource/mcp", UriKind.Relative);
+        options.ResourceMetadata = new ProtectedResourceMetadata
+        {
+            Resource = mcpResourceUrl,
+            AuthorizationServers = { mcpIssuer },
+            ScopesSupported = [.. McpScopes.All],
+            // BearerMethodsSupported already defaults to ["header"].
+            ResourceName = "Bantera Admin MCP",
+        };
     });
 
 builder.Services.AddAuthorization(opts =>
-    opts.AddPolicy("Admin", policy => policy.RequireRole("admin")));
+{
+    opts.AddPolicy("Admin", policy => policy.RequireRole("admin"));
+
+    // MCP tools: must present an MCP token, for an admin, carrying the right scope.
+    opts.AddPolicy(McpAuthDefaults.ReadPolicy, policy => policy
+        .AddAuthenticationSchemes(McpAuthenticationDefaults.AuthenticationScheme)
+        .RequireAuthenticatedUser()
+        .RequireRole("admin")
+        .RequireAssertion(c => McpScopes.Has(c.User, McpScopes.Read)));
+
+    opts.AddPolicy(McpAuthDefaults.WritePolicy, policy => policy
+        .AddAuthenticationSchemes(McpAuthenticationDefaults.AuthenticationScheme)
+        .RequireAuthenticatedUser()
+        .RequireRole("admin")
+        .RequireAssertion(c => McpScopes.Has(c.User, McpScopes.Write)));
+});
 
 // ── Swagger ───────────────────────────────────────────────────────────────────
 builder.Services.AddEndpointsApiExplorer();
@@ -248,6 +364,11 @@ app.UseForwardedHeaders();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Records that an authenticated user was active today. Runs after the response is
+// produced and never throws, so it cannot affect request handling.
+app.UseMiddleware<UserActivityTrackingMiddleware>();
+
 app.UseWebSockets();
 
 // ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -2532,6 +2653,9 @@ using (var scope = app.Services.CreateScope())
 
         if (app.Environment.IsDevelopment())
             await DataSeeder.SeedAsync(db, startupLogger);
+
+        // Pre-register any MCP OAuth clients declared in configuration.
+        await scope.ServiceProvider.GetRequiredService<OAuthClientStore>().EnsureStaticClientsAsync();
     }
     catch (Exception ex)
     {
@@ -2572,6 +2696,8 @@ startupLogger.LogInformation("[Startup] All checks passed — starting server.")
 // ─────────────────────────────────────────────────────────────────────────────
 
 AdminEndpoints.Map(app);
+McpOAuthEndpoints.Map(app);
+McpEndpoints.Map(app);
 
 app.Run();
 

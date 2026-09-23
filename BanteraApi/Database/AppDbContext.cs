@@ -1,5 +1,7 @@
 using BanteraApi.Database.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace BanteraApi.Database;
 
@@ -19,6 +21,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ChatMessageReceipt> ChatMessageReceipts => Set<ChatMessageReceipt>();
     public DbSet<ChatBlock> ChatBlocks => Set<ChatBlock>();
     public DbSet<UserPushToken> UserPushTokens => Set<UserPushToken>();
+    public DbSet<UserActivityDaily> UserActivityDaily => Set<UserActivityDaily>();
+    public DbSet<OAuthClient> OAuthClients => Set<OAuthClient>();
+    public DbSet<OAuthAuthorizationCode> OAuthAuthorizationCodes => Set<OAuthAuthorizationCode>();
+    public DbSet<OAuthRefreshToken> OAuthRefreshTokens => Set<OAuthRefreshToken>();
+    public DbSet<McpAuditLog> McpAuditLogs => Set<McpAuditLog>();
+
+    // Stores a string list as a JSON array. Explicit rather than relying on provider
+    // defaults, which map List<string> to text[] unless told otherwise.
+    private static readonly ValueConverter<List<string>, string> StringListConverter = new(
+        v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+        v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new List<string>());
+
+    private static readonly ValueComparer<List<string>> StringListComparer = new(
+        (a, b) => a != null && b != null && a.SequenceEqual(b),
+        v => v.Aggregate(0, (acc, s) => HashCode.Combine(acc, s.GetHashCode())),
+        v => v.ToList());
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -277,6 +295,113 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany(x => x.PushTokens)
              .HasForeignKey(x => x.UserId)
              .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Activity tracking ─────────────────────────────────────────────────
+        b.Entity<UserActivityDaily>(e =>
+        {
+            e.ToTable("user_activity_daily");
+            // Composite key; no FK to users on purpose — history must survive account deletion.
+            e.HasKey(x => new { x.UserId, x.Date });
+            e.Property(x => x.Date).HasColumnType("date").IsRequired();
+            e.Property(x => x.FirstSeenAt).IsRequired();
+            e.Property(x => x.LastSeenAt).IsRequired();
+            e.Property(x => x.TouchCount).IsRequired().HasDefaultValue(1);
+            e.Property(x => x.MessagesSent).IsRequired().HasDefaultValue(0);
+            e.Property(x => x.Source).HasMaxLength(10).IsRequired().HasDefaultValue(ActivitySources.Live);
+            e.HasIndex(x => x.Date);
+        });
+
+        // ── MCP OAuth ─────────────────────────────────────────────────────────
+        b.Entity<OAuthClient>(e =>
+        {
+            e.ToTable("oauth_clients");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.ClientId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.ClientSecretHash).HasMaxLength(255);
+            e.Property(x => x.ClientName).HasMaxLength(200).IsRequired();
+            e.Property(x => x.RedirectUris)
+             .HasColumnType("jsonb").IsRequired()
+             .HasConversion(StringListConverter, StringListComparer);
+            e.Property(x => x.GrantTypes)
+             .HasColumnType("jsonb").IsRequired()
+             .HasConversion(StringListConverter, StringListComparer);
+            e.Property(x => x.TokenEndpointAuthMethod).HasMaxLength(40).IsRequired();
+            e.Property(x => x.ClientUri).HasMaxLength(500);
+            e.Property(x => x.IsStatic).IsRequired().HasDefaultValue(false);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.HasIndex(x => x.ClientId).IsUnique();
+        });
+
+        b.Entity<OAuthAuthorizationCode>(e =>
+        {
+            e.ToTable("oauth_authorization_codes");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.RedirectUri).HasMaxLength(2000).IsRequired();
+            e.Property(x => x.Resource).HasMaxLength(500).IsRequired();
+            e.Property(x => x.RequestedScopes).HasMaxLength(200).IsRequired();
+            e.Property(x => x.GrantedScopes).HasMaxLength(200);
+            e.Property(x => x.CodeChallenge).HasMaxLength(128).IsRequired();
+            e.Property(x => x.CodeChallengeMethod).HasMaxLength(10).IsRequired();
+            e.Property(x => x.State).HasMaxLength(1024);
+            e.Property(x => x.CodeHash).HasMaxLength(64);
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.ExpiresAt).IsRequired();
+            // Filtered unique index, same pattern as UserSession.RefreshTokenLookup.
+            e.HasIndex(x => x.CodeHash).IsUnique().HasFilter("\"CodeHash\" IS NOT NULL");
+            e.HasIndex(x => x.ExpiresAt);
+            e.HasOne(x => x.Client)
+             .WithMany()
+             .HasForeignKey(x => x.OAuthClientId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<OAuthRefreshToken>(e =>
+        {
+            e.ToTable("oauth_refresh_tokens");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.TokenLookup).HasMaxLength(64).IsRequired();
+            e.Property(x => x.FamilyId).IsRequired();
+            e.Property(x => x.Scopes).HasMaxLength(200).IsRequired();
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.ExpiresAt).IsRequired();
+            e.HasIndex(x => x.TokenLookup).IsUnique();
+            e.HasIndex(x => x.FamilyId);
+            e.HasIndex(x => x.UserId);
+            e.HasOne(x => x.Client)
+             .WithMany(x => x.RefreshTokens)
+             .HasForeignKey(x => x.OAuthClientId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.User)
+             .WithMany()
+             .HasForeignKey(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<McpAuditLog>(e =>
+        {
+            e.ToTable("mcp_audit_log");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.CreatedAt).IsRequired();
+            e.Property(x => x.AdminUserId).IsRequired();
+            e.Property(x => x.ClientId).HasMaxLength(200);
+            e.Property(x => x.Tool).HasMaxLength(100).IsRequired();
+            e.Property(x => x.ArgsJson).HasColumnType("jsonb").IsRequired();
+            e.Property(x => x.Outcome).HasMaxLength(20).IsRequired();
+            e.Property(x => x.ResultSummary).HasMaxLength(1000);
+            e.Property(x => x.DurationMs).IsRequired();
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => new { x.AdminUserId, x.CreatedAt });
+            e.HasIndex(x => x.TargetUserId);
+            e.HasIndex(x => new { x.Tool, x.CreatedAt });
         });
     }
 }
