@@ -1,7 +1,8 @@
 namespace BanteraApi;
 
 /// <summary>
-/// Curated learning language catalog: English variants plus French, Italian, German, and Spanish variants.
+/// Learning language catalog. Matches the native-language list: every speech-recognition locale
+/// (AI audio uses Gemini TTS + Gemini Transcribe, which cover all of them), region-specific.
 /// </summary>
 public sealed record LearningLanguageItem(
     string Identifier,
@@ -46,5 +47,42 @@ public static class LearningLanguageCatalog
         // Italian (2)
         new("it-IT", "Italian (Italy)", "🇮🇹"),
         new("it-CH", "Italian (Switzerland)", "🇨🇭"),
+        // Chinese (4)
+        new("zh-CN", "Chinese, Mandarin (China mainland)", "🇨🇳"),
+        new("zh-TW", "Chinese, Mandarin (Taiwan)", "🇹🇼"),
+        new("zh-HK", "Cantonese (Hong Kong)", "🇭🇰"),
+        new("yue-CN", "Cantonese (China mainland)", "🇨🇳"),
+        // Japanese, Korean
+        new("ja-JP", "Japanese (Japan)", "🇯🇵"),
+        new("ko-KR", "Korean (South Korea)", "🇰🇷"),
+        // Portuguese (2)
+        new("pt-BR", "Portuguese (Brazil)", "🇧🇷"),
+        new("pt-PT", "Portuguese (Portugal)", "🇵🇹"),
+        // Other languages
+        new("ar-SA", "Arabic (Saudi Arabia)", "🇸🇦"),
+        new("ar-AE", "Arabic (United Arab Emirates)", "🇦🇪"),
+        new("ru-RU", "Russian (Russia)", "🇷🇺"),
+        new("hi-IN", "Hindi (India)", "🇮🇳"),
+        new("id-ID", "Indonesian (Indonesia)", "🇮🇩"),
+        new("vi-VN", "Vietnamese (Vietnam)", "🇻🇳"),
+        new("th-TH", "Thai (Thailand)", "🇹🇭"),
+        new("tr-TR", "Turkish (Türkiye)", "🇹🇷"),
+        new("nl-NL", "Dutch (Netherlands)", "🇳🇱"),
+        new("nl-BE", "Dutch (Belgium)", "🇧🇪"),
+        new("pl-PL", "Polish (Poland)", "🇵🇱"),
+        new("sv-SE", "Swedish (Sweden)", "🇸🇪"),
+        new("da-DK", "Danish (Denmark)", "🇩🇰"),
+        new("nb-NO", "Norwegian Bokmål (Norway)", "🇳🇴"),
+        new("fi-FI", "Finnish (Finland)", "🇫🇮"),
+        new("uk-UA", "Ukrainian (Ukraine)", "🇺🇦"),
+        new("el-GR", "Greek (Greece)", "🇬🇷"),
+        new("cs-CZ", "Czech (Czechia)", "🇨🇿"),
+        new("sk-SK", "Slovak (Slovakia)", "🇸🇰"),
+        new("hu-HU", "Hungarian (Hungary)", "🇭🇺"),
+        new("ro-RO", "Romanian (Romania)", "🇷🇴"),
+        new("hr-HR", "Croatian (Croatia)", "🇭🇷"),
+        new("he-IL", "Hebrew (Israel)", "🇮🇱"),
+        new("ms-MY", "Malay (Malaysia)", "🇲🇾"),
+        new("ca-ES", "Catalan (Spain)", "🇪🇸"),
     ];
 }

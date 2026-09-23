@@ -15,6 +15,11 @@ RUN dotnet publish BanteraApi/BanteraApi.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
+# lame encodes AI-generated dialogue audio to MP3 (see Audio/Mp3Encoder.cs).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends lame \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /app/publish .
 
 ENV ASPNETCORE_URLS=http://+:8080

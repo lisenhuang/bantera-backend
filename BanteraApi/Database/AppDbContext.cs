@@ -26,6 +26,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<OAuthAuthorizationCode> OAuthAuthorizationCodes => Set<OAuthAuthorizationCode>();
     public DbSet<OAuthRefreshToken> OAuthRefreshTokens => Set<OAuthRefreshToken>();
     public DbSet<McpAuditLog> McpAuditLogs => Set<McpAuditLog>();
+    public DbSet<AppSetting> AppSettings => Set<AppSetting>();
+    public DbSet<AiPipelineEvent> AiPipelineEvents => Set<AiPipelineEvent>();
 
     // Stores a string list as a JSON array. Explicit rather than relying on provider
     // defaults, which map List<string> to text[] unless told otherwise.
@@ -115,6 +117,35 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany(x => x.Videos)
              .HasForeignKey(x => x.UserId)
              .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<AiPipelineEvent>(e =>
+        {
+            e.ToTable("ai_pipeline_events");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Severity).HasMaxLength(10).IsRequired();
+            e.Property(x => x.Stage).HasMaxLength(30).IsRequired();
+            e.Property(x => x.Code).HasMaxLength(60).IsRequired();
+            e.Property(x => x.Endpoint).HasMaxLength(60);
+            e.Property(x => x.LanguageCode).HasMaxLength(16);
+            e.Property(x => x.Model).HasMaxLength(100);
+            e.Property(x => x.KeyHint).HasMaxLength(20);
+            e.Property(x => x.Message).HasMaxLength(2000);
+            e.Property(x => x.DetailJson).HasColumnType("jsonb");
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => new { x.Code, x.CreatedAt });
+            e.HasIndex(x => new { x.Stage, x.CreatedAt });
+            e.HasIndex(x => x.JobId);
+        });
+
+        b.Entity<AppSetting>(e =>
+        {
+            e.ToTable("app_settings");
+            e.HasKey(x => x.Key);
+            e.Property(x => x.Key).HasMaxLength(100);
+            e.Property(x => x.Value).HasMaxLength(2000).IsRequired();
+            e.Property(x => x.UpdatedAt).IsRequired();
         });
 
         b.Entity<UserAudioJob>(e =>

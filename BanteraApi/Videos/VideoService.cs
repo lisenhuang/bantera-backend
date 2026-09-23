@@ -249,9 +249,13 @@ public class VideoService(
             video.VideoWidth,
             video.VideoHeight,
             video.MediaContentType,
+            // MP3s get a URL ending in ".mp3": released iOS apps name the cached file after the
+            // URL's extension (defaulting to .wav), and AVPlayer trusts that extension.
             linkGenerator.GetUriByName(
                 httpContext,
-                "GetVideoFile",
+                string.Equals(video.MediaContentType, Audio.Mp3Encoder.ContentType, StringComparison.OrdinalIgnoreCase)
+                    ? "GetVideoFileMp3"
+                    : "GetVideoFile",
                 values: new { videoId = video.Id }),
             video.CoverImageObjectKey != null
                 ? linkGenerator.GetUriByName(httpContext, "GetVideoCoverImage", values: new { videoId = video.Id })
@@ -413,16 +417,16 @@ public class VideoService(
     public async Task<VideoUploadResponse> SaveAiAudioAsync(
         Guid userId,
         string title,
-        byte[] wavBytes,
+        Gemini.GeneratedAudio audio,
         string transcriptLanguage,
         string transcriptLanguageCode,
         IReadOnlyList<Gemini.VideoTranscriptCueRecord> cues,
-        int durationMs,
+        bool isTranscriptionEstimated,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        var objectKey = $"videos/{userId}/{Guid.NewGuid():N}.wav";
-        await r2StorageService.UploadObjectAsync(objectKey, new MemoryStream(wavBytes), "audio/wav", cancellationToken);
+        var objectKey = $"videos/{userId}/{Guid.NewGuid():N}{audio.FileExtension}";
+        await r2StorageService.UploadObjectAsync(objectKey, new MemoryStream(audio.Bytes), audio.ContentType, cancellationToken);
 
         var coverKey = await TryGenerateAiAudioCoverAsync(
             userId,
@@ -439,18 +443,18 @@ public class VideoService(
         {
             UserId = userId,
             MediaObjectKey = objectKey,
-            MediaContentType = "audio/wav",
-            OriginalFileName = $"{title}.wav",
+            MediaContentType = audio.ContentType,
+            OriginalFileName = $"{title}{audio.FileExtension}",
             TranscriptText = transcriptText,
             TranscriptLanguage = NormalizeTranscriptLanguage(transcriptLanguage),
             TranscriptLanguageCode = NormalizeTranscriptLanguageCode(transcriptLanguageCode, transcriptLanguage),
             TranscriptCuesJson = cuesJson,
             IsPublic = true,
             IsAiGenerated = true,
-            IsTranscriptionEstimated = true,
+            IsTranscriptionEstimated = isTranscriptionEstimated,
             CoverImageObjectKey = coverKey,
-            FileSizeBytes = wavBytes.Length,
-            DurationMs = durationMs,
+            FileSizeBytes = audio.Bytes.Length,
+            DurationMs = audio.DurationMs,
             VideoWidth = null,
             VideoHeight = null,
             CreatedAt = DateTime.UtcNow,
@@ -467,6 +471,8 @@ public class VideoService(
         string title,
         string objectKey,
         long fileSizeBytes,
+        string mediaContentType,
+        string fileExtension,
         string transcriptLanguage,
         string transcriptLanguageCode,
         DialogueLine[] dialogueLines,
@@ -497,8 +503,8 @@ public class VideoService(
         {
             UserId = userId,
             MediaObjectKey = objectKey,
-            MediaContentType = "audio/wav",
-            OriginalFileName = $"{title}.wav",
+            MediaContentType = mediaContentType,
+            OriginalFileName = $"{title}{fileExtension}",
             TranscriptText = transcriptText,
             TranscriptLanguage = NormalizeTranscriptLanguage(transcriptLanguage),
             TranscriptLanguageCode = NormalizeTranscriptLanguageCode(transcriptLanguageCode, transcriptLanguage),

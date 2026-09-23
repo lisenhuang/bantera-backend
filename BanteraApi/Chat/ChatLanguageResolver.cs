@@ -78,6 +78,11 @@ public static class ChatLanguageResolver
 
     private static string MatchKeyFor(string normalized)
     {
+        // Mainland Mandarin written in Simplified Chinese is one family with bare "zh" (the
+        // native-language picker offers "zh"; the learning catalog offers "zh-CN").
+        // Taiwan / Hong Kong / Traditional stay distinct.
+        if (normalized is "zh-cn" or "zh-sg" || normalized.StartsWith("zh-hans", StringComparison.Ordinal))
+            return "zh";
         if (normalized.StartsWith("zh-", StringComparison.Ordinal))
             return normalized;
 

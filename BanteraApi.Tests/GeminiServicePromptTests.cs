@@ -2,6 +2,9 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using BanteraApi.Gemini;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -72,7 +75,23 @@ public class GeminiServicePromptTests
             LatestNewsTextModel = "test-news-model",
         });
 
-        return new GeminiService(new StaticHttpClientFactory(client), settings);
+        var services = new ServiceCollection().BuildServiceProvider();
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var modelSettings = new AiModelSettingsService(
+            services.GetRequiredService<IServiceScopeFactory>(),
+            cache,
+            settings,
+            NullLogger<AiModelSettingsService>.Instance);
+
+        return new GeminiService(
+            new StaticHttpClientFactory(client),
+            settings,
+            modelSettings,
+            new BanteraApi.Audio.Mp3Encoder(NullLogger<BanteraApi.Audio.Mp3Encoder>.Instance),
+            new BanteraApi.Diagnostics.AiPipelineEventRecorder(
+                services.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<BanteraApi.Diagnostics.AiPipelineEventRecorder>.Instance),
+            NullLogger<GeminiService>.Instance);
     }
 
     private sealed class StaticHttpClientFactory(HttpClient client) : IHttpClientFactory

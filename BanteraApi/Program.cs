@@ -81,6 +81,11 @@ builder.Services.AddHttpClient("gemini", c =>
     c.Timeout = TimeSpan.FromSeconds(180);
 });
 builder.Services.AddScoped<GeminiService>();
+builder.Services.AddSingleton<AiModelSettingsService>();
+builder.Services.AddSingleton<BanteraApi.Audio.Mp3Encoder>();
+builder.Services.AddScoped<AiAudioTimingService>();
+builder.Services.AddSingleton<BanteraApi.Diagnostics.AiPipelineEventRecorder>();
+builder.Services.AddHostedService<BanteraApi.Diagnostics.AiPipelineEventCleanupService>();
 builder.Services.Configure<AiAudioDiagnosticsOptions>(
     builder.Configuration.GetSection(AiAudioDiagnosticsOptions.Section));
 builder.Services.AddSingleton<AiAudioDiagnosticFileWriter>();
@@ -1392,6 +1397,8 @@ app.MapPost("/api/me/audio/generate", async (
     HttpContext httpContext,
     System.Security.Claims.ClaimsPrincipal user,
     GeminiService geminiService,
+    AiAudioTimingService aiAudioTimingService,
+    BanteraApi.Diagnostics.AiPipelineEventRecorder pipelineEvents,
     VideoService videoService,
     AppDbContext db,
     CancellationToken cancellationToken) =>
@@ -1437,6 +1444,7 @@ app.MapPost("/api/me/audio/generate", async (
         await httpContext.Response.Body.FlushAsync(cancellationToken);
     }
 
+    using var v1PipelineContext = pipelineEvents.BeginContext(userId.Value, null, req.LanguageCode, "generate/v1");
     try
     {
         var dialogue = await geminiService.GenerateDialogueAsync(
@@ -1451,17 +1459,20 @@ app.MapPost("/api/me/audio/generate", async (
             cancellationToken);
         var flattenedShortCueTexts = BuildFlattenedShortCueTexts(dialogue.Lines);
 
-        var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
-        var cues = geminiService.EstimateCues(dialogue.Lines, durationMs);
-        var videoResponse = await videoService.SaveAiAudioAsync(userId.Value, dialogue.Title, wavBytes, req.Language, req.LanguageCode, cues, durationMs, httpContext, cancellationToken);
+        var audio = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
+        var timing = await aiAudioTimingService.TryBuildAsync(dialogue.Lines, audio, req.LanguageCode, buildShortCues: false, cancellationToken);
+        var cues = timing?.Cues ?? geminiService.EstimateCues(dialogue.Lines, audio.DurationMs);
+        var videoResponse = await videoService.SaveAiAudioAsync(userId.Value, dialogue.Title, audio, req.Language, req.LanguageCode, cues, isTranscriptionEstimated: timing is null, httpContext, cancellationToken);
         await SendAsync(new { step = "done", video = videoResponse });
     }
     catch (ContentRejectedException ex)
     {
+        await pipelineEvents.RecordAsync("info", "dialogue", "content_rejected", ex.Message);
         await SendAsync(new { step = "error", message = ex.Message });
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {
+        await pipelineEvents.RecordAsync("error", "generation", "generation_failed", ex.Message, new { exception = ex.GetType().Name });
         app.Logger.LogError(
             ex,
             "Practice audio generation failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
@@ -1481,6 +1492,8 @@ app.MapPost("/api/me/audio/generate/v2", async (
     HttpContext httpContext,
     System.Security.Claims.ClaimsPrincipal user,
     GeminiService geminiService,
+    AiAudioTimingService aiAudioTimingService,
+    BanteraApi.Diagnostics.AiPipelineEventRecorder pipelineEvents,
     RevAiAlignmentService revAiAlignmentService,
     IOptions<RevAiSettings> revAiOptions,
     IOptions<AiAudioDiagnosticsOptions> aiAudioDiagnosticsOptions,
@@ -1568,6 +1581,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
         };
         db.UserAudioJobs.Add(job);
         await db.SaveChangesAsync(genToken);
+        using var v2PipelineContext = pipelineEvents.BeginContext(userId.Value, job.Id, req.LanguageCode, "generate/v2");
         await SendSafe(new { step = "started", jobId = job.Id });
 
         var dialogue = await geminiService.GenerateDialogueAsync(
@@ -1613,12 +1627,13 @@ app.MapPost("/api/me/audio/generate/v2", async (
                 : "NoMultiPartShortCuesFromDialogue";
         }
 
-        var (wavBytes, durationMs) = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, genToken);
-        objectKey = $"videos/{userId.Value}/{Guid.NewGuid():N}.wav";
+        var audio = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, genToken);
+        var durationMs = audio.DurationMs;
+        objectKey = $"videos/{userId.Value}/{Guid.NewGuid():N}{audio.FileExtension}";
         await r2StorageService.UploadObjectAsync(
             objectKey,
-            new MemoryStream(wavBytes),
-            "audio/wav",
+            new MemoryStream(audio.Bytes),
+            audio.ContentType,
             genToken);
         await SendSafe(new { step = "audio" });
         lastStep = "audio";
@@ -1628,10 +1643,41 @@ app.MapPost("/api/me/audio/generate/v2", async (
         IReadOnlyList<WordTimingRecord>? wordTiming = null;
         IReadOnlyList<VideoTranscriptCueRecord>? cues = null;
         IReadOnlyList<VideoTranscriptCueRecord>? shortCues = null;
+        // Primary: Gemini Transcribe word timestamps aligned to the script (all languages).
+        // Fallbacks: Rev.ai forced alignment (en/fr/de/it/es), then Gemini cue timing.
+        var geminiTiming = await aiAudioTimingService.TryBuildAsync(
+            dialogue.Lines,
+            audio,
+            req.LanguageCode,
+            buildShortCues: flattenedShortCueTexts.Count > 0,
+            genToken);
         var revAiRequired = RevAiAlignmentService.TryGetSupportedLanguageCode(
             req.LanguageCode,
             out var revAiLanguageCode);
-        if (revAiRequired && revAiLanguageCode is not null)
+        if (geminiTiming is not null)
+        {
+            wordTiming = geminiTiming.WordTiming;
+            cues = geminiTiming.Cues;
+            shortCues = geminiTiming.ShortCues;
+            longAlignmentMode = geminiTiming.Mode;
+            if (flattenedShortCueTexts.Count > 0)
+            {
+                shortAlignmentAttempted = true;
+                if (shortCues is null)
+                {
+                    if (RevAiCueAlignmentBuilder.TryBuildShortCueBoundary(dialogue.Lines, cues, wordTiming, out var rebuiltShortCues, out var geminiShortCueFailure))
+                    {
+                        shortCues = rebuiltShortCues;
+                    }
+                    else
+                    {
+                        shortCueAlignmentFailure = geminiShortCueFailure;
+                        shortCueNullReason ??= "ShortCueAlignmentFailed";
+                    }
+                }
+            }
+        }
+        else if (revAiRequired && revAiLanguageCode is not null)
         {
             var transcript = string.Join("\n", dialogue.Lines.Select(l => l.Text));
             var revAiLogOptions = revAiOptions.Value;
@@ -1858,8 +1904,8 @@ app.MapPost("/api/me/audio/generate/v2", async (
             try
             {
                 cues = await geminiService.GenerateCueTimingAsync(
-                    wavBytes,
-                    "audio/wav",
+                    audio.Bytes,
+                    audio.ContentType,
                     dialogue.Lines,
                     durationMs,
                     genToken);
@@ -1883,6 +1929,13 @@ app.MapPost("/api/me/audio/generate/v2", async (
         {
             throw new InvalidOperationException("Required cue alignment did not produce valid timing.");
         }
+        if (geminiTiming is null)
+        {
+            await pipelineEvents.RecordAsync(
+                "warning", "timing", "timing_fallback",
+                $"Gemini word timing unavailable; used {longAlignmentMode}.",
+                new { mode = longAlignmentMode, hasWordTiming = wordTiming is not null });
+        }
 
         if (flattenedShortCueTexts.Count > 0 && shortCues is null && wordTiming is null)
             shortCueNullReason ??= "NoWordTimingForShortCueAlignment";
@@ -1892,7 +1945,9 @@ app.MapPost("/api/me/audio/generate/v2", async (
             userId.Value,
             dialogue.Title,
             objectKey,
-            wavBytes.LongLength,
+            audio.Bytes.LongLength,
+            audio.ContentType,
+            audio.FileExtension,
             req.Language,
             req.LanguageCode,
             dialogue.Lines,
@@ -2002,6 +2057,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
     }
     catch (ContentRejectedException ex)
     {
+        await pipelineEvents.RecordAsync("info", "dialogue", "content_rejected", ex.Message);
         if (job is not null)
         {
             job.Status = "failed";
@@ -2019,6 +2075,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             userId,
             req.LanguageCode,
             req.ScenarioId);
+        await pipelineEvents.RecordAsync("error", lastStep, "generation_timeout", "Generation timed out or was canceled.", new { lastStep });
         if (job is not null)
         {
             job.Status = "failed";
@@ -2036,6 +2093,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             userId,
             req.LanguageCode,
             req.ScenarioId);
+        await pipelineEvents.RecordAsync("error", lastStep, "generation_failed", ex.Message, new { lastStep, exception = ex.GetType().Name });
         await diagnosticFileWriter.WriteGenerationFailureAsync(new
         {
             timestampUtc = DateTime.UtcNow,
@@ -2057,7 +2115,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
         if (job is not null)
         {
             job.Status = "failed";
-            job.ErrorMessage = ex.Message;
+            job.ErrorMessage = generationFailedMessage; // details are in ai_pipeline_events
             job.CompletedAt = DateTime.UtcNow;
             try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
         }
@@ -2070,7 +2128,8 @@ app.MapPost("/api/me/audio/generate/v2", async (
 // V3 forces web search on for custom scenarios; delegates to v2 logic via shared request body flag.
 app.MapPost("/api/me/audio/generate/v3",
     async (HttpRequest httpReq, HttpContext httpContext, System.Security.Claims.ClaimsPrincipal user,
-        GeminiService geminiService, RevAiAlignmentService revAiAlignmentService,
+        GeminiService geminiService, AiAudioTimingService aiAudioTimingService,
+        BanteraApi.Diagnostics.AiPipelineEventRecorder pipelineEvents, RevAiAlignmentService revAiAlignmentService,
         IOptions<RevAiSettings> revAiOptions, IOptions<AiAudioDiagnosticsOptions> aiAudioDiagnosticsOptions,
         AiAudioDiagnosticFileWriter diagnosticFileWriter, R2StorageService r2StorageService,
         VideoService videoService, AppDbContext db, CancellationToken cancellationToken) =>
@@ -2133,6 +2192,7 @@ app.MapPost("/api/me/audio/generate/v3",
             v3Job = new UserAudioJob { UserId = userId.Value, LanguageCode = req.LanguageCode, ScenarioId = req.ScenarioId };
             db.UserAudioJobs.Add(v3Job);
             await db.SaveChangesAsync(genToken);
+            using var v3PipelineContext = pipelineEvents.BeginContext(userId.Value, v3Job.Id, req.LanguageCode, "generate/v3");
             await SendSafeV3(new { step = "started", jobId = v3Job.Id });
 
             var v3Dialogue = await geminiService.GenerateDialogueAsync(
@@ -2141,16 +2201,27 @@ app.MapPost("/api/me/audio/generate/v3",
             await SendSafeV3(new { step = "dialogue", lines = v3Dialogue.Lines.Select(l => l.Text).ToArray() });
 
             var v3FlatCues = BuildFlattenedShortCueTexts(v3Dialogue.Lines);
-            var (v3Wav, v3DurMs) = await geminiService.GenerateAudioAsync(v3Dialogue, req.LanguageCode, genToken);
-            var v3ObjKey = $"videos/{userId.Value}/{Guid.NewGuid():N}.wav";
-            await r2StorageService.UploadObjectAsync(v3ObjKey, new MemoryStream(v3Wav), "audio/wav", genToken);
+            var v3Audio = await geminiService.GenerateAudioAsync(v3Dialogue, req.LanguageCode, genToken);
+            var v3DurMs = v3Audio.DurationMs;
+            var v3ObjKey = $"videos/{userId.Value}/{Guid.NewGuid():N}{v3Audio.FileExtension}";
+            await r2StorageService.UploadObjectAsync(v3ObjKey, new MemoryStream(v3Audio.Bytes), v3Audio.ContentType, genToken);
             await SendSafeV3(new { step = "audio" });
             await SendSafeV3(new { step = "aligning" });
 
             IReadOnlyList<WordTimingRecord>? v3WordTiming = null;
             IReadOnlyList<VideoTranscriptCueRecord>? v3Cues = null;
             IReadOnlyList<VideoTranscriptCueRecord>? v3ShortCues = null;
-            if (RevAiAlignmentService.TryGetSupportedLanguageCode(req.LanguageCode, out var v3RevLang) && v3RevLang is not null)
+            var v3Timing = await aiAudioTimingService.TryBuildAsync(v3Dialogue.Lines, v3Audio, req.LanguageCode, buildShortCues: v3FlatCues.Count > 0, genToken);
+            if (v3Timing is not null)
+            {
+                v3WordTiming = v3Timing.WordTiming;
+                v3Cues = v3Timing.Cues;
+                v3ShortCues = v3Timing.ShortCues;
+                if (v3ShortCues is null && v3FlatCues.Count > 0
+                    && RevAiCueAlignmentBuilder.TryBuildShortCueBoundary(v3Dialogue.Lines, v3Cues, v3WordTiming, out var v3Rebuilt, out _))
+                    v3ShortCues = v3Rebuilt;
+            }
+            else if (RevAiAlignmentService.TryGetSupportedLanguageCode(req.LanguageCode, out var v3RevLang) && v3RevLang is not null)
             {
                 var v3Transcript = string.Join("\n", v3Dialogue.Lines.Select(l => l.Text));
                 var v3PresignedUrl = r2StorageService.GeneratePresignedUrl(v3ObjKey, TimeSpan.FromHours(1));
@@ -2170,25 +2241,65 @@ app.MapPost("/api/me/audio/generate/v3",
                 }
             }
 
+            if (v3Timing is null)
+            {
+                await pipelineEvents.RecordAsync(
+                    "warning", "timing", "timing_fallback",
+                    v3Cues is null ? "Gemini word timing unavailable; used estimated timing." : "Gemini word timing unavailable; used Rev.ai.",
+                    new { mode = v3Cues is null ? "estimatedFallback" : "revAi", hasWordTiming = v3WordTiming is not null });
+            }
             var v3FinalCues = v3Cues ?? geminiService.EstimateCues(v3Dialogue.Lines, v3DurMs);
             var v3Video = await videoService.SaveAiAudioV2Async(
-                userId.Value, v3Dialogue.Title, v3ObjKey, v3Wav.LongLength,
+                userId.Value, v3Dialogue.Title, v3ObjKey, v3Audio.Bytes.LongLength,
+                v3Audio.ContentType, v3Audio.FileExtension,
                 req.Language, req.LanguageCode,
                 v3Dialogue.Lines, v3WordTiming, v3FinalCues, v3ShortCues,
                 v3DurMs, httpContext, genToken);
 
-            if (v3Job is not null) { v3Job.CompletedAt = DateTime.UtcNow; try { await db.SaveChangesAsync(CancellationToken.None); } catch { } }
+            if (v3Job is not null)
+            {
+                v3Job.Status = "done";
+                v3Job.VideoId = v3Video.Id;
+                v3Job.CompletedAt = DateTime.UtcNow;
+                try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
+            }
             await SendSafeV3(new { step = "done", video = v3Video });
         }
         catch (ContentRejectedException ex)
         {
-            if (v3Job is not null) { v3Job.CompletedAt = DateTime.UtcNow; try { await db.SaveChangesAsync(CancellationToken.None); } catch { } }
+            await pipelineEvents.RecordAsync("info", "dialogue", "content_rejected", ex.Message);
+            if (v3Job is not null)
+            {
+                v3Job.Status = "failed";
+                v3Job.ErrorMessage = ex.Message;
+                v3Job.CompletedAt = DateTime.UtcNow;
+                try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
+            }
             await SendSafeV3(new { step = "error", message = ex.Message });
+        }
+        catch (OperationCanceledException) when (genToken.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            await pipelineEvents.RecordAsync("error", "generation", "generation_timeout", "Generation timed out.");
+            if (v3Job is not null)
+            {
+                v3Job.Status = "failed";
+                v3Job.ErrorMessage = "Generation timed out.";
+                v3Job.CompletedAt = DateTime.UtcNow;
+                try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
+            }
+            await SendSafeV3(new { step = "error", message = "Something went wrong while creating the practice audio. Please try again." });
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             app.Logger.LogError(ex, "[V3] Audio generation failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}", userId, req.LanguageCode, req.ScenarioId);
-            if (v3Job is not null) { v3Job.CompletedAt = DateTime.UtcNow; try { await db.SaveChangesAsync(CancellationToken.None); } catch { } }
+            await pipelineEvents.RecordAsync("error", "generation", "generation_failed", ex.Message, new { exception = ex.GetType().Name });
+            if (v3Job is not null)
+            {
+                v3Job.Status = "failed";
+                v3Job.ErrorMessage = "Something went wrong while creating the practice audio. Please try again."; // details are in ai_pipeline_events
+                v3Job.CompletedAt = DateTime.UtcNow;
+                try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
+            }
             await SendSafeV3(new { step = "error", message = "Something went wrong while creating the practice audio. Please try again." });
         }
     })
@@ -2567,6 +2678,26 @@ app.MapGet("/api/videos/{videoId:guid}/file", async Task<IResult> (
 .Produces(404)
 .AllowAnonymous();
 
+// Same file as /file, at a URL ending in ".mp3" so clients that pick a cache file extension
+// from the URL (released iOS builds) store MP3 audio as .mp3 rather than .wav.
+app.MapGet("/api/videos/{videoId:guid}/file.mp3", async Task<IResult> (
+    Guid videoId,
+    System.Security.Claims.ClaimsPrincipal user,
+    HttpContext httpContext,
+    VideoService videoService,
+    CancellationToken cancellationToken) =>
+{
+    var file = await videoService.GetVideoFileAsync(videoId, TryGetUserId(user), cancellationToken);
+    if (file is null)
+        return Results.NotFound();
+
+    httpContext.Response.ContentLength = file.ContentLength;
+    return Results.Stream(file.Stream, file.ContentType, enableRangeProcessing: true);
+})
+.WithName("GetVideoFileMp3")
+.ExcludeFromDescription()
+.AllowAnonymous();
+
 app.MapGet("/api/videos/{videoId:guid}/cover", async (
     Guid videoId,
     R2StorageService r2StorageService,
@@ -2697,6 +2828,8 @@ startupLogger.LogInformation("[Startup] All checks passed — starting server.")
 // ─────────────────────────────────────────────────────────────────────────────
 
 AdminEndpoints.Map(app);
+AiSettingsEndpoints.Map(app);
+AiPipelineEndpoints.Map(app);
 McpOAuthEndpoints.Map(app);
 McpEndpoints.Map(app);
 

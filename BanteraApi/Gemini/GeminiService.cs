@@ -3,11 +3,19 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using BanteraApi.Audio;
+using BanteraApi.Diagnostics;
 using Microsoft.Extensions.Options;
 
 namespace BanteraApi.Gemini;
 
-public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<GeminiSettings> options)
+public class GeminiService(
+    IHttpClientFactory httpClientFactory,
+    IOptions<GeminiSettings> options,
+    AiModelSettingsService modelSettings,
+    Mp3Encoder mp3Encoder,
+    AiPipelineEventRecorder events,
+    ILogger<GeminiService> logger)
 {
     private const string LatestNewsScenarioId = "latest_news";
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
@@ -89,6 +97,14 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
         ["en-ZA"] = "Both speakers must use a natural, authentic South African English accent throughout.",
         ["en-GB"] = "Both speakers must use a natural, authentic British English accent throughout. Do not use Australian, American, or New Zealand accents.",
         ["en-US"] = "Both speakers must use a natural, authentic US American accent throughout. Do not use Australian, British, or New Zealand accents.",
+        ["yue-CN"] = "Both speakers must speak Cantonese (not Mandarin) throughout, with a natural Guangdong accent.",
+        ["zh-HK"] = "Both speakers must speak Cantonese (not Mandarin) throughout, with a natural Hong Kong accent.",
+        ["zh-TW"] = "Both speakers must speak Mandarin with a natural Taiwanese accent throughout.",
+        ["zh-CN"] = "Both speakers must speak standard Mandarin (Putonghua) with a natural mainland China accent throughout.",
+        ["pt-PT"] = "Both speakers must use a natural European Portuguese accent from Portugal throughout. Do not use a Brazilian accent.",
+        ["pt-BR"] = "Both speakers must use a natural Brazilian Portuguese accent throughout. Do not use a European Portuguese accent.",
+        ["es-ES"] = "Both speakers must use a natural accent from Spain (Castilian Spanish) throughout. Do not use a Latin American accent.",
+        ["fr-CA"] = "Both speakers must use a natural Québécois / Canadian French accent throughout. Do not use a France French accent.",
     };
 
     private static readonly Dictionary<string, string> NewsFocusByLocale = new(StringComparer.OrdinalIgnoreCase)
@@ -265,7 +281,7 @@ public class GeminiService(IHttpClientFactory httpClientFactory, IOptions<Gemini
             || (useWebSearchForCustom && !string.IsNullOrWhiteSpace(scenario));
         var textModel = useGoogleSearch
             ? Settings.LatestNewsTextModel
-            : Settings.TextModel;
+            : (await modelSettings.GetAsync(cancellationToken)).TextModel;
         var todayUtc = DateTime.UtcNow.Date;
         var recentStartUtc = DateTime.UtcNow.AddDays(-1);
         var requestedNewsCount = Math.Max(1, durationSeconds / 60);
@@ -398,7 +414,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
 }
 """.Trim();
 
-        return await WithGeminiKeyAsync(async key =>
+        return await WithGeminiKeyAsync(useGoogleSearch ? "dialogue (web search)" : "dialogue", async key =>
         {
             var client = httpClientFactory.CreateClient("gemini");
             var url = $"/v1beta/models/{textModel}:generateContent?key={key}";
@@ -499,25 +515,26 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                 Voice2: voice2,
                 Lines: dialogueLines.ToArray(),
                 ShortCueValidationFailures: shortCueValidationFailures);
-        }, cancellationToken);
+        }, cancellationToken, webSearch: useGoogleSearch, model: textModel);
     }
 
-    public async Task<(byte[] WavBytes, int DurationMs)> GenerateAudioAsync(
+    public async Task<GeneratedAudio> GenerateAudioAsync(
         GeneratedDialogue dialogue,
         string languageCode,
         CancellationToken cancellationToken = default)
     {
-        var ttsAccent = TtsAccentInstructions.GetValueOrDefault(languageCode);
+        var ttsAccent = ResolveTtsAccentInstruction(languageCode);
         var dialogueText = string.Join("\n",
             dialogue.Lines.Select(l => $"{l.Speaker}: {l.Text}"));
         var transcript = ttsAccent != null
             ? $"[Accent instruction: {ttsAccent}]\n\n{dialogueText}"
             : dialogueText;
+        var audioModel = (await modelSettings.GetAsync(cancellationToken)).AudioModel;
 
-        return await WithGeminiKeyAsync(async key =>
+        var (pcm, sampleRate, mimeType) = await WithGeminiKeyAsync("tts", async key =>
         {
             var client = httpClientFactory.CreateClient("gemini");
-            var url = $"/v1beta/models/{Settings.AudioModel}:generateContent?key={key}";
+            var url = $"/v1beta/models/{audioModel}:generateContent?key={key}";
             var body = new
             {
                 contents = new[] { new { parts = new[] { new { text = transcript } } } },
@@ -543,10 +560,16 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                 new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
                 cancellationToken);
 
-            response.EnsureSuccessStatusCode();
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
-            var root = JsonDocument.Parse(json).RootElement;
-            var inlineData = root
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Gemini TTS failed with status {(int)response.StatusCode} for model '{audioModel}'. Body: {TruncateForLog(json)}",
+                    null,
+                    response.StatusCode);
+            }
+
+            var inlineData = JsonDocument.Parse(json).RootElement
                 .GetProperty("candidates")[0]
                 .GetProperty("content")
                 .GetProperty("parts")[0]
@@ -554,28 +577,47 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
 
             var base64Data = inlineData.GetProperty("data").GetString()
                 ?? throw new InvalidOperationException("No audio data in Gemini response.");
-            var mimeType = inlineData.TryGetProperty("mimeType", out var mt) ? mt.GetString() ?? "" : "";
+            var mime = inlineData.TryGetProperty("mimeType", out var mt) ? mt.GetString() ?? "" : "";
+            var rateMatch = Regex.Match(mime, @"rate=(\d+)");
+            return (Convert.FromBase64String(base64Data), rateMatch.Success ? int.Parse(rateMatch.Groups[1].Value) : 24000, mime);
+        }, cancellationToken, model: audioModel);
 
-            var pcm = Convert.FromBase64String(base64Data);
+        // 2.5 TTS returns "audio/L16;codec=pcm;rate=24000"; 3.1 returns "audio/l16; rate=24000; channels=1".
+        var isRawPcm = mimeType.Contains("l16", StringComparison.OrdinalIgnoreCase) || mimeType.Contains("pcm", StringComparison.OrdinalIgnoreCase);
+        var durationMs = (int)((double)pcm.Length / (sampleRate * 2) * 1000);
+        if (!isRawPcm)
+        {
+            logger.LogWarning("Gemini TTS returned unexpected audio type {MimeType}; storing it unchanged as WAV.", mimeType);
+            return new GeneratedAudio(pcm, "audio/wav", ".wav", durationMs);
+        }
 
-            int sampleRate = 24000;
-            var rateMatch = System.Text.RegularExpressions.Regex.Match(mimeType, @"rate=(\d+)");
-            if (rateMatch.Success) sampleRate = int.Parse(rateMatch.Groups[1].Value);
+        // Encoding runs outside the key loop: an encoder problem must not burn Gemini keys.
+        var mp3 = await mp3Encoder.EncodeAsync(pcm, sampleRate, cancellationToken);
+        if (mp3 is null)
+        {
+            await events.RecordAsync(
+                AiPipelineSeverity.Warning, "mp3",
+                mp3Encoder.IsAvailable ? "mp3_encode_failed" : "mp3_encoder_missing",
+                "Stored the audio as WAV instead of MP3.");
+        }
+        return mp3 is not null
+            ? new GeneratedAudio(mp3, Mp3Encoder.ContentType, ".mp3", durationMs)
+            : new GeneratedAudio(PcmToWav(pcm, sampleRate), "audio/wav", ".wav", durationMs);
+    }
 
-            byte[] wavBytes;
-            // 2.5 TTS returns "audio/L16;codec=pcm;rate=24000"; 3.1 returns "audio/l16; rate=24000; channels=1".
-            if (mimeType.Contains("l16", StringComparison.OrdinalIgnoreCase) || mimeType.Contains("pcm", StringComparison.OrdinalIgnoreCase))
-            {
-                wavBytes = PcmToWav(pcm, sampleRate);
-            }
-            else
-            {
-                wavBytes = pcm;
-            }
+    /// <summary>
+    /// What the TTS model is told about accent. The script alone does not decide it for
+    /// several locales (Cantonese vs Mandarin read the same characters; pt-PT vs pt-BR).
+    /// </summary>
+    private static string? ResolveTtsAccentInstruction(string languageCode)
+    {
+        if (TtsAccentInstructions.TryGetValue(languageCode, out var instruction))
+            return instruction;
 
-            var durationMs = (int)((double)pcm.Length / (sampleRate * 1 * 2) * 1000);
-            return (wavBytes, durationMs);
-        }, cancellationToken);
+        var item = LearningLanguageCatalog.Items.FirstOrDefault(i => i.Identifier.Equals(languageCode, StringComparison.OrdinalIgnoreCase));
+        return item is null
+            ? null
+            : $"Both speakers must speak natural {item.DisplayName} with an authentic native accent throughout.";
     }
 
     /// Corrects the text of phone-transcribed cues using the original dialogue as
@@ -611,10 +653,11 @@ Example output for 3 cues:
 ["corrected text 1","corrected text 2","corrected text 3"]
 """.Trim();
 
-        return await WithGeminiKeyAsync(async key =>
+        var textModel = (await modelSettings.GetAsync(cancellationToken)).TextModel;
+        return await WithGeminiKeyAsync("transcript correction", async key =>
         {
             var client = httpClientFactory.CreateClient("gemini");
-            var url = $"/v1beta/models/{Settings.TextModel}:generateContent?key={key}";
+            var url = $"/v1beta/models/{textModel}:generateContent?key={key}";
             var body = new { contents = new[] { new { parts = new[] { new { text = prompt } } } } };
 
             using var response = await client.PostAsync(
@@ -622,8 +665,14 @@ Example output for 3 cues:
                 new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
                 cancellationToken);
 
-            response.EnsureSuccessStatusCode();
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Gemini transcript correction failed with status {(int)response.StatusCode} for model '{textModel}'. Body: {TruncateForLog(json)}",
+                    null,
+                    response.StatusCode);
+            }
             var root = JsonDocument.Parse(json).RootElement;
             var raw = root.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
             var cleaned = raw.Replace("```json", "").Replace("```", "").Trim();
@@ -640,7 +689,7 @@ Example output for 3 cues:
                 return transcribedCues; // fallback: return original transcribed cues unchanged
 
             return transcribedCues.Select((c, i) => c with { Text = corrected[i].Trim() }).ToList();
-        }, cancellationToken);
+        }, cancellationToken, model: textModel);
     }
 
     public IReadOnlyList<VideoTranscriptCueRecord> EstimateCues(DialogueLine[] lines, int durationMs)
@@ -701,7 +750,7 @@ Example:
 
         try
         {
-            return await WithGeminiKeyAsync(async key =>
+            return await WithGeminiKeyAsync("cue timing", async key =>
             {
                 var client = httpClientFactory.CreateClient("gemini");
                 var url = $"/v1beta/models/{Settings.CueTimingModel}:generateContent?key={key}";
@@ -750,7 +799,7 @@ Example:
                     .GetString() ?? "";
 
                 return ParseCueTimingResponse(raw, lines, durationMs);
-            }, cancellationToken);
+            }, cancellationToken, model: Settings.CueTimingModel);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1046,9 +1095,288 @@ Example:
         return ms.ToArray();
     }
 
-    private string[] GetShuffledKeys()
+    // ── Word timing pipeline: transcribe with word timestamps, then align to the script ──
+
+    private static readonly string[] NonTextModelKeywords =
+    [
+        "tts", "audio", "embed", "image", "video", "aqa", "lyria", "veo", "imagen", "robotics",
+        "predict", "nano-banana", "deep-research", "transcribe", "computer-use", "live",
+    ];
+
+    /// <summary>
+    /// Transcribes audio with word-level timestamps (gemini-3.5-transcribe via the Interactions
+    /// API). Each failure moves to the next key; the free tier allows only a few calls per
+    /// minute per key.
+    /// </summary>
+    public async Task<IReadOnlyList<TranscribedWord>> TranscribeWordsAsync(
+        byte[] audio,
+        string mimeType,
+        string? languageCode,
+        CancellationToken cancellationToken = default)
     {
-        var keys = Settings.ApiKeys.ToArray();
+        var model = Settings.TranscribeModel;
+        var data = Convert.ToBase64String(audio);
+        var hint = string.IsNullOrWhiteSpace(languageCode) ? null : languageCode.Trim();
+
+        return await WithGeminiKeyAsync("transcription", async key =>
+        {
+            var client = httpClientFactory.CreateClient("gemini");
+            var (status, json) = await PostTranscriptionAsync(client, key, model, data, mimeType, hint, cancellationToken);
+            if (status == System.Net.HttpStatusCode.BadRequest && hint is not null && json.Contains("language", StringComparison.OrdinalIgnoreCase))
+            {
+                // An unsupported language hint: auto-detect instead of failing.
+                (status, json) = await PostTranscriptionAsync(client, key, model, data, mimeType, null, cancellationToken);
+            }
+            if ((int)status is < 200 or >= 300)
+            {
+                throw new HttpRequestException(
+                    $"Gemini transcription failed with status {(int)status} for model '{model}'. Body: {TruncateForLog(json)}",
+                    null,
+                    status);
+            }
+
+            var root = JsonDocument.Parse(json).RootElement.Clone();
+            root = await WaitForInteractionAsync(client, key, root, cancellationToken);
+            var words = ParseTranscribedWords(root);
+            if (words.Count == 0)
+                throw new InvalidOperationException("Gemini transcription returned no words.");
+            return words;
+        }, cancellationToken, model: model);
+    }
+
+    private async Task<(System.Net.HttpStatusCode Status, string Json)> PostTranscriptionAsync(
+        HttpClient client, string key, string model, string data, string mimeType, string? languageCode, CancellationToken cancellationToken)
+    {
+        var body = new
+        {
+            model,
+            input = new[] { new { type = "audio", data, mime_type = mimeType } },
+            generation_config = new
+            {
+                transcription_config = new
+                {
+                    language_codes = languageCode is null ? Array.Empty<string>() : [languageCode],
+                    mode = new { type = "verbatim", diarization_mode = "speaker", timestamp_granularities = new[] { "word" } },
+                },
+            },
+        };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1beta/interactions")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Add("x-goog-api-key", key);
+        using var response = await client.SendAsync(request, cancellationToken);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(cancellationToken));
+    }
+
+    /// <summary>Longer audio can come back still running; poll until it completes (about 3 minutes max).</summary>
+    private static async Task<JsonElement> WaitForInteractionAsync(HttpClient client, string key, JsonElement interaction, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 90; attempt++)
+        {
+            var status = interaction.TryGetProperty("status", out var st) ? st.GetString() : null;
+            if (status == "completed") return interaction;
+            if (status is "failed" or "cancelled" || !interaction.TryGetProperty("id", out var idEl) || idEl.GetString() is not { Length: > 0 } id)
+                throw new InvalidOperationException($"Gemini transcription ended with status '{status ?? "unknown"}'.");
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/v1beta/interactions/{Uri.EscapeDataString(id)}");
+            request.Headers.Add("x-goog-api-key", key);
+            using var response = await client.SendAsync(request, cancellationToken);
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException($"Polling Gemini transcription failed with status {(int)response.StatusCode}. Body: {TruncateForLog(json)}", null, response.StatusCode);
+            interaction = JsonDocument.Parse(json).RootElement.Clone();
+        }
+        throw new TimeoutException("Gemini transcription did not finish in time.");
+    }
+
+    public static List<TranscribedWord> ParseTranscribedWords(JsonElement interaction)
+    {
+        var words = new List<TranscribedWord>();
+        if (!interaction.TryGetProperty("steps", out var steps) || steps.ValueKind != JsonValueKind.Array)
+            return words;
+
+        foreach (var step in steps.EnumerateArray())
+        {
+            if (step.TryGetProperty("type", out var type) && type.GetString() != "model_output") continue;
+            if (!step.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) continue;
+            foreach (var item in content.EnumerateArray())
+            {
+                if (!item.TryGetProperty("annotations", out var annotations) || annotations.ValueKind != JsonValueKind.Array) continue;
+                foreach (var a in annotations.EnumerateArray())
+                {
+                    if (!a.TryGetProperty("type", out var at) || at.GetString() != "word_info") continue;
+                    var text = a.TryGetProperty("text", out var t) ? t.GetString() : null;
+                    if (string.IsNullOrWhiteSpace(text)) continue;
+                    var start = ParseOffsetMs(a, "start_offset");
+                    var end = Math.Max(start, ParseOffsetMs(a, "end_offset"));
+                    words.Add(new TranscribedWord(text, start, end, a.TryGetProperty("speaker", out var sp) ? sp.GetString() : null));
+                }
+            }
+        }
+        return words;
+    }
+
+    /// <summary>"1.300s" (or a number of seconds) → 1300.</summary>
+    private static int ParseOffsetMs(JsonElement annotation, string property)
+    {
+        if (!annotation.TryGetProperty(property, out var value)) return 0;
+        double seconds = value.ValueKind switch
+        {
+            JsonValueKind.Number => value.GetDouble(),
+            JsonValueKind.String when double.TryParse(value.GetString()!.TrimEnd('s'), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ => 0,
+        };
+        return (int)Math.Round(seconds * 1000);
+    }
+
+    /// <summary>
+    /// Asks the text model which transcript words were spoken for each script token. Used
+    /// only for tokens the character aligner could not match exactly (numbers, misheard words).
+    /// </summary>
+    public async Task<TokenMatch?[]> AlignTokensWithAiAsync(
+        IReadOnlyList<ScriptToken> tokens,
+        IReadOnlyList<DialogueLine> lines,
+        IReadOnlyList<TranscribedWord> words,
+        CancellationToken cancellationToken = default)
+    {
+        static string Cell(string text) => Regex.Replace(text, @"[\t\r\n]+", " ");
+
+        var script = new StringBuilder();
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            if (i == 0 || tokens[i - 1].Line != tokens[i].Line)
+                script.Append("# line ").Append(tokens[i].Line + 1).Append(" (").Append(lines[tokens[i].Line].Speaker).Append(")\n");
+            script.Append(i).Append('\t').Append(Cell(tokens[i].Text)).Append('\n');
+        }
+        var transcript = new StringBuilder();
+        for (var i = 0; i < words.Count; i++)
+            transcript.Append(i).Append('\t').Append(Cell(words[i].Text)).Append(words[i].Speaker is { } sp ? "\t" + sp : "").Append('\n');
+
+        var prompt = $$"""
+You align a known script to a speech-recognition transcript that has word timestamps.
+
+The SCRIPT is exactly what was said and is the text people will read. The TRANSCRIPT is what a speech-recognition model heard, one entry per word (languages without spaces may be one character per entry). It can contain misheard words, other spellings, numerals instead of spelled-out numbers (or the reverse), merged or split words, missing words and different punctuation.
+
+For every script token, give the range of transcript word indices [s, e] that were spoken for it.
+Rules:
+- Work in order. Ranges never go backwards: each token's s and e are >= the previous matched token's s and e.
+- One token may cover several transcript words, e.g. "25" <-> "twenty" "five", or "咖啡" <-> "咖" "啡".
+- Consecutive tokens may share one transcript word when the transcript merged them.
+- Match by sound and position, not spelling: a misheard word in the right place still matches.
+- If a token was not spoken or cannot be located, use s = -1 and e = -1.
+- Transcript words that belong to no token (fillers, repeats, hallucinations) are skipped.
+Return exactly one entry per script token, in order, with its index as "t".
+
+SCRIPT TOKENS (index<TAB>token), grouped by line:
+{{script}}
+TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
+{{transcript}}
+""";
+
+        var textModel = (await modelSettings.GetAsync(cancellationToken)).TextModel;
+        return await WithGeminiKeyAsync("word alignment", async key =>
+        {
+            var client = httpClientFactory.CreateClient("gemini");
+            var body = new
+            {
+                contents = new[] { new { parts = new[] { new { text = prompt } } } },
+                generationConfig = new
+                {
+                    responseMimeType = "application/json",
+                    responseSchema = new
+                    {
+                        type = "OBJECT",
+                        properties = new
+                        {
+                            tokens = new
+                            {
+                                type = "ARRAY",
+                                items = new
+                                {
+                                    type = "OBJECT",
+                                    properties = new { t = new { type = "INTEGER" }, s = new { type = "INTEGER" }, e = new { type = "INTEGER" } },
+                                    required = new[] { "t", "s", "e" },
+                                },
+                            },
+                        },
+                        required = new[] { "tokens" },
+                    },
+                },
+            };
+            using var response = await client.PostAsync(
+                $"/v1beta/models/{textModel}:generateContent?key={key}",
+                new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
+                cancellationToken);
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Gemini word alignment failed with status {(int)response.StatusCode} for model '{textModel}'. Body: {TruncateForLog(json)}",
+                    null,
+                    response.StatusCode);
+            }
+
+            var raw = JsonDocument.Parse(json).RootElement
+                .GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
+            using var parsed = JsonDocument.Parse(raw.Replace("```json", "").Replace("```", "").Trim());
+            var matches = new TokenMatch?[tokens.Count];
+            foreach (var entry in parsed.RootElement.GetProperty("tokens").EnumerateArray())
+            {
+                if (!entry.TryGetProperty("t", out var tEl) || !tEl.TryGetInt32(out var t)) continue;
+                if (!entry.TryGetProperty("s", out var sEl) || !sEl.TryGetInt32(out var s)) continue;
+                if (!entry.TryGetProperty("e", out var eEl) || !eEl.TryGetInt32(out var e)) continue;
+                if (t < 0 || t >= tokens.Count || s < 0 || e < s || e >= words.Count) continue;
+                matches[t] = new TokenMatch(s, e);
+            }
+            return matches;
+        }, cancellationToken, model: textModel);
+    }
+
+    /// <summary>The models these keys can use right now, straight from Gemini (not cached).</summary>
+    public async Task<GeminiModelCatalog> ListModelsAsync(CancellationToken cancellationToken = default)
+    {
+        return await WithGeminiKeyAsync("list models", async key =>
+        {
+            var client = httpClientFactory.CreateClient("gemini");
+            using var response = await client.GetAsync($"/v1beta/models?pageSize=1000&key={key}", cancellationToken);
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException($"Gemini list models failed with status {(int)response.StatusCode}. Body: {TruncateForLog(json)}", null, response.StatusCode);
+
+            var text = new List<string>();
+            var audio = new List<string>();
+            foreach (var model in JsonDocument.Parse(json).RootElement.GetProperty("models").EnumerateArray())
+            {
+                var name = (model.GetProperty("name").GetString() ?? "").Replace("models/", "");
+                var methods = model.TryGetProperty("supportedGenerationMethods", out var m) && m.ValueKind == JsonValueKind.Array
+                    ? m.EnumerateArray().Select(x => x.GetString()).ToHashSet()
+                    : [];
+                if (name.Length == 0 || !methods.Contains("generateContent")) continue;
+                if (name.Contains("tts", StringComparison.OrdinalIgnoreCase)) audio.Add(name);
+                else if (!NonTextModelKeywords.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase))) text.Add(name);
+            }
+            return new GeminiModelCatalog(text, audio);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// The keys a call may use, de-duplicated and shuffled. Web search only works on keys
+    /// with <see cref="GeminiSettings.WebSearchKeyPrefix"/>; if none have it, all keys are tried.
+    /// </summary>
+    public static string[] SelectKeys(IEnumerable<string> configured, bool webSearch, string webSearchPrefix)
+    {
+        var keys = configured
+            .Select(k => k?.Trim() ?? "")
+            .Where(k => k.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (webSearch && !string.IsNullOrEmpty(webSearchPrefix))
+        {
+            var searchKeys = keys.Where(k => k.StartsWith(webSearchPrefix, StringComparison.Ordinal)).ToArray();
+            if (searchKeys.Length > 0) keys = searchKeys;
+        }
         for (var i = keys.Length - 1; i > 0; i--)
         {
             var j = Random.Shared.Next(i + 1);
@@ -1057,25 +1385,51 @@ Example:
         return keys;
     }
 
-    private async Task<T> WithGeminiKeyAsync<T>(Func<string, Task<T>> fn, CancellationToken cancellationToken)
+    private static string MaskKey(string key) => key.Length <= 10 ? "***" : $"{key[..6]}…{key[^4..]}";
+
+    /// <summary>
+    /// Runs one step with each key in turn (shuffled per step) until one succeeds. A content
+    /// rejection is final and is not retried with other keys.
+    /// </summary>
+    private async Task<T> WithGeminiKeyAsync<T>(string operation, Func<string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false, string? model = null)
     {
-        var keys = GetShuffledKeys();
+        var stage = operation.Replace(' ', '_').Replace("(", "").Replace(")", "");
+        var keys = SelectKeys(Settings.ApiKeys, webSearch, Settings.WebSearchKeyPrefix);
         if (keys.Length == 0) throw new InvalidOperationException("No Gemini API keys configured.");
 
         Exception? lastEx = null;
-        foreach (var key in keys)
+        for (var attempt = 0; attempt < keys.Length; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var key = keys[attempt];
             try
             {
                 return await fn(key);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (ContentRejectedException)
             {
+                throw;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                // Includes HttpClient timeouts (TaskCanceledException without our token cancelled).
                 lastEx = ex;
+                logger.LogWarning(
+                    "Gemini {Operation} failed with key {Key} (attempt {Attempt}/{Total}); trying the next key. {Error}",
+                    operation, MaskKey(key), attempt + 1, keys.Length, TruncateForLog(ex.Message, 400));
+                await events.RecordAsync(
+                    AiPipelineSeverity.Warning, stage, "key_failed",
+                    TruncateForLog(ex.Message, 1000),
+                    new { attempt = attempt + 1, total = keys.Length, status = (ex as HttpRequestException)?.StatusCode is { } code ? (int)code : (int?)null, exception = ex.GetType().Name },
+                    model, MaskKey(key));
             }
         }
-        throw new InvalidOperationException("All Gemini API keys failed.", lastEx);
+        await events.RecordAsync(
+            AiPipelineSeverity.Error, stage, "all_keys_failed",
+            TruncateForLog(lastEx?.Message, 1000),
+            new { keys = keys.Length, webSearch },
+            model);
+        throw new InvalidOperationException($"All Gemini API keys failed for {operation}.", lastEx);
     }
 
     // ── Internal deserialization types ───────────────────────────────
@@ -1130,3 +1484,7 @@ public record ShortCueValidationFailure(
 public record VideoTranscriptCueRecord(int Index, int StartMs, int EndMs, string Text);
 
 public class ContentRejectedException(string message) : Exception(message);
+
+public record GeneratedAudio(byte[] Bytes, string ContentType, string FileExtension, int DurationMs);
+
+public record GeminiModelCatalog(IReadOnlyList<string> TextModels, IReadOnlyList<string> AudioModels);
