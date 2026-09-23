@@ -8,8 +8,12 @@ namespace BanteraApi.Gemini;
 /// <summary>A word heard by the transcription model, with its time in the audio.</summary>
 public sealed record TranscribedWord(string Text, int StartMs, int EndMs, string? Speaker = null);
 
-/// <summary>One word of the original script. <see cref="Key"/> is what spellings are compared on.</summary>
-public sealed record ScriptToken(int Line, string Text, string Key);
+/// <summary>
+/// One timed unit of the original script. <see cref="Key"/> is what spellings are compared on.
+/// <see cref="Word"/> is the index of the app word it belongs to: a Chinese or Japanese run
+/// is one app word but one token per character.
+/// </summary>
+public sealed record ScriptToken(int Line, string Text, string Key, int Word = 0);
 
 /// <summary>The inclusive range of transcript word indices spoken for one script token.</summary>
 public readonly record struct TokenMatch(int Start, int End);
@@ -24,7 +28,10 @@ public enum TokenTimingStatus
     Estimated,
 }
 
-public sealed record TimedToken(int Line, string Text, int StartMs, int EndMs, TokenTimingStatus Status);
+public sealed record TimedToken(int Line, string Text, int StartMs, int EndMs, TokenTimingStatus Status, int Word = 0);
+
+/// <summary>One app word with its timing; <see cref="Parts"/> are its per-character tokens.</summary>
+public sealed record TimedWord(int Line, string Text, int StartMs, int EndMs, TokenTimingStatus Status, IReadOnlyList<TimedToken> Parts);
 
 public sealed record WordAlignment(IReadOnlyList<TimedToken> Tokens, int Exact, int Corrected, int Estimated, int UnusedTranscriptWords)
 {
@@ -46,15 +53,87 @@ public static class WordTimingAligner
     private const int MinEstimatedMs = 80;
     private const int CueEndPaddingMs = 150;
 
+    /// <summary>
+    /// App words, with Chinese and Japanese runs split into single characters (so each is
+    /// timed on its own). Concatenating a word's tokens gives back the app word exactly.
+    /// </summary>
     public static List<ScriptToken> Tokenize(IReadOnlyList<string> lines)
     {
         var tokens = new List<ScriptToken>();
+        var word = 0;
         for (var line = 0; line < lines.Count; line++)
         {
             foreach (Match m in AppWordRegex.Matches(lines[line] ?? ""))
-                tokens.Add(new ScriptToken(line, m.Value, NormalizeKey(m.Value)));
+            {
+                foreach (var piece in SplitCjk(m.Value))
+                    tokens.Add(new ScriptToken(line, piece, NormalizeKey(piece), word));
+                word++;
+            }
         }
         return tokens;
+    }
+
+    /// <summary>
+    /// Splits a word into one piece per Han / kana character; other letters stay together
+    /// ("我的iPhone" → 我, 的, iPhone). Small kana and the long-vowel mark join the character
+    /// before them (きょう → きょ, う), since they are not spoken alone.
+    /// </summary>
+    public static List<string> SplitCjk(string word)
+    {
+        var pieces = new List<string>();
+        var other = new StringBuilder();
+        var lastWasCjk = false;
+        foreach (var rune in word.EnumerateRunes())
+        {
+            if (!IsCjk(rune))
+            {
+                other.Append(rune.ToString());
+                lastWasCjk = false;
+                continue;
+            }
+            if (other.Length > 0) { pieces.Add(other.ToString()); other.Clear(); }
+            if (lastWasCjk && IsKanaModifier(rune)) pieces[^1] += rune.ToString();
+            else pieces.Add(rune.ToString());
+            lastWasCjk = true;
+        }
+        if (other.Length > 0) pieces.Add(other.ToString());
+        return pieces;
+    }
+
+    /// <summary>Han ideographs, hiragana and katakana (incl. half-width).</summary>
+    public static bool IsCjk(Rune rune) => rune.Value switch
+    {
+        >= 0x3040 and <= 0x30FF => true,   // hiragana, katakana
+        >= 0x31F0 and <= 0x31FF => true,   // katakana phonetic extensions
+        >= 0x3400 and <= 0x4DBF => true,   // CJK extension A
+        >= 0x4E00 and <= 0x9FFF => true,   // CJK unified ideographs
+        >= 0xF900 and <= 0xFAFF => true,   // CJK compatibility ideographs
+        >= 0xFF66 and <= 0xFF9F => true,   // half-width katakana
+        >= 0x20000 and <= 0x3134F => true, // CJK extensions B–G
+        _ => false,
+    };
+
+    private static bool IsKanaModifier(Rune rune) =>
+        "ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿーｧｨｩｪｫｯｬｭｮｰﾞﾟ゛゜".Contains(rune.ToString(), StringComparison.Ordinal);
+
+    /// <summary>Groups the timed tokens back into app words, first token start to last token end.</summary>
+    public static List<TimedWord> GroupWords(WordAlignment alignment)
+    {
+        var result = new List<TimedWord>();
+        var tokens = alignment.Tokens;
+        for (var i = 0; i < tokens.Count;)
+        {
+            var j = i + 1;
+            while (j < tokens.Count && tokens[j].Word == tokens[i].Word) j++;
+            var parts = tokens.Skip(i).Take(j - i).ToList();
+            var status = parts.All(p => p.Status == TokenTimingStatus.Exact) ? TokenTimingStatus.Exact
+                : parts.All(p => p.Status == TokenTimingStatus.Estimated) ? TokenTimingStatus.Estimated
+                : TokenTimingStatus.Corrected;
+            result.Add(new TimedWord(parts[0].Line, string.Concat(parts.Select(p => p.Text)),
+                parts[0].StartMs, parts.Max(p => p.EndMs), status, parts));
+            i = j;
+        }
+        return result;
     }
 
     /// <summary>Lowercased letters and digits only. Marks are dropped so "नमस्ते" compares equal however it is split.</summary>
@@ -234,7 +313,7 @@ public static class WordTimingAligner
         {
             var s = (int)Math.Round(start[i]);
             var e = Math.Max(s + 1, (int)Math.Round(end[i]));
-            result.Add(new TimedToken(tokens[i].Line, tokens[i].Text, s, e, status[i]));
+            result.Add(new TimedToken(tokens[i].Line, tokens[i].Text, s, e, status[i], tokens[i].Word));
             switch (status[i])
             {
                 case TokenTimingStatus.Exact: exactCount++; break;
@@ -245,15 +324,26 @@ public static class WordTimingAligner
         return new WordAlignment(result, exactCount, correctedCount, estimatedCount, used.Count(u => !u));
     }
 
+    /// <summary>
+    /// One record per app word, so released apps keep matching words as before. Words made of
+    /// several timed characters (Chinese, Japanese) also carry per-character <c>Parts</c>.
+    /// </summary>
     public static List<WordTimingRecord> ToWordTiming(WordAlignment alignment) =>
-        alignment.Tokens
-            .Select(t => new WordTimingRecord(t.Text, t.StartMs, t.EndMs, t.Status switch
+        GroupWords(alignment)
+            .Select(w => new WordTimingRecord(w.Text, w.StartMs, w.EndMs, Confidence(w.Status))
             {
-                TokenTimingStatus.Exact => 1.0,
-                TokenTimingStatus.Corrected => 0.8,
-                _ => 0.0,
-            }))
+                Parts = w.Parts.Count > 1
+                    ? w.Parts.Select(p => new WordTimingPart(p.Text, p.StartMs, p.EndMs)).ToList()
+                    : null,
+            })
             .ToList();
+
+    private static double Confidence(TokenTimingStatus status) => status switch
+    {
+        TokenTimingStatus.Exact => 1.0,
+        TokenTimingStatus.Corrected => 0.8,
+        _ => 0.0,
+    };
 
     /// <summary>
     /// One cue per dialogue line: first word start to last word end, with a little padding
@@ -279,9 +369,10 @@ public static class WordTimingAligner
     {
         var spans = new List<(int Start, int End)>();
         var texts = new List<string>();
+        var words = GroupWords(alignment);
         for (var line = 0; line < lines.Count; line++)
         {
-            var lineTokens = alignment.Tokens.Where(t => t.Line == line).ToList();
+            var lineTokens = words.Where(t => t.Line == line).ToList();
             var pieces = lines[line].ShortCues.Count > 0 ? lines[line].ShortCues : [lines[line].Text];
             var cursor = 0;
             foreach (var piece in pieces)

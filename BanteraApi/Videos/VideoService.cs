@@ -1098,7 +1098,12 @@ public class VideoService(
         {
             var timings = JsonSerializer.Deserialize<List<WordTimingRecord>>(json, TranscriptJsonOptions)?
                 .Where(t => !string.IsNullOrWhiteSpace(t.Word) && t.EndMs > t.StartMs)
-                .Select(t => new WordTimingDto(t.Word, t.StartMs, t.EndMs, t.Confidence))
+                .Select(t => new WordTimingDto(t.Word, t.StartMs, t.EndMs, t.Confidence)
+                {
+                    Parts = t.Parts?.Where(p => !string.IsNullOrEmpty(p.Word) && p.EndMs > p.StartMs).ToList() is { Count: > 1 } parts
+                        ? parts
+                        : null,
+                })
                 .ToList();
             return timings is { Count: > 0 } ? timings : null;
         }

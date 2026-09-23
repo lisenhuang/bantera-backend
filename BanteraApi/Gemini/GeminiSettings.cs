@@ -17,7 +17,7 @@ public class GeminiSettings
     public string CueTimingModel { get; set; } = "gemini-flash-latest";
 
     /// <summary>Default TTS model. Admins can override it in the dashboard.</summary>
-    public string AudioModel { get; set; } = "gemini-2.5-flash-preview-tts";
+    public string AudioModel { get; set; } = "gemini-3.1-flash-tts-preview";
 
     /// <summary>Speech-to-text model that returns word-level timestamps (Interactions API).</summary>
     public string TranscribeModel { get; set; } = "gemini-3.5-transcribe";

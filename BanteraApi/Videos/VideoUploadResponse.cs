@@ -1,10 +1,20 @@
+using System.Text.Json.Serialization;
+
 namespace BanteraApi.Videos;
 
 public sealed record WordTimingDto(
     string Word,
     int StartMs,
     int EndMs,
-    double? Confidence);
+    double? Confidence)
+{
+    /// <summary>
+    /// Per-character timing inside a Chinese / Japanese word (the word is one clause-long run
+    /// for the app's word pattern). Omitted for other words; older apps ignore it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<WordTimingPart>? Parts { get; init; }
+}
 
 public sealed record VideoUploadResponse(
     Guid Id,

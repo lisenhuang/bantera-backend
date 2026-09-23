@@ -10,12 +10,24 @@ public class WordTimingAlignerTests
         words.Select(w => new TranscribedWord(w.Text, w.Start, w.End)).ToList();
 
     [Fact]
-    public void Tokenize_MatchesTheAppWordPattern()
+    public void Tokenize_MatchesTheAppWordPatternAndSplitsChineseCharacters()
     {
-        var tokens = WordTimingAligner.Tokenize(["Hey! Don't be late, it's 7:30.", "你好，今天去喝咖啡吧。"]);
+        var tokens = WordTimingAligner.Tokenize(["Hey! Don't be late, it's 7:30.", "你好，喝咖啡吧。"]);
 
-        Assert.Equal(["Hey", "Don't", "be", "late", "it's", "7", "30", "你好", "今天去喝咖啡吧"], tokens.Select(t => t.Text));
-        Assert.Equal([0, 0, 0, 0, 0, 0, 0, 1, 1], tokens.Select(t => t.Line));
+        Assert.Equal(["Hey", "Don't", "be", "late", "it's", "7", "30", "你", "好", "喝", "咖", "啡", "吧"], tokens.Select(t => t.Text));
+        Assert.Equal([0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1], tokens.Select(t => t.Line));
+        // Chinese characters keep the index of the app word (the whole run) they belong to.
+        Assert.Equal([0, 1, 2, 3, 4, 5, 6, 7, 7, 8, 8, 8, 8], tokens.Select(t => t.Word));
+    }
+
+    [Theory]
+    [InlineData("我的iPhone", new[] { "我", "的", "iPhone" })]
+    [InlineData("きょうはコーヒー", new[] { "きょ", "う", "は", "コー", "ヒー" })]
+    [InlineData("hello", new[] { "hello" })]
+    [InlineData("안녕하세요", new[] { "안녕하세요" })]
+    public void SplitCjk_SplitsHanAndKanaOnly(string word, string[] expected)
+    {
+        Assert.Equal(expected, WordTimingAligner.SplitCjk(word));
     }
 
     [Fact]
@@ -51,16 +63,33 @@ public class WordTimingAlignerTests
     }
 
     [Fact]
-    public void ChineseCharacters_AreGroupedIntoTheScriptsWords()
+    public void ChineseCharacters_AreTimedOneByOneAndGroupedForTheApp()
     {
         var tokens = WordTimingAligner.Tokenize(["你好，喝咖啡吧。"]);
         var words = Words(("你", 300, 400), ("好，", 400, 900), ("喝", 1000, 1100), ("咖", 1100, 1300), ("啡", 1300, 1500), ("吧。", 1500, 1600));
 
         var alignment = WordTimingAligner.Resolve(tokens, words, WordTimingAligner.AlignByCharacters(tokens, words), 2000);
+        var timing = WordTimingAligner.ToWordTiming(alignment);
 
-        Assert.Equal(["你好", "喝咖啡吧"], alignment.Tokens.Select(t => t.Text));
-        Assert.Equal([(300, 900), (1000, 1600)], alignment.Tokens.Select(t => (t.StartMs, t.EndMs)));
-        Assert.Equal(2, alignment.Exact);
+        Assert.Equal(6, alignment.Exact);
+        // One record per app word (what released apps match on), with per-character parts.
+        Assert.Equal([("你好", 300, 900), ("喝咖啡吧", 1000, 1600)], timing.Select(t => (t.Word, t.StartMs, t.EndMs)));
+        Assert.Equal([("喝", 1000, 1100), ("咖", 1100, 1300), ("啡", 1300, 1500), ("吧", 1500, 1600)],
+            timing[1].Parts!.Select(p => (p.Word, p.StartMs, p.EndMs)));
+    }
+
+    [Fact]
+    public void WordTiming_OmitsPartsForSingleTokenWords()
+    {
+        var tokens = WordTimingAligner.Tokenize(["Hi 你好"]);
+        var words = Words(("Hi", 0, 200), ("你", 300, 400), ("好", 400, 600));
+        var alignment = WordTimingAligner.Resolve(tokens, words, WordTimingAligner.AlignByCharacters(tokens, words), 1000);
+
+        var json = JsonSerializer.Serialize(WordTimingAligner.ToWordTiming(alignment), new JsonSerializerOptions(JsonSerializerDefaults.Web) { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+
+        Assert.Equal(
+            """[{"word":"Hi","startMs":0,"endMs":200,"confidence":1},{"word":"你好","startMs":300,"endMs":600,"confidence":1,"parts":[{"word":"你","startMs":300,"endMs":400},{"word":"好","startMs":400,"endMs":600}]}]""",
+            json);
     }
 
     [Fact]
