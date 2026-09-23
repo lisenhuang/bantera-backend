@@ -563,7 +563,8 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             if (rateMatch.Success) sampleRate = int.Parse(rateMatch.Groups[1].Value);
 
             byte[] wavBytes;
-            if (mimeType.Contains("L16") || mimeType.Contains("pcm"))
+            // 2.5 TTS returns "audio/L16;codec=pcm;rate=24000"; 3.1 returns "audio/l16; rate=24000; channels=1".
+            if (mimeType.Contains("l16", StringComparison.OrdinalIgnoreCase) || mimeType.Contains("pcm", StringComparison.OrdinalIgnoreCase))
             {
                 wavBytes = PcmToWav(pcm, sampleRate);
             }
