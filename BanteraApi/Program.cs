@@ -82,6 +82,7 @@ builder.Services.AddHttpClient("gemini", c =>
 });
 builder.Services.AddScoped<GeminiService>();
 builder.Services.AddSingleton<AiModelSettingsService>();
+builder.Services.AddSingleton<CueTimingSettingsService>();
 builder.Services.AddSingleton<BanteraApi.Audio.Mp3Encoder>();
 builder.Services.AddScoped<AiAudioTimingService>();
 builder.Services.AddSingleton<BanteraApi.Diagnostics.AiPipelineEventRecorder>();

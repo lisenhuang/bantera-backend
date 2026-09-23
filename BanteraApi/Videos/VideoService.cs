@@ -21,6 +21,7 @@ public class VideoService(
     R2StorageService r2StorageService,
     LinkGenerator linkGenerator,
     CloudflareImageService cloudflareImageService,
+    CueTimingSettingsService cueTimingSettings,
     ILogger<VideoService> logger)
 {
     private static readonly JsonSerializerOptions TranscriptJsonOptions = new(JsonSerializerDefaults.Web);
@@ -234,6 +235,14 @@ public class VideoService(
 
     private VideoUploadResponse BuildResponse(UserVideo video, HttpContext httpContext, string? creatorDisplayName = null)
     {
+        var cues = ParseTranscriptCues(video.TranscriptCuesJson);
+        var shortCues = ParseOptionalStoredTranscriptCues(video.TranscriptShortCuesJson);
+        if (video.IsAiGenerated && cueTimingSettings.StartsAtPreviousCueEnd)
+        {
+            cues = CueTimingSettingsService.StartAtPreviousCueEnd(cues);
+            shortCues = shortCues is null ? null : CueTimingSettingsService.StartAtPreviousCueEnd(shortCues);
+        }
+
         return new VideoUploadResponse(
             video.Id,
             video.UserId,
@@ -241,8 +250,8 @@ public class VideoService(
             video.TranscriptText,
             video.TranscriptLanguage,
             video.TranscriptLanguageCode,
-            ParseTranscriptCues(video.TranscriptCuesJson),
-            ParseOptionalStoredTranscriptCues(video.TranscriptShortCuesJson),
+            cues,
+            shortCues,
             video.IsPublic,
             video.DurationMs,
             video.FileSizeBytes,
