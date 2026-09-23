@@ -37,8 +37,9 @@ public class UserActivityTrackingMiddleware(
                 try
                 {
                     var db = context.RequestServices.GetRequiredService<AppDbContext>();
+                    var geo = CloudflareGeo.FromHeaders(context.Request.Headers);
                     // Not context.RequestAborted: a client disconnect must not cancel the write.
-                    await recorder.TouchAsync(userId, db, CancellationToken.None);
+                    await recorder.TouchAsync(userId, db, geo, CancellationToken.None);
                 }
                 catch (Exception ex)
                 {

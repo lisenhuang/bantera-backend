@@ -9,8 +9,41 @@ namespace BanteraApi.Mcp.Tools;
 /// User-population analytics: registrations, active users, retention and language mix.
 /// </summary>
 [McpServerToolType]
-public sealed class AnalyticsTools(AppDbContext db)
+public sealed class AnalyticsTools(AppDbContext db, Admin.AdminAnalyticsService analytics)
 {
+    [McpServerTool(Name = "location_breakdown")]
+    [Description("""
+        Where users are: user counts per country and the top cities, based on each user's
+        most recent known location from Cloudflare's visitor-location headers. Answers "which
+        countries are our users in". Location is only recorded from the day geo tracking went
+        live, so users who have not opened the app since then are counted as unknown.
+        """)]
+    public async Task<string> LocationBreakdownAsync(CancellationToken ct = default)
+    {
+        var (countries, cities, withoutLocation) = await analytics.GetLocationsAsync(ct);
+        var located = countries.Sum(c => c.Users);
+
+        return McpJson.Serialize(new
+        {
+            asOf = DateTime.UtcNow,
+            usersWithLocation = located,
+            usersWithoutLocation = withoutLocation,
+            countries = countries.Select(c => new
+            {
+                c.Code,
+                c.Flag,
+                c.Users,
+                pct = located == 0 ? 0 : Math.Round(c.Users * 100.0 / located, 1),
+            }),
+            topCities = cities,
+            caveats = new[]
+            {
+                "Location comes from the IP address Cloudflare saw, so VPN users appear wherever their VPN exits.",
+                "City and region need Cloudflare's 'Add visitor location headers' managed transform; without it only the country is recorded.",
+            },
+        });
+    }
+
     private const string SystemRole = "system";
 
     private static readonly string[] RegistrationCaveat =
@@ -95,7 +128,7 @@ public sealed class AnalyticsTools(AppDbContext db)
         if (byProvider)
         {
             var rows = await db.Database.SqlQueryRaw<McpSql.ProviderBucketRow>($$"""
-                SELECT date_trunc('{{unit}}', u."CreatedAt") AS "Bucket",
+                SELECT date_trunc('{{unit}}', u."CreatedAt" AT TIME ZONE 'UTC') AS "Bucket",
                        i."Provider" AS "Provider",
                        COUNT(*) AS "Count"
                 FROM users u
@@ -129,7 +162,7 @@ public sealed class AnalyticsTools(AppDbContext db)
         }
 
         var counts = await db.Database.SqlQueryRaw<McpSql.BucketCountRow>($$"""
-            SELECT date_trunc('{{unit}}', "CreatedAt") AS "Bucket", COUNT(*) AS "Count"
+            SELECT date_trunc('{{unit}}', "CreatedAt" AT TIME ZONE 'UTC') AS "Bucket", COUNT(*) AS "Count"
             FROM users
             WHERE "DeletedAt" IS NULL AND "Role" <> 'system'
               AND "CreatedAt" >= {0} AND "CreatedAt" < {1}
@@ -240,7 +273,7 @@ public sealed class AnalyticsTools(AppDbContext db)
         var from = DateTime.UtcNow.Date.AddDays(-7 * (weeks + maxOffset));
 
         var sizes = await db.Database.SqlQueryRaw<McpSql.CohortSizeRow>("""
-            SELECT date_trunc('week', "CreatedAt")::date AS "CohortWeek", COUNT(*) AS "Size"
+            SELECT date_trunc('week', "CreatedAt" AT TIME ZONE 'UTC')::date AS "CohortWeek", COUNT(*) AS "Size"
             FROM users
             WHERE "DeletedAt" IS NULL AND "Role" <> 'system' AND "CreatedAt" >= {0}
             GROUP BY 1 ORDER BY 1
@@ -248,11 +281,11 @@ public sealed class AnalyticsTools(AppDbContext db)
 
         var retention = await db.Database.SqlQueryRaw<McpSql.CohortRow>("""
             WITH cohorts AS (
-              SELECT "Id" AS uid, date_trunc('week', "CreatedAt")::date AS cw
+              SELECT "Id" AS uid, date_trunc('week', "CreatedAt" AT TIME ZONE 'UTC')::date AS cw
               FROM users
               WHERE "DeletedAt" IS NULL AND "Role" <> 'system' AND "CreatedAt" >= {0}
             ), act AS (
-              SELECT DISTINCT "UserId" AS uid, date_trunc('week', "Date")::date AS aw
+              SELECT DISTINCT "UserId" AS uid, date_trunc('week', "Date"::timestamp)::date AS aw
               FROM user_activity_daily WHERE "Date" >= {0}::date
             )
             SELECT c.cw AS "CohortWeek",
@@ -512,7 +545,7 @@ public sealed class AnalyticsTools(AppDbContext db)
     {
         var rows = await db.Database.SqlQueryRaw<BucketRow>($$"""
             SELECT g.b AS "Bucket"
-            FROM generate_series(date_trunc('{{unit}}', {0}::timestamptz), {1}::timestamptz, interval '{{interval}}') AS g(b)
+            FROM generate_series(date_trunc('{{unit}}', {0}::timestamptz AT TIME ZONE 'UTC'), {1}::timestamptz AT TIME ZONE 'UTC', interval '{{interval}}') AS g(b)
             """, p.FromUtc, p.ToUtc.AddSeconds(-1)).ToListAsync(ct);
 
         return [.. rows.Select(r => r.Bucket)];

@@ -104,9 +104,9 @@ public sealed class ContentTools(AppDbContext db)
                    COALESCE(c.uploads, 0) AS "Uploads",
                    COALESCE(c.ai, 0) AS "AiAudio",
                    COALESCE(c.bytes, 0) AS "StorageBytes"
-            FROM generate_series(date_trunc('{{unit}}', {0}::timestamptz), {1}::timestamptz, interval '{{interval}}') AS g(b)
+            FROM generate_series(date_trunc('{{unit}}', {0}::timestamptz AT TIME ZONE 'UTC'), {1}::timestamptz AT TIME ZONE 'UTC', interval '{{interval}}') AS g(b)
             LEFT JOIN (
-              SELECT date_trunc('{{unit}}', "CreatedAt") AS b,
+              SELECT date_trunc('{{unit}}', "CreatedAt" AT TIME ZONE 'UTC') AS b,
                      SUM(CASE WHEN "IsAiGenerated" THEN 0 ELSE 1 END) AS uploads,
                      SUM(CASE WHEN "IsAiGenerated" THEN 1 ELSE 0 END) AS ai,
                      SUM("FileSizeBytes") AS bytes
@@ -232,7 +232,7 @@ public sealed class ContentTools(AppDbContext db)
         {
             "language" => "\"LanguageCode\"",
             "scenario" => "\"ScenarioId\"",
-            "day" => "to_char(date_trunc('day', \"CreatedAt\"), 'YYYY-MM-DD')",
+            "day" => "to_char(date_trunc('day', \"CreatedAt\" AT TIME ZONE 'UTC'), 'YYYY-MM-DD')",
             _ => throw new McpException("groupBy must be 'language', 'scenario' or 'day'."),
         };
 

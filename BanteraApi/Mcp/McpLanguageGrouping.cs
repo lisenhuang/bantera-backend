@@ -2,11 +2,12 @@ using BanteraApi.Chat;
 
 namespace BanteraApi.Mcp;
 
-public sealed record LanguageVariant(string Code, int Users);
+public sealed record LanguageVariant(string Code, string DisplayName, string Flag, int Users);
 
 public sealed record LanguageGroup(
     string Key,
     string DisplayName,
+    string Flag,
     int Users,
     double Pct,
     IReadOnlyList<LanguageVariant> Variants);
@@ -28,37 +29,41 @@ public static class McpLanguageGrouping
         IEnumerable<(string? Code, int Count)> rows,
         bool byFamily = true)
     {
-        var buckets = new Dictionary<string, (string Display, int Total, Dictionary<string, int> Variants)>(StringComparer.OrdinalIgnoreCase);
+        var buckets = new Dictionary<string, (string Display, int Total, Dictionary<string, (string Name, int Count)> Variants)>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var (code, count) in rows)
         {
             var descriptor = ChatLanguageResolver.Resolve(code);
 
-            string key, display, variantCode;
+            string key, display, variantCode, variantName;
             if (descriptor is null)
             {
                 key = UnsetKey;
                 display = "Not set";
                 variantCode = UnsetKey;
+                variantName = "Not set";
             }
             else if (byFamily)
             {
                 key = descriptor.MatchKey;
                 display = descriptor.DisplayName;
                 variantCode = descriptor.OriginalCode;
+                variantName = descriptor.ExactDisplayName;
             }
             else
             {
                 key = descriptor.OriginalCode;
                 display = descriptor.ExactDisplayName;
                 variantCode = descriptor.OriginalCode;
+                variantName = descriptor.ExactDisplayName;
             }
 
             if (!buckets.TryGetValue(key, out var bucket))
-                bucket = (display, 0, new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+                bucket = (display, 0, new Dictionary<string, (string, int)>(StringComparer.OrdinalIgnoreCase));
 
             bucket.Total += count;
-            bucket.Variants[variantCode] = bucket.Variants.GetValueOrDefault(variantCode) + count;
+            var existing = bucket.Variants.GetValueOrDefault(variantCode);
+            bucket.Variants[variantCode] = (variantName, existing.Count + count);
             buckets[key] = bucket;
         }
 
@@ -68,10 +73,15 @@ public static class McpLanguageGrouping
             .Select(kv => new LanguageGroup(
                 kv.Key,
                 kv.Value.Display,
+                kv.Key == UnsetKey ? "" : LanguageFlags.For(kv.Key),
                 kv.Value.Total,
                 grandTotal == 0 ? 0 : Math.Round(kv.Value.Total * 100.0 / grandTotal, 1),
                 [.. kv.Value.Variants
-                    .Select(v => new LanguageVariant(v.Key, v.Value))
+                    .Select(v => new LanguageVariant(
+                        v.Key,
+                        v.Value.Name,
+                        v.Key == UnsetKey ? "" : LanguageFlags.For(v.Key),
+                        v.Value.Count))
                     .OrderByDescending(v => v.Users)]))
             .OrderByDescending(g => g.Users)
             .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)];

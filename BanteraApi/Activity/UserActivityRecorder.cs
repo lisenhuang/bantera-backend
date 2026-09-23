@@ -15,8 +15,9 @@ public class UserActivityRecorder(IMemoryCache cache, ILogger<UserActivityRecord
 {
     private static readonly TimeSpan MaxWindow = TimeSpan.FromMinutes(60);
 
-    public async Task TouchAsync(Guid userId, AppDbContext db, CancellationToken ct = default)
+    public async Task TouchAsync(Guid userId, AppDbContext db, VisitorGeo? geo = null, CancellationToken ct = default)
     {
+        geo ??= VisitorGeo.None;
         var now = DateTime.UtcNow;
         var today = DateOnly.FromDateTime(now);
         var key = $"activity:{userId:N}:{today:yyyyMMdd}";
@@ -35,13 +36,20 @@ public class UserActivityRecorder(IMemoryCache cache, ILogger<UserActivityRecord
 
         try
         {
+            // Location keeps the latest non-null value for the day, so a request that
+            // arrives without Cloudflare headers never erases a known location.
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO user_activity_daily
-                    ("UserId","Date","FirstSeenAt","LastSeenAt","TouchCount","MessagesSent","Source")
-                VALUES ({userId}, {today}, {now}, {now}, 1, 0, 'live')
+                    ("UserId","Date","FirstSeenAt","LastSeenAt","TouchCount","MessagesSent","Source",
+                     "CountryCode","Region","City")
+                VALUES ({userId}, {today}, {now}, {now}, 1, 0, 'live',
+                        {geo.CountryCode}, {geo.Region}, {geo.City})
                 ON CONFLICT ("UserId","Date") DO UPDATE
-                    SET "LastSeenAt" = EXCLUDED."LastSeenAt",
-                        "TouchCount" = user_activity_daily."TouchCount" + 1
+                    SET "LastSeenAt"  = EXCLUDED."LastSeenAt",
+                        "TouchCount"  = user_activity_daily."TouchCount" + 1,
+                        "CountryCode" = COALESCE(EXCLUDED."CountryCode", user_activity_daily."CountryCode"),
+                        "Region"      = COALESCE(EXCLUDED."Region", user_activity_daily."Region"),
+                        "City"        = COALESCE(EXCLUDED."City", user_activity_daily."City")
                 """, ct);
         }
         catch (Exception ex)

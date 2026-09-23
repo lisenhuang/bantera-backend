@@ -38,7 +38,7 @@ public sealed class SchemaTools(AppDbContext db, McpToolContext ctx)
                 new { name = "aiAudioJobs", what = "AI audio generation attempts.", fields = new[] { "status (processing|done|failed)", "languageCode", "scenarioId", "createdAt", "completedAt" } },
                 new { name = "chat", what = "Voice message threads.", fields = new[] { "threadType (dm|group)", "spokenLanguageCode", "durationMs", "createdAt" } },
                 new { name = "pushTokens", what = "APNs device tokens.", fields = new[] { "platform", "isSandbox", "supportsCalls", "lastSeenAt" } },
-                new { name = "activity", what = "One row per user per UTC day they used the app. Backs DAU/WAU/MAU.", fields = new[] { "date", "touchCount", "messagesSent", "source (live|backfill)" } },
+                new { name = "activity", what = "One row per user per UTC day they used the app. Backs DAU/WAU/MAU.", fields = new[] { "date", "touchCount", "messagesSent", "source (live|backfill)", "countryCode", "region", "city" } },
             },
             languageGrouping = "Language codes are BCP-47 and stored as free text, so casing varies. Tools group them into language families by default: en-US and en-GB both count as 'en', while zh-HK and zh-TW stay distinct. Pass groupBy='exact' to see raw codes.",
             activityTracking = new
@@ -79,6 +79,7 @@ public sealed class SchemaTools(AppDbContext db, McpToolContext ctx)
                 new { name = "retention_cohorts", what = "Weekly signup cohorts and how many came back in later weeks." },
                 new { name = "language_breakdown", what = "Users per learning, native or translation language." },
                 new { name = "language_matrix", what = "Most common native-language to learning-language pairs." },
+                new { name = "location_breakdown", what = "Users per country and top cities, from Cloudflare geolocation." },
                 new { name = "top_users", what = "Most active users by videos, AI audio, messages, saves or active days." },
                 new { name = "content_overview", what = "Library totals: uploads vs AI audio, storage, durations, AI job success." },
                 new { name = "content_timeseries", what = "Content created per bucket with storage added." },

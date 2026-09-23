@@ -17,6 +17,16 @@ public static class AdminEndpoints
         })
         .WithName("AdminGetStats");
 
+        // GET /api/admin/analytics?days=30 — everything the dashboard overview charts.
+        group.MapGet("/analytics", async (
+            AdminAnalyticsService analytics,
+            CancellationToken ct,
+            [FromQuery] int days = 30) =>
+        {
+            return Results.Ok(await analytics.GetAsync(days, ct));
+        })
+        .WithName("AdminGetAnalytics");
+
         // GET /api/admin/users
         group.MapGet("/users", async (
             AdminService admin,

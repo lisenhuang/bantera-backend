@@ -26,6 +26,17 @@ public class UserActivityDaily
 
     /// <summary>"live" for rows written by the tracking middleware, "backfill" for reconstructed history.</summary>
     public string Source { get; set; } = ActivitySources.Live;
+
+    // Where the user was on this day, from Cloudflare's visitor-location headers.
+    // Last value seen that day; null for backfilled rows and when Cloudflare has no data.
+
+    /// <summary>ISO 3166-1 alpha-2 country code, e.g. "NZ".</summary>
+    public string? CountryCode { get; set; }
+
+    /// <summary>Region / state name, e.g. "Auckland".</summary>
+    public string? Region { get; set; }
+
+    public string? City { get; set; }
 }
 
 public static class ActivitySources

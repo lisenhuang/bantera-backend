@@ -309,6 +309,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.TouchCount).IsRequired().HasDefaultValue(1);
             e.Property(x => x.MessagesSent).IsRequired().HasDefaultValue(0);
             e.Property(x => x.Source).HasMaxLength(10).IsRequired().HasDefaultValue(ActivitySources.Live);
+            e.Property(x => x.CountryCode).HasMaxLength(2);
+            e.Property(x => x.Region).HasMaxLength(100);
+            e.Property(x => x.City).HasMaxLength(100);
             e.HasIndex(x => x.Date);
         });
 

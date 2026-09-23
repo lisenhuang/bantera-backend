@@ -95,6 +95,7 @@ builder.Services.AddScoped<RevAiAlignmentService>();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<AdminService>();
+builder.Services.AddScoped<AdminAnalyticsService>();
 
 // ── Admin MCP server (OAuth 2.1 authorization server + resource server) ───────
 builder.Services.Configure<McpSettings>(builder.Configuration.GetSection(McpSettings.Section));
