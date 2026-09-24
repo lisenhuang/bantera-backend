@@ -106,6 +106,7 @@ public sealed class SchemaTools(AppDbContext db, McpToolContext ctx)
                 new { name = "set_user_ai_daily_limit", what = "Change a user's daily AI audio allowance.", requiresConfirm = false },
                 new { name = "begin_practice_audio_upload", what = "Get short-lived PUT URLs for an authored audio file and JPEG cover.", requiresConfirm = false },
                 new { name = "submit_practice_audio", what = "Validate and save a complete authored practice-audio lesson, private by default.", requiresConfirm = false },
+                new { name = "update_practice_audio_transcript", what = "Replace the main cues of an owned audio lesson while preserving its media and word timings.", requiresConfirm = false },
                 new { name = "update_user_profile", what = "Edit a user's name or languages.", requiresConfirm = false },
                 new { name = "delete_user", what = "Permanently delete an account.", requiresConfirm = true },
                 new { name = "delete_video", what = "Delete a video or AI audio item.", requiresConfirm = true },

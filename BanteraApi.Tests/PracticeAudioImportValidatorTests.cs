@@ -63,4 +63,13 @@ public class PracticeAudioImportValidatorTests
         Assert.Throws<McpException>(() => PracticeAudioImportValidator.Validate("A greeting", "English", "en-US",
             "Hello there.\nHow are we?", 2500, Lines, Cues, null, Words));
     }
+
+    [Fact]
+    public void TranscriptUpdateMayChangeLineBreaksButNotSpokenText()
+    {
+        Assert.True(PracticeAudioImportValidator.HasSameSpokenText(
+            "Hello there. How are you?", "Hello there.\nHow are you?"));
+        Assert.False(PracticeAudioImportValidator.HasSameSpokenText(
+            "Hello there. How are you?", "Hello there.\nHow are we?"));
+    }
 }

@@ -10,6 +10,14 @@ public static class PracticeAudioImportValidator
     public const int MaxCoverBytes = 5 * 1024 * 1024;
     public const int MaxDurationMs = 30 * 60 * 1000;
 
+    public static bool HasSameSpokenText(string? before, string? after)
+    {
+        static string WithoutWhitespace(string? text)
+            => string.Concat((text ?? "").Where(ch => !char.IsWhiteSpace(ch)));
+
+        return string.Equals(WithoutWhitespace(before), WithoutWhitespace(after), StringComparison.Ordinal);
+    }
+
     public static string AudioExtension(string? format) => format?.Trim().ToLowerInvariant() switch
     {
         "mp3" => ".mp3",

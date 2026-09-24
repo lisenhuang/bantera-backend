@@ -268,6 +268,65 @@ public sealed class PracticeAudioTools(
         }
     }
 
+    [McpServerTool(Name = "update_practice_audio_transcript")]
+    [Description("""
+        Replace the main transcript cues of an existing audio practice lesson owned by the
+        connected admin. Supply every new line, cue, and the matching transcript text.
+        The spoken text must remain identical. Audio, cover, publication status, short
+        subtitle cues, and word timings are preserved; no AI generation is performed.
+        """)]
+    public async Task<string> UpdateTranscriptAsync(
+        [Description("ID of the existing audio practice lesson.")] Guid videoId,
+        [Description("Complete transcript text, one dialogue line per line.")] string transcriptText,
+        [Description("All replacement dialogue lines in playback order.")] string[] dialogueLines,
+        [Description("All replacement indexed main cues with startMs, endMs and text.")] VideoTranscriptCue[] transcriptCues,
+        CancellationToken ct = default)
+    {
+        ctx.RequireWrite();
+        var sw = Stopwatch.StartNew();
+        var video = await db.UserVideos.FirstOrDefaultAsync(v => v.Id == videoId, ct);
+        if (video is null || video.UserId != ctx.AdminUserId || !video.IsAiGenerated
+            || !video.MediaContentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+            throw new McpException("Audio practice lesson was not found for this account.");
+
+        if (!PracticeAudioImportValidator.HasSameSpokenText(video.TranscriptText, transcriptText))
+            throw new McpException("The replacement transcript must contain the same spoken text as the current lesson.");
+
+        var shortCues = string.IsNullOrWhiteSpace(video.TranscriptShortCuesJson)
+            ? null
+            : JsonSerializer.Deserialize<VideoTranscriptCue[]>(video.TranscriptShortCuesJson, JsonOptions);
+        var wordTiming = string.IsNullOrWhiteSpace(video.WordTimingJson)
+            ? null
+            : JsonSerializer.Deserialize<WordTimingRecord[]>(video.WordTimingJson, JsonOptions);
+        var title = Path.GetFileNameWithoutExtension(video.OriginalFileName);
+        var validatedText = PracticeAudioImportValidator.Validate(
+            title, video.TranscriptLanguage, video.TranscriptLanguageCode, transcriptText,
+            video.DurationMs, dialogueLines, transcriptCues, shortCues, wordTiming);
+
+        video.TranscriptText = validatedText;
+        video.TranscriptCuesJson = JsonSerializer.Serialize(transcriptCues, JsonOptions);
+        video.DialogueLinesJson = JsonSerializer.Serialize(dialogueLines, JsonOptions);
+        video.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        await audit.WriteAsync("update_practice_audio_transcript", new
+        {
+            videoId, cueCount = transcriptCues.Length,
+        }, McpAuditOutcomes.Ok, "updated main transcript cues", ctx.AdminUserId,
+            videoId, (int)sw.ElapsedMilliseconds, ct);
+
+        return McpJson.Serialize(new
+        {
+            ok = true,
+            videoId,
+            cueCount = transcriptCues.Length,
+            shortCueCount = shortCues?.Length ?? 0,
+            wordCount = wordTiming?.Length ?? 0,
+            video.IsPublic,
+            video.UpdatedAt,
+        });
+    }
+
     private static string StagingAudioKey(Guid ownerId, Guid id, string extension)
         => $"mcp/practice-audio/{ownerId}/{id:N}/audio{extension}";
 
