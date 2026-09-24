@@ -125,6 +125,7 @@ builder.Services.AddMcpServer()
     .WithTools<PushTools>()
     .WithTools<UserTools>()
     .WithTools<AdminWriteTools>()
+    .WithTools<PracticeAudioTools>()
     .AddAuthorizationFilters();
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
@@ -3442,4 +3443,3 @@ sealed record SavedCueMetadata(
         ParentCueId is not null ||
         ParentCueIndex is not null;
 }
-

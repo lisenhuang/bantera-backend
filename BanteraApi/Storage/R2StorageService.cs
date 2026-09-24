@@ -117,6 +117,17 @@ public class R2StorageService
             Verb = HttpVerb.GET,
         });
     }
+
+    public string GeneratePresignedUploadUrl(string key, TimeSpan expiry)
+    {
+        return _client.GetPreSignedURL(new GetPreSignedUrlRequest
+        {
+            BucketName = _bucket,
+            Key = key,
+            Expires = DateTime.UtcNow.Add(expiry),
+            Verb = HttpVerb.PUT,
+        });
+    }
 }
 
 public sealed record StoredObjectResult(
