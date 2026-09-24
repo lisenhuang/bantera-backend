@@ -172,8 +172,17 @@ public sealed class PracticeAudioTools(
                 // Copy out of staging so a still-valid signed PUT URL cannot replace published media.
                 var stagedAudio = await storage.DownloadObjectAsync(stagedAudioKey, ct);
                 await using (stagedAudio.Stream)
-                    await storage.UploadObjectAsync(finalAudioKey, stagedAudio.Stream,
+                await using (var seekableAudio = new MemoryStream((int)audio.ContentLength))
+                {
+                    // R2 download streams are not seekable. The S3 client needs a known
+                    // length to upload without chunk encoding, so buffer this bounded file.
+                    await stagedAudio.Stream.CopyToAsync(seekableAudio, ct);
+                    if (seekableAudio.Length != audio.ContentLength)
+                        throw new McpException("The uploaded audio could not be read completely. Re-upload it and try again.");
+                    seekableAudio.Position = 0;
+                    await storage.UploadObjectAsync(finalAudioKey, seekableAudio,
                         PracticeAudioImportValidator.AudioContentType(audioFormat), ct);
+                }
                 await storage.UploadObjectAsync(finalCoverKey, coverBytes, "image/jpeg", ct);
             }
 
