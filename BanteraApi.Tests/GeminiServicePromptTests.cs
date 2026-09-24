@@ -59,6 +59,41 @@ public class GeminiServicePromptTests
         Assert.Contains("Use enough turns to fit the requested duration", prompt);
         Assert.DoesNotContain("Aim for approximately", prompt);
         Assert.DoesNotContain("words total across all speakers", prompt);
+        Assert.Contains("One character must be male and the other female", prompt);
+    }
+
+    [Fact]
+    public async Task GenerateDialogueAsync_RetriesSameGenderResponseBeforeChoosingVoices()
+    {
+        var handler = new CapturingHandler([("female", "female"), ("female", "male")]);
+        var service = CreateService(handler);
+
+        var dialogue = await service.GenerateDialogueAsync("English", "en-US", "ordering coffee", 120);
+
+        Assert.Equal(2, handler.RequestCount);
+        Assert.Contains("Regenerate the entire dialogue with opposite speaker genders", handler.GetPrompt());
+        Assert.NotEqual(dialogue.Voice1, dialogue.Voice2);
+    }
+
+    [Fact]
+    public async Task GenerateDialogueAsync_RejectsPersistentlySameGenderResponse()
+    {
+        var handler = new CapturingHandler([("male", "male")]);
+        var service = CreateService(handler);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.GenerateDialogueAsync("English", "en-US", "ordering coffee", 120));
+
+        Assert.Equal(2, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task GenerateAudioAsync_RejectsTwoVoicesOfTheSameGender()
+    {
+        var service = CreateService(new CapturingHandler());
+        var dialogue = new GeneratedDialogue("Coffee", "Kore", "Aoede", [], []);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateAudioAsync(dialogue, "en-US"));
     }
 
     private static GeminiService CreateService(CapturingHandler handler)
@@ -99,22 +134,27 @@ public class GeminiServicePromptTests
         public HttpClient CreateClient(string name) => client;
     }
 
-    private sealed class CapturingHandler : HttpMessageHandler
+    private sealed class CapturingHandler((string First, string Second)[]? genders = null) : HttpMessageHandler
     {
         private string? requestJson;
+        public int RequestCount { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             requestJson = await request.Content!.ReadAsStringAsync(cancellationToken);
+            var pair = genders is { Length: > 0 }
+                ? genders[Math.Min(RequestCount, genders.Length - 1)]
+                : ("female", "male");
+            RequestCount++;
 
             var dialogueJson = JsonSerializer.Serialize(new
             {
                 title = "News Chat",
-                speaker1_gender = "female",
+                speaker1_gender = pair.Item1,
                 speaker1_styles = new[] { "friendly" },
-                speaker2_gender = "male",
+                speaker2_gender = pair.Item2,
                 speaker2_styles = new[] { "calm" },
                 lines = new[]
                 {

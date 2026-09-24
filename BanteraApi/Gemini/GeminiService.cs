@@ -188,9 +188,8 @@ public class GeminiService(
             .Where(v => v.Gender == gender && v.Name != exclude)
             .ToArray();
 
-        // Fall back to opposite gender if the pool is somehow empty.
         if (candidates.Length == 0)
-            candidates = VoiceLibrary.Where(v => v.Name != exclude).ToArray();
+            throw new InvalidOperationException($"No {gender} voice is available for dialogue generation.");
 
         // Score by how many requested styles each voice has, with a random tiebreak.
         return candidates
@@ -370,6 +369,8 @@ Write a natural dialogue sized for roughly that duration when spoken at a normal
 Use enough turns to fit the requested duration without padding or rushing the conversation.
 
 Generate a natural, realistic spoken dialogue between exactly TWO people.
+- One character must be male and the other female. Either speaker may have either gender, but keep each character's name, pronouns, and dialogue consistent with that gender throughout.
+- If the scenario explicitly requires two characters of the same gender, refuse by returning ONLY {"rejected":true} rather than changing their genders.
 - In the JSON structure below, strictly use "Speaker1" and "Speaker2" as the labels for the speakers.
 - Inside the actual dialogue text (the "text" fields), give the characters realistic names natural to the target language and locale.
 - Characters should address each other by these real names, NEVER as "Speaker 1" or "Speaker 2".
@@ -397,7 +398,7 @@ Generate a natural, realistic spoken dialogue between exactly TWO people.
 - Example of good split: "I usually check the logs first, then I ask the team what changed recently." -> ["I usually check the logs first,", "then I ask the team what changed recently."]
 
 For each speaker, determine:
-  • gender — RULES: if the scenario explicitly states a character's gender (e.g. "girl", "boy", "woman", "man", "he", "she"), you MUST use that gender. Otherwise infer from context. Output only "male" or "female".
+  • gender — Output only "male" or "female". The two genders MUST differ. Honour any explicitly stated character gender when the scenario allows one male and one female.
   • styles — choose 1–3 that best describe the character's personality and the emotional tone they bring to the scene. Pick ONLY from this list: warm, friendly, playful, youthful, energetic, gentle, calm, sincere, expressive, professional, authoritative, confident, mature, intense, smooth, casual
 
 Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
@@ -418,73 +419,93 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
         {
             var client = httpClientFactory.CreateClient("gemini");
             var url = $"/v1beta/models/{textModel}:generateContent?key={key}";
-            object body = useGoogleSearch
-                ? new
+            RawDialogue? parsed = null;
+
+            for (var genderAttempt = 0; genderAttempt < 2; genderAttempt++)
+            {
+                var requestPrompt = genderAttempt == 0
+                    ? prompt
+                    : $"{prompt}\n\nYour previous response did not assign one male and one female speaker. Regenerate the entire dialogue with opposite speaker genders, or return the rejection JSON if the scenario requires two people of the same gender.";
+                object body = useGoogleSearch
+                    ? new
+                    {
+                        contents = new[] { new { parts = new[] { new { text = requestPrompt } } } },
+                        tools = new[] { new { google_search = new { } } }
+                    }
+                    : new
+                    {
+                        contents = new[] { new { parts = new[] { new { text = requestPrompt } } } }
+                    };
+
+                using var response = await client.PostAsync(
+                    url,
+                    new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
+                    cancellationToken);
+
+                var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
                 {
-                    contents = new[] { new { parts = new[] { new { text = prompt } } } },
-                    tools = new[] { new { google_search = new { } } }
+                    throw new HttpRequestException(
+                        $"Gemini generateContent failed with status {(int)response.StatusCode} for model '{textModel}'. Body: {TruncateForLog(json)}",
+                        null,
+                        response.StatusCode);
                 }
-                : new
+
+                var root = JsonDocument.Parse(json).RootElement;
+                var raw = root
+                    .GetProperty("candidates")[0]
+                    .GetProperty("content")
+                    .GetProperty("parts")[0]
+                    .GetProperty("text")
+                    .GetString() ?? "";
+
+                var cleaned = raw
+                    .Replace("```json", "").Replace("```", "")
+                    .Trim();
+
+                // Check if Gemini refused the scenario.
+                if (cleaned.Contains("\"rejected\"", StringComparison.OrdinalIgnoreCase))
                 {
-                    contents = new[] { new { parts = new[] { new { text = prompt } } } }
-                };
+                    try
+                    {
+                        using var rejDoc = JsonDocument.Parse(cleaned);
+                        if (rejDoc.RootElement.TryGetProperty("rejected", out var rVal) && rVal.GetBoolean())
+                            throw new ContentRejectedException("This topic cannot be used for generation. Please choose a different scenario.");
+                    }
+                    catch (ContentRejectedException) { throw; }
+                    catch { /* not a rejection payload, continue normal parsing */ }
+                }
 
-            using var response = await client.PostAsync(
-                url,
-                new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
-                cancellationToken);
-
-            var json = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new HttpRequestException(
-                    $"Gemini generateContent failed with status {(int)response.StatusCode} for model '{textModel}'. Body: {TruncateForLog(json)}",
-                    null,
-                    response.StatusCode);
-            }
-
-            var root = JsonDocument.Parse(json).RootElement;
-            var raw = root
-                .GetProperty("candidates")[0]
-                .GetProperty("content")
-                .GetProperty("parts")[0]
-                .GetProperty("text")
-                .GetString() ?? "";
-
-            var cleaned = raw
-                .Replace("```json", "").Replace("```", "")
-                .Trim();
-
-            // Check if Gemini refused the scenario.
-            if (cleaned.Contains("\"rejected\"", StringComparison.OrdinalIgnoreCase))
-            {
+                RawDialogue? attemptParsed;
                 try
                 {
-                    using var rejDoc = JsonDocument.Parse(cleaned);
-                    if (rejDoc.RootElement.TryGetProperty("rejected", out var rVal) && rVal.GetBoolean())
-                        throw new ContentRejectedException("This topic cannot be used for generation. Please choose a different scenario.");
+                    attemptParsed = JsonSerializer.Deserialize<RawDialogue>(cleaned, JsonOpts);
                 }
-                catch (ContentRejectedException) { throw; }
-                catch { /* not a rejection payload, continue normal parsing */ }
+                catch
+                {
+                    var start = cleaned.IndexOf('{');
+                    var end = cleaned.LastIndexOf('}');
+                    if (start < 0 || end < 0) throw new InvalidOperationException("Could not parse dialogue JSON from Gemini response.");
+                    attemptParsed = JsonSerializer.Deserialize<RawDialogue>(cleaned[start..(end + 1)], JsonOpts);
+                }
+
+                if (attemptParsed is null) throw new InvalidOperationException("Gemini returned null dialogue.");
+
+                var firstGender = attemptParsed.Speaker1Gender?.Trim().ToLowerInvariant();
+                var secondGender = attemptParsed.Speaker2Gender?.Trim().ToLowerInvariant();
+                if (firstGender is ("male" or "female") &&
+                    secondGender is ("male" or "female") && firstGender != secondGender)
+                {
+                    parsed = attemptParsed;
+                    break;
+                }
             }
 
-            RawDialogue? parsed;
-            try
-            {
-                parsed = JsonSerializer.Deserialize<RawDialogue>(cleaned, JsonOpts);
-            }
-            catch
-            {
-                var start = cleaned.IndexOf('{');
-                var end = cleaned.LastIndexOf('}');
-                if (start < 0 || end < 0) throw new InvalidOperationException("Could not parse dialogue JSON from Gemini response.");
-                parsed = JsonSerializer.Deserialize<RawDialogue>(cleaned[start..(end + 1)], JsonOpts);
-            }
+            if (parsed is null)
+                throw new InvalidOperationException("Gemini did not generate one male and one female dialogue speaker.");
 
-            if (parsed is null) throw new InvalidOperationException("Gemini returned null dialogue.");
-
-            var gender1 = parsed.Speaker1Gender?.Trim().ToLowerInvariant() == "female" ? "female" : "male";
-            var gender2 = parsed.Speaker2Gender?.Trim().ToLowerInvariant() == "female" ? "female" : "male";
+            var gender1 = parsed.Speaker1Gender!.Trim().ToLowerInvariant();
+            var gender2 = parsed.Speaker2Gender!.Trim().ToLowerInvariant();
             var styles1 = parsed.Speaker1Styles ?? [];
             string[] styles2 = parsed.Speaker2Styles ?? [];
             var (voice1, voice2) = PickVoices(gender1, styles1, gender2, styles2);
@@ -523,12 +544,18 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
         string languageCode,
         CancellationToken cancellationToken = default)
     {
+        var voice1Gender = VoiceLibrary.FirstOrDefault(v => v.Name == dialogue.Voice1)?.Gender;
+        var voice2Gender = VoiceLibrary.FirstOrDefault(v => v.Name == dialogue.Voice2)?.Gender;
+        if (voice1Gender is null || voice2Gender is null || voice1Gender == voice2Gender)
+            throw new InvalidOperationException("Dialogue audio requires one male and one female voice.");
+
         var ttsAccent = ResolveTtsAccentInstruction(languageCode);
         var dialogueText = string.Join("\n",
             dialogue.Lines.Select(l => $"{l.Speaker}: {l.Text}"));
+        var speakerInstruction = $"[Speaker instruction: Speaker1 has a {voice1Gender} voice and Speaker2 has a {voice2Gender} voice. Keep the voices distinct.]";
         var transcript = ttsAccent != null
-            ? $"[Accent instruction: {ttsAccent}]\n\n{dialogueText}"
-            : dialogueText;
+            ? $"[Accent instruction: {ttsAccent}]\n{speakerInstruction}\n\n{dialogueText}"
+            : $"{speakerInstruction}\n\n{dialogueText}";
         var audioModel = (await modelSettings.GetAsync(cancellationToken)).AudioModel;
 
         var (pcm, sampleRate, mimeType) = await WithGeminiKeyAsync("tts", async key =>
