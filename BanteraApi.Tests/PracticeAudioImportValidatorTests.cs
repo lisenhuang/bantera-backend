@@ -72,4 +72,19 @@ public class PracticeAudioImportValidatorTests
         Assert.False(PracticeAudioImportValidator.HasSameSpokenText(
             "Hello there. How are you?", "Hello there.\nHow are we?"));
     }
+
+    [Fact]
+    public void RejectsMainCueThatIsTooLongForPracticeScreen()
+    {
+        var longText = new string('a', PracticeAudioImportValidator.MaxMainCueCharacters + 1);
+        VideoTranscriptCue[] longTextCue = [new(0, 0, 1000, longText)];
+        Assert.Throws<McpException>(() => PracticeAudioImportValidator.Validate(
+            "News", "English", "en-US", longText, 27000, [longText], longTextCue, null, Words));
+
+        VideoTranscriptCue[] longDurationCue =
+            [new(0, 0, PracticeAudioImportValidator.MaxMainCueDurationMs + 1, "Hello there.")];
+        Assert.Throws<McpException>(() => PracticeAudioImportValidator.Validate(
+            "News", "English", "en-US", "Hello there.", 27000,
+            ["Hello there."], longDurationCue, null, Words));
+    }
 }

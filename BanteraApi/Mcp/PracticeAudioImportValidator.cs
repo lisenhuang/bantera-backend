@@ -9,6 +9,8 @@ public static class PracticeAudioImportValidator
     public const int MaxAudioBytes = 30 * 1024 * 1024;
     public const int MaxCoverBytes = 5 * 1024 * 1024;
     public const int MaxDurationMs = 30 * 60 * 1000;
+    public const int MaxMainCueDurationMs = 25_000;
+    public const int MaxMainCueCharacters = 320;
 
     public static bool HasSameSpokenText(string? before, string? after)
     {
@@ -59,6 +61,12 @@ public static class PracticeAudioImportValidator
             throw new McpException("wordTiming must contain 1-15000 words.");
 
         ValidateCues(cues, durationMs, "transcriptCues");
+        for (var i = 0; i < cues.Length; i++)
+        {
+            if (cues[i].EndMs - cues[i].StartMs > MaxMainCueDurationMs
+                || cues[i].Text.Length > MaxMainCueCharacters)
+                throw new McpException($"transcriptCues[{i}] is too long for the practice screen. Split it into sentence-sized lines and combine very short sentences with the next line.");
+        }
         if (shortCues is { Length: > 0 })
         {
             ValidateCues(shortCues, durationMs, "transcriptShortCues");

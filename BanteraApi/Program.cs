@@ -2667,7 +2667,10 @@ app.MapGet("/api/videos/{videoId:guid}/file", async Task<IResult> (
         cancellationToken);
 
     if (file is null)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
         return Results.NotFound();
+    }
 
     httpContext.Response.ContentLength = file.ContentLength;
     return Results.Stream(file.Stream, file.ContentType, enableRangeProcessing: true);
@@ -2691,7 +2694,10 @@ app.MapGet("/api/videos/{videoId:guid}/file.mp3", async Task<IResult> (
 {
     var file = await videoService.GetVideoFileAsync(videoId, TryGetUserId(user), cancellationToken);
     if (file is null)
+    {
+        httpContext.Response.Headers.CacheControl = "no-store";
         return Results.NotFound();
+    }
 
     httpContext.Response.ContentLength = file.ContentLength;
     return Results.Stream(file.Stream, file.ContentType, enableRangeProcessing: true);

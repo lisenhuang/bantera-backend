@@ -74,6 +74,8 @@ public sealed class PracticeAudioTools(
         the URLs from begin_practice_audio_upload. Each dialogue line must exactly match its
         indexed long transcript cue. Supply transcriptText explicitly; it must match the long
         cues. Word timings are required; optional short cues enable the short subtitle mode.
+        Main cues must fit the practice screen: at most 25 seconds and 320 characters
+        each. Use sentence-sized lines, combining very short sentences when helpful.
         Creates a private item unless isPublic is explicitly true. All content is supplied by
         the caller; this tool does not call Gemini or generate audio or a cover image.
         """)]
@@ -272,7 +274,8 @@ public sealed class PracticeAudioTools(
     [Description("""
         Replace the main transcript cues of an existing audio practice lesson owned by the
         connected admin. Supply every new line, cue, and the matching transcript text.
-        The spoken text must remain identical. Audio, cover, publication status, short
+        Each main cue may be at most 25 seconds and 320 characters. The spoken text
+        must remain identical. Audio, cover, publication status, short
         subtitle cues, and word timings are preserved; no AI generation is performed.
         """)]
     public async Task<string> UpdateTranscriptAsync(
