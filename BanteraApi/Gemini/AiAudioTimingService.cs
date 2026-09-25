@@ -9,16 +9,20 @@ public sealed record AiAudioTimingResult(
     IReadOnlyList<VideoTranscriptCueRecord> Cues,
     IReadOnlyList<VideoTranscriptCueRecord>? ShortCues,
     string Mode,
-    WordAlignment Alignment);
+    WordAlignment Alignment,
+    DialogueLine[] DisplayLines);
 
 /// <summary>
-/// Word timing for AI-generated dialogue audio:
-/// Gemini Transcribe (word timestamps) → exact character matches → AI fixes only the
-/// words heard differently → timings for every word of the ORIGINAL script.
-/// A transcript that misses part of the dialogue is retried once. Returns null when
-/// anything fails, so callers fall back to Rev.ai or estimated timing.
+/// Word timing for AI-generated dialogue audio. By default, transcribed word timestamps
+/// are matched to the original script, with AI correction for words heard differently.
+/// Admins may instead use the transcription directly as the displayed and timed text.
+/// Returns null on failure so callers can use their existing timing fallback.
 /// </summary>
-public sealed class AiAudioTimingService(GeminiService gemini, AiPipelineEventRecorder events, ILogger<AiAudioTimingService> logger)
+public sealed class AiAudioTimingService(
+    GeminiService gemini,
+    AiAudioAlignmentSettingsService alignmentSettings,
+    AiPipelineEventRecorder events,
+    ILogger<AiAudioTimingService> logger)
 {
     /// <summary>More estimated words than this means the transcript did not fit the script.</summary>
     private const double MaxEstimatedRatio = 0.35;
@@ -45,6 +49,18 @@ public sealed class AiAudioTimingService(GeminiService gemini, AiPipelineEventRe
 
         try
         {
+            if (!await alignmentSettings.GetAsync(cancellationToken))
+            {
+                var words = await gemini.TranscribeWordsAsync(audio.Bytes, audio.ContentType, languageCode, cancellationToken);
+                var direct = TranscriptionTimingBuilder.Build(words, audio.DurationMs);
+                if (direct is null) return null;
+                await events.RecordAsync(
+                    AiPipelineSeverity.Info, "timing", "timing_completed",
+                    $"Used {direct.WordTiming.Count} transcribed words without script alignment.",
+                    new { mode = direct.Mode, words = direct.WordTiming.Count });
+                return direct;
+            }
+
             var best = await RunAttemptAsync(lines, tokens, audio, languageCode, cancellationToken);
             var retried = false;
 
@@ -113,7 +129,7 @@ public sealed class AiAudioTimingService(GeminiService gemini, AiPipelineEventRe
                 Summary(best, retried),
                 durationMs: (int)(best.TranscribeMs + best.AlignMs));
 
-            return new AiAudioTimingResult(WordTimingAligner.ToWordTiming(alignment), cues, shortCues, best.Mode, alignment);
+            return new AiAudioTimingResult(WordTimingAligner.ToWordTiming(alignment), cues, shortCues, best.Mode, alignment, lines);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

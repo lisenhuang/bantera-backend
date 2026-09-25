@@ -24,13 +24,14 @@ public static partial class AiSettingsEndpoints
         group.MapGet("", async (
             AiModelSettingsService settings,
             CueTimingSettingsService cueTiming,
+            AiAudioAlignmentSettingsService alignmentSettings,
             GeminiService gemini,
             IOptions<GeminiSettings> geminiOptions,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var catalog = await TryListModelsAsync(gemini, loggerFactory, ct);
-            return Results.Ok(await BuildResponseAsync(settings, cueTiming, geminiOptions.Value, catalog, ct));
+            return Results.Ok(await BuildResponseAsync(settings, cueTiming, alignmentSettings, geminiOptions.Value, catalog, ct));
         })
         .WithName("AdminGetAiSettings");
 
@@ -49,12 +50,28 @@ public static partial class AiSettingsEndpoints
         })
         .WithName("AdminUpdatePlaybackSettings");
 
+        // PUT /api/admin/ai-settings/alignment — controls newly generated audio only.
+        group.MapPut("/alignment", async (
+            UpdateAlignmentSettingsRequest req,
+            ClaimsPrincipal user,
+            AiAudioAlignmentSettingsService alignmentSettings,
+            CancellationToken ct) =>
+        {
+            if (!Guid.TryParse(user.FindFirst("sub")?.Value, out var adminId))
+                return Results.Json(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), statusCode: 401);
+
+            await alignmentSettings.SetAsync(req.AlignToOriginalDialogue, adminId, ct);
+            return Results.Ok(await BuildAlignmentAsync(alignmentSettings, ct));
+        })
+        .WithName("AdminUpdateAiAudioAlignmentSettings");
+
         // PUT /api/admin/ai-settings — set or clear (null / "") each override.
         group.MapPut("", async (
             UpdateAiSettingsRequest req,
             ClaimsPrincipal user,
             AiModelSettingsService settings,
             CueTimingSettingsService cueTiming,
+            AiAudioAlignmentSettingsService alignmentSettings,
             GeminiService gemini,
             IOptions<GeminiSettings> geminiOptions,
             ILoggerFactory loggerFactory,
@@ -80,7 +97,7 @@ public static partial class AiSettingsEndpoints
                 return Results.BadRequest(new ApiError("unknown_audio_model", $"\"{audioModel}\" is not an available TTS model."));
 
             await settings.UpdateAsync(textModel, audioModel, adminId, ct);
-            return Results.Ok(await BuildResponseAsync(settings, cueTiming, geminiOptions.Value, catalog, ct));
+            return Results.Ok(await BuildResponseAsync(settings, cueTiming, alignmentSettings, geminiOptions.Value, catalog, ct));
         })
         .WithName("AdminUpdateAiSettings");
     }
@@ -114,9 +131,20 @@ public static partial class AiSettingsEndpoints
         };
     }
 
+    private static async Task<object> BuildAlignmentAsync(AiAudioAlignmentSettingsService alignmentSettings, CancellationToken ct)
+    {
+        var row = await alignmentSettings.GetRowAsync(ct);
+        return new
+        {
+            alignToOriginalDialogue = row?.Value != "false",
+            updatedAt = row?.UpdatedAt,
+        };
+    }
+
     private static async Task<object> BuildResponseAsync(
         AiModelSettingsService settings,
         CueTimingSettingsService cueTiming,
+        AiAudioAlignmentSettingsService alignmentSettings,
         GeminiSettings gemini,
         GeminiModelCatalog? catalog,
         CancellationToken ct)
@@ -147,6 +175,7 @@ public static partial class AiSettingsEndpoints
             availableAudioModels = catalog?.AudioModels ?? [],
             modelListAvailable = catalog is not null,
             playback = await BuildPlaybackAsync(cueTiming, ct),
+            alignment = await BuildAlignmentAsync(alignmentSettings, ct),
         };
     }
 }
@@ -154,3 +183,5 @@ public static partial class AiSettingsEndpoints
 public record UpdateAiSettingsRequest(string? TextModel, string? AudioModel);
 
 public record UpdatePlaybackSettingsRequest(bool CueStartsAtPreviousCueEnd);
+
+public record UpdateAlignmentSettingsRequest(bool AlignToOriginalDialogue);

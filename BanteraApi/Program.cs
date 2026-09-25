@@ -85,6 +85,7 @@ builder.Services.AddSingleton<AiModelSettingsService>();
 builder.Services.AddSingleton<CueTimingSettingsService>();
 builder.Services.AddSingleton<BanteraApi.Audio.Mp3Encoder>();
 builder.Services.AddScoped<AiAudioTimingService>();
+builder.Services.AddScoped<AiAudioAlignmentSettingsService>();
 builder.Services.AddSingleton<BanteraApi.Diagnostics.AiPipelineEventRecorder>();
 builder.Services.AddHostedService<BanteraApi.Diagnostics.AiPipelineEventCleanupService>();
 builder.Services.Configure<AiAudioDiagnosticsOptions>(
@@ -1952,7 +1953,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             audio.FileExtension,
             req.Language,
             req.LanguageCode,
-            dialogue.Lines,
+            geminiTiming?.DisplayLines ?? dialogue.Lines,
             wordTiming,
             cues,
             shortCues,
@@ -2255,7 +2256,7 @@ app.MapPost("/api/me/audio/generate/v3",
                 userId.Value, v3Dialogue.Title, v3ObjKey, v3Audio.Bytes.LongLength,
                 v3Audio.ContentType, v3Audio.FileExtension,
                 req.Language, req.LanguageCode,
-                v3Dialogue.Lines, v3WordTiming, v3FinalCues, v3ShortCues,
+                v3Timing?.DisplayLines ?? v3Dialogue.Lines, v3WordTiming, v3FinalCues, v3ShortCues,
                 v3DurMs, httpContext, genToken);
 
             if (v3Job is not null)
