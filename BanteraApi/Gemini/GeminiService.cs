@@ -278,9 +278,9 @@ public class GeminiService(
 
         var useGoogleSearch = IsLatestNewsScenario(scenarioId)
             || (useWebSearchForCustom && !string.IsNullOrWhiteSpace(scenario));
-        var textModel = useGoogleSearch
-            ? Settings.LatestNewsTextModel
-            : (await modelSettings.GetAsync(cancellationToken)).TextModel;
+        var models = await modelSettings.GetAsync(cancellationToken);
+        var textModel = useGoogleSearch ? Settings.LatestNewsTextModel : models.TextModel;
+        var fallbackTextModel = useGoogleSearch ? null : models.FallbackTextModel;
         var todayUtc = DateTime.UtcNow.Date;
         var recentStartUtc = DateTime.UtcNow.AddDays(-1);
         var requestedNewsCount = Math.Max(1, durationSeconds / 60);
@@ -415,10 +415,10 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
 }
 """.Trim();
 
-        return await WithGeminiKeyAsync(useGoogleSearch ? "dialogue (web search)" : "dialogue", async key =>
+        return await WithModelFallbackAsync(useGoogleSearch ? "dialogue (web search)" : "dialogue", textModel, fallbackTextModel, async (selectedModel, key) =>
         {
             var client = httpClientFactory.CreateClient("gemini");
-            var url = $"/v1beta/models/{textModel}:generateContent?key={key}";
+            var url = $"/v1beta/models/{selectedModel}:generateContent?key={key}";
             RawDialogue? parsed = null;
 
             for (var genderAttempt = 0; genderAttempt < 2; genderAttempt++)
@@ -446,7 +446,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                 if (!response.IsSuccessStatusCode)
                 {
                     throw new HttpRequestException(
-                        $"Gemini generateContent failed with status {(int)response.StatusCode} for model '{textModel}'. Body: {TruncateForLog(json)}",
+                        $"Gemini generateContent failed with status {(int)response.StatusCode} for model '{selectedModel}'. Body: {TruncateForLog(json)}",
                         null,
                         response.StatusCode);
                 }
@@ -536,7 +536,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                 Voice2: voice2,
                 Lines: dialogueLines.ToArray(),
                 ShortCueValidationFailures: shortCueValidationFailures);
-        }, cancellationToken, webSearch: useGoogleSearch, model: textModel);
+        }, cancellationToken, webSearch: useGoogleSearch);
     }
 
     public async Task<GeneratedAudio> GenerateAudioAsync(
@@ -556,9 +556,9 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
         var transcript = ttsAccent != null
             ? $"[Accent instruction: {ttsAccent}]\n{speakerInstruction}\n\n{dialogueText}"
             : $"{speakerInstruction}\n\n{dialogueText}";
-        var audioModel = (await modelSettings.GetAsync(cancellationToken)).AudioModel;
+        var models = await modelSettings.GetAsync(cancellationToken);
 
-        var (pcm, sampleRate, mimeType) = await WithGeminiKeyAsync("tts", async key =>
+        var (pcm, sampleRate, mimeType) = await WithModelFallbackAsync("tts", models.AudioModel, models.FallbackAudioModel, async (audioModel, key) =>
         {
             var client = httpClientFactory.CreateClient("gemini");
             var url = $"/v1beta/models/{audioModel}:generateContent?key={key}";
@@ -607,7 +607,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             var mime = inlineData.TryGetProperty("mimeType", out var mt) ? mt.GetString() ?? "" : "";
             var rateMatch = Regex.Match(mime, @"rate=(\d+)");
             return (Convert.FromBase64String(base64Data), rateMatch.Success ? int.Parse(rateMatch.Groups[1].Value) : 24000, mime);
-        }, cancellationToken, model: audioModel);
+        }, cancellationToken);
 
         // 2.5 TTS returns "audio/L16;codec=pcm;rate=24000"; 3.1 returns "audio/l16; rate=24000; channels=1".
         var isRawPcm = mimeType.Contains("l16", StringComparison.OrdinalIgnoreCase) || mimeType.Contains("pcm", StringComparison.OrdinalIgnoreCase);
@@ -680,8 +680,8 @@ Example output for 3 cues:
 ["corrected text 1","corrected text 2","corrected text 3"]
 """.Trim();
 
-        var textModel = (await modelSettings.GetAsync(cancellationToken)).TextModel;
-        return await WithGeminiKeyAsync("transcript correction", async key =>
+        var models = await modelSettings.GetAsync(cancellationToken);
+        return await WithModelFallbackAsync("transcript correction", models.TextModel, models.FallbackTextModel, async (textModel, key) =>
         {
             var client = httpClientFactory.CreateClient("gemini");
             var url = $"/v1beta/models/{textModel}:generateContent?key={key}";
@@ -716,7 +716,7 @@ Example output for 3 cues:
                 return transcribedCues; // fallback: return original transcribed cues unchanged
 
             return transcribedCues.Select((c, i) => c with { Text = corrected[i].Trim() }).ToList();
-        }, cancellationToken, model: textModel);
+        }, cancellationToken);
     }
 
     public IReadOnlyList<VideoTranscriptCueRecord> EstimateCues(DialogueLine[] lines, int durationMs)
@@ -1302,8 +1302,8 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
 {{transcript}}
 """;
 
-        var textModel = (await modelSettings.GetAsync(cancellationToken)).TextModel;
-        return await WithGeminiKeyAsync("word alignment", async key =>
+        var models = await modelSettings.GetAsync(cancellationToken);
+        return await WithModelFallbackAsync("word alignment", models.TextModel, models.FallbackTextModel, async (textModel, key) =>
         {
             var client = httpClientFactory.CreateClient("gemini");
             var body = new
@@ -1358,7 +1358,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
                 matches[t] = new TokenMatch(s, e);
             }
             return matches;
-        }, cancellationToken, model: textModel);
+        }, cancellationToken);
     }
 
     /// <summary>The models these keys can use right now, straight from Gemini (not cached).</summary>
@@ -1414,11 +1414,46 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
 
     private static string MaskKey(string key) => key.Length <= 10 ? "***" : $"{key[..6]}…{key[^4..]}";
 
+    /// <summary>Try every eligible key on the primary model before trying the configured fallback.</summary>
+    private async Task<T> WithModelFallbackAsync<T>(
+        string operation, string primaryModel, string? fallbackModel,
+        Func<string, string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false)
+    {
+        if (string.Equals(primaryModel, fallbackModel, StringComparison.Ordinal))
+            fallbackModel = null;
+
+        try
+        {
+            return await WithGeminiKeyAsync(operation, key => fn(primaryModel, key), cancellationToken,
+                webSearch: webSearch, model: primaryModel, fallbackAvailable: fallbackModel is not null);
+        }
+        catch (Exception primaryError) when (fallbackModel is not null &&
+            primaryError is not ContentRejectedException &&
+            (primaryError is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
+        {
+            var stage = operation.Replace(' ', '_').Replace("(", "").Replace(")", "");
+            logger.LogWarning(primaryError,
+                "Gemini {Operation} failed on primary model {PrimaryModel}; trying fallback model {FallbackModel}.",
+                operation, primaryModel, fallbackModel);
+            await events.RecordAsync(AiPipelineSeverity.Warning, stage, "model_fallback_attempted",
+                "Primary model failed; trying the configured fallback model.",
+                new { primaryModel, fallbackModel }, primaryModel);
+
+            var result = await WithGeminiKeyAsync(operation, key => fn(fallbackModel, key), cancellationToken,
+                webSearch: webSearch, model: fallbackModel);
+            logger.LogInformation("Gemini {Operation} succeeded on fallback model {FallbackModel}.", operation, fallbackModel);
+            await events.RecordAsync(AiPipelineSeverity.Info, stage, "model_fallback_succeeded",
+                "Generation continued with the configured fallback model.",
+                new { primaryModel, fallbackModel }, fallbackModel);
+            return result;
+        }
+    }
+
     /// <summary>
     /// Runs one step with each key in turn (shuffled per step) until one succeeds. A content
     /// rejection is final and is not retried with other keys.
     /// </summary>
-    private async Task<T> WithGeminiKeyAsync<T>(string operation, Func<string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false, string? model = null)
+    private async Task<T> WithGeminiKeyAsync<T>(string operation, Func<string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false, string? model = null, bool fallbackAvailable = false)
     {
         var stage = operation.Replace(' ', '_').Replace("(", "").Replace(")", "");
         var keys = SelectKeys(Settings.ApiKeys, webSearch, Settings.WebSearchKeyPrefix);
@@ -1452,7 +1487,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
             }
         }
         await events.RecordAsync(
-            AiPipelineSeverity.Error, stage, "all_keys_failed",
+            fallbackAvailable ? AiPipelineSeverity.Warning : AiPipelineSeverity.Error, stage, "all_keys_failed",
             TruncateForLog(lastEx?.Message, 1000),
             new { keys = keys.Length, webSearch },
             model);

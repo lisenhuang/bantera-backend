@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using BanteraApi.Auth;
 using BanteraApi.Gemini;
@@ -82,7 +83,10 @@ public static partial class AiSettingsEndpoints
 
             var textModel = Normalize(req.TextModel);
             var audioModel = Normalize(req.AudioModel);
-            foreach (var model in new[] { textModel, audioModel })
+            if (!TryReadOptionalModel(req.FallbackTextModel, out var fallbackTextModel) ||
+                !TryReadOptionalModel(req.FallbackAudioModel, out var fallbackAudioModel))
+                return Results.BadRequest(new ApiError("invalid_model", "Fallback models must be model names or null."));
+            foreach (var model in new[] { textModel, audioModel, fallbackTextModel, fallbackAudioModel })
             {
                 if (model is not null && !ModelNamePattern().IsMatch(model))
                     return Results.BadRequest(new ApiError("invalid_model", $"\"{model}\" is not a valid model name."));
@@ -95,8 +99,25 @@ public static partial class AiSettingsEndpoints
                 return Results.BadRequest(new ApiError("unknown_text_model", $"\"{textModel}\" is not an available text model."));
             if (audioModel is not null && !catalog.AudioModels.Contains(audioModel))
                 return Results.BadRequest(new ApiError("unknown_audio_model", $"\"{audioModel}\" is not an available TTS model."));
+            if (fallbackTextModel is not null && !catalog.TextModels.Contains(fallbackTextModel))
+                return Results.BadRequest(new ApiError("unknown_text_model", $"\"{fallbackTextModel}\" is not an available text model."));
+            if (fallbackAudioModel is not null && !catalog.AudioModels.Contains(fallbackAudioModel))
+                return Results.BadRequest(new ApiError("unknown_audio_model", $"\"{fallbackAudioModel}\" is not an available TTS model."));
 
-            await settings.UpdateAsync(textModel, audioModel, adminId, ct);
+            var current = await settings.GetAsync(ct);
+            var effectiveFallbackTextModel = req.FallbackTextModel.ValueKind == JsonValueKind.Undefined
+                ? current.FallbackTextModel : fallbackTextModel;
+            var effectiveFallbackAudioModel = req.FallbackAudioModel.ValueKind == JsonValueKind.Undefined
+                ? current.FallbackAudioModel : fallbackAudioModel;
+            if ((effectiveFallbackTextModel is not null && effectiveFallbackTextModel == (textModel ?? settings.Defaults.TextModel)) ||
+                (effectiveFallbackAudioModel is not null && effectiveFallbackAudioModel == (audioModel ?? settings.Defaults.AudioModel)))
+                return Results.BadRequest(new ApiError("duplicate_fallback_model", "A fallback model must differ from its primary model."));
+
+            await settings.UpdateAsync(textModel, audioModel, adminId, ct,
+                updateFallbackTextModel: req.FallbackTextModel.ValueKind != JsonValueKind.Undefined,
+                fallbackTextModel: fallbackTextModel,
+                updateFallbackAudioModel: req.FallbackAudioModel.ValueKind != JsonValueKind.Undefined,
+                fallbackAudioModel: fallbackAudioModel);
             return Results.Ok(await BuildResponseAsync(settings, cueTiming, alignmentSettings, geminiOptions.Value, catalog, ct));
         })
         .WithName("AdminUpdateAiSettings");
@@ -106,6 +127,17 @@ public static partial class AiSettingsEndpoints
     {
         var trimmed = model?.Trim().Replace("models/", "");
         return string.IsNullOrEmpty(trimmed) ? null : trimmed;
+    }
+
+    private static bool TryReadOptionalModel(JsonElement value, out string? model)
+    {
+        model = null;
+        if (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+            return true;
+        if (value.ValueKind != JsonValueKind.String)
+            return false;
+        model = Normalize(value.GetString());
+        return true;
     }
 
     private static async Task<GeminiModelCatalog?> TryListModelsAsync(GeminiService gemini, ILoggerFactory loggerFactory, CancellationToken ct)
@@ -159,11 +191,15 @@ public static partial class AiSettingsEndpoints
         {
             textModel = current.TextModel,
             audioModel = current.AudioModel,
+            fallbackTextModel = current.FallbackTextModel,
+            fallbackAudioModel = current.FallbackAudioModel,
             defaults = new { textModel = settings.Defaults.TextModel, audioModel = settings.Defaults.AudioModel },
             overrides = new
             {
                 textModel = Override(AiModelSettingsService.TextModelKey),
                 audioModel = Override(AiModelSettingsService.AudioModelKey),
+                fallbackTextModel = Override(AiModelSettingsService.FallbackTextModelKey),
+                fallbackAudioModel = Override(AiModelSettingsService.FallbackAudioModelKey),
             },
             fixedModels = new
             {
@@ -180,7 +216,7 @@ public static partial class AiSettingsEndpoints
     }
 }
 
-public record UpdateAiSettingsRequest(string? TextModel, string? AudioModel);
+public record UpdateAiSettingsRequest(string? TextModel, string? AudioModel, JsonElement FallbackTextModel = default, JsonElement FallbackAudioModel = default);
 
 public record UpdatePlaybackSettingsRequest(bool CueStartsAtPreviousCueEnd);
 

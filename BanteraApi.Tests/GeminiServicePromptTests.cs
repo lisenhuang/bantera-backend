@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using BanteraApi.Admin;
 using BanteraApi.Gemini;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
@@ -96,7 +97,59 @@ public class GeminiServicePromptTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateAudioAsync(dialogue, "en-US"));
     }
 
-    private static GeminiService CreateService(CapturingHandler handler)
+    [Fact]
+    public async Task GenerateDialogueAsync_UsesFallbackTextModelAfterPrimaryFails()
+    {
+        var handler = new FallbackHandler(audio: false);
+        var service = CreateService(handler, new AiModelSelection("primary-text", "primary-tts", "backup-text", null));
+
+        var dialogue = await service.GenerateDialogueAsync("English", "en-US", "ordering coffee", 60);
+
+        Assert.NotEmpty(dialogue.Lines);
+        Assert.Equal(["primary-text", "backup-text"], handler.Models);
+    }
+
+    [Fact]
+    public async Task GenerateAudioAsync_UsesFallbackTtsModelAfterPrimaryFails()
+    {
+        var handler = new FallbackHandler(audio: true);
+        var service = CreateService(handler, new AiModelSelection("primary-text", "primary-tts", null, "backup-tts"));
+        var dialogue = new GeneratedDialogue("Coffee", "Kore", "Puck", [new DialogueLine("Speaker1", "Hello")], []);
+
+        var audio = await service.GenerateAudioAsync(dialogue, "en-US");
+
+        Assert.Equal("audio/wav", audio.ContentType);
+        Assert.Equal(["primary-tts", "backup-tts"], handler.Models);
+    }
+
+    [Fact]
+    public async Task GenerateDialogueAsync_DoesNotFallbackOnTopicRejection()
+    {
+        var handler = new FallbackHandler(audio: false, rejectPrimary: true);
+        var service = CreateService(handler, new AiModelSelection("primary-text", "primary-tts", "backup-text", null));
+
+        await Assert.ThrowsAsync<ContentRejectedException>(() =>
+            service.GenerateDialogueAsync("English", "en-US", "a rejected topic", 60));
+
+        Assert.Equal(["primary-text"], handler.Models);
+    }
+
+    [Fact]
+    public void UpdateAiSettingsRequest_DistinguishesOldClientsFromClearingFallbacks()
+    {
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var oldClient = JsonSerializer.Deserialize<UpdateAiSettingsRequest>(
+            "{\"textModel\":null,\"audioModel\":null}", jsonOptions)!;
+        var clearFallbacks = JsonSerializer.Deserialize<UpdateAiSettingsRequest>(
+            "{\"textModel\":null,\"audioModel\":null,\"fallbackTextModel\":null,\"fallbackAudioModel\":null}", jsonOptions)!;
+
+        Assert.Equal(JsonValueKind.Undefined, oldClient.FallbackTextModel.ValueKind);
+        Assert.Equal(JsonValueKind.Undefined, oldClient.FallbackAudioModel.ValueKind);
+        Assert.Equal(JsonValueKind.Null, clearFallbacks.FallbackTextModel.ValueKind);
+        Assert.Equal(JsonValueKind.Null, clearFallbacks.FallbackAudioModel.ValueKind);
+    }
+
+    private static GeminiService CreateService(HttpMessageHandler handler, AiModelSelection? selection = null)
     {
         var client = new HttpClient(handler)
         {
@@ -112,6 +165,7 @@ public class GeminiServicePromptTests
 
         var services = new ServiceCollection().BuildServiceProvider();
         var cache = new MemoryCache(new MemoryCacheOptions());
+        if (selection is not null) cache.Set("ai-model-settings", selection);
         var modelSettings = new AiModelSettingsService(
             services.GetRequiredService<IServiceScopeFactory>(),
             cache,
@@ -132,6 +186,52 @@ public class GeminiServicePromptTests
     private sealed class StaticHttpClientFactory(HttpClient client) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => client;
+    }
+
+    private sealed class FallbackHandler(bool audio, bool rejectPrimary = false) : HttpMessageHandler
+    {
+        public List<string> Models { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var model = request.RequestUri!.AbsolutePath.Split("/models/")[1].Split(':')[0];
+            Models.Add(model);
+            if (model.StartsWith("primary", StringComparison.Ordinal))
+            {
+                if (!rejectPrimary)
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                    {
+                        Content = new StringContent("unavailable"),
+                    });
+                return Task.FromResult(JsonResponse("{\"rejected\":true}"));
+            }
+
+            if (audio)
+            {
+                var body = JsonSerializer.Serialize(new
+                {
+                    candidates = new[] { new { content = new { parts = new[]
+                    {
+                        new { inlineData = new { data = Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }), mimeType = "audio/wav" } },
+                    } } } },
+                });
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(body, Encoding.UTF8, "application/json"),
+                });
+            }
+
+            return Task.FromResult(JsonResponse("{\"title\":\"Coffee\",\"speaker1_gender\":\"female\",\"speaker2_gender\":\"male\",\"lines\":[{\"speaker\":\"Speaker1\",\"text\":\"Hello\",\"shortCues\":[\"Hello\"]}]}"));
+        }
+
+        private static HttpResponseMessage JsonResponse(string text)
+        {
+            var body = JsonSerializer.Serialize(new { candidates = new[] { new { content = new { parts = new[] { new { text } } } } } });
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            };
+        }
     }
 
     private sealed class CapturingHandler((string First, string Second)[]? genders = null) : HttpMessageHandler
