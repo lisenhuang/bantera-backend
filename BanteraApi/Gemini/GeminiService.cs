@@ -321,6 +321,22 @@ public class GeminiService(
                 : "- Also write a short title (max 10 words) that summarises the main news topic(s) discussed — e.g. \"Solar Storm Hits Power Grids Across Europe\" or \"Japan's Moon Rover Sends Back New Photos\". Do not use a generic conversational title.")
             : "- Also write a short, catchy title for this dialogue (max 8 words).";
 
+        // Older published app versions still send a pizza-specific preset. Keep the
+        // public request shape intact while giving that preset the broader meaning.
+        var effectiveScenario = scenarioId == "restaurant_order"
+            ? "Two friends discuss what to order at a restaurant. Choose a plausible cuisine and dishes that fit the target locale, and make their choices specific to this visit. Do not default to pizza."
+            : scenario;
+        var variationAngles = new[]
+        {
+            "a small practical complication",
+            "a change of plans",
+            "a choice between two reasonable options",
+            "a helpful clarification",
+            "a surprising but plausible detail",
+            "a personal preference that affects the decision",
+        };
+        var variationAngle = variationAngles[Random.Shared.Next(variationAngles.Length)];
+
         var scenarioLine = isCustomWebSearch
             ? $$"""
 The scenario is: {{scenario}}
@@ -347,7 +363,7 @@ Search from the internet to follow this instruction: {{searchInstruction}}
 """
                 : string.IsNullOrWhiteSpace(scenario)
                     ? "Choose a random, interesting everyday scenario (e.g. ordering coffee, catching up after a holiday, a job interview, grocery shopping, getting lost on holiday)."
-                    : $"The scenario is: {scenario}";
+                    : $"The scenario is: {effectiveScenario}";
 
         var prompt = $$"""
 You are a dialogue writer for conversational language learning.
@@ -364,6 +380,8 @@ CONTENT POLICY (follow strictly):
 {{accentInstruction}}
 Use plain, everyday wording that any speaker of this language would understand. The regional flavour must come from spelling, grammar, and ordinary word choice — NOT from slang, idioms, or catchphrases. Do not showcase, stack, or stereotype regional expressions; use one only if the line would sound unnatural without it.
 {{scenarioLine}}
+
+For everyday scenarios, use {{variationAngle}} as a possible source of variety when it fits the user's scenario. Choose concrete, plausible details rather than the most obvious stock example. Vary the setting, objects, goals, and outcome across independent generations; never force an unrelated twist. Choose names natural to the target language and locale without relying on a fixed list or the same familiar pair of example names. Do not mention these writing instructions in the output.
 
 Target audio duration: approximately {{durationLabel}}.
 Write a natural dialogue sized for roughly that duration when spoken at a normal conversational pace.
@@ -578,67 +596,97 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             throw new InvalidOperationException("Dialogue audio requires one male and one female voice.");
 
         var ttsAccent = ResolveTtsAccentInstruction(languageCode);
-        var dialogueText = string.Join("\n",
-            dialogue.Lines.Select(l => $"{l.Speaker}: {l.Text}"));
         var speakerInstruction = $"[Speaker instruction: Speaker1 has a {voice1Gender} voice and Speaker2 has a {voice2Gender} voice. Keep the voices distinct.]";
-        var transcript = ttsAccent != null
-            ? $"[Accent instruction: {ttsAccent}]\n{speakerInstruction}\n\n{dialogueText}"
-            : $"{speakerInstruction}\n\n{dialogueText}";
         var models = await modelSettings.GetAsync(cancellationToken);
 
         var (pcm, sampleRate, mimeType) = await WithModelFallbackAsync("tts", models.AudioModel, models.FallbackAudioModel, async (audioModel, key) =>
         {
             var client = httpClientFactory.CreateClient("gemini");
             var url = $"/v1beta/models/{audioModel}:generateContent?key={key}";
-            var body = new
+            // Preview TTS can lose voice identity or acoustic quality late in a long
+            // response. Restart synthesis with the same voice mapping every few turns.
+            var isPreviewTts = audioModel is "gemini-3.1-flash-tts-preview" or "gemini-2.5-flash-preview-tts";
+            var chunks = isPreviewTts && dialogue.Lines.Length > 8
+                ? dialogue.Lines.Chunk(8).ToArray()
+                : [dialogue.Lines];
+            using var combined = new MemoryStream();
+            int? combinedRate = null;
+            string? combinedMime = null;
+
+            foreach (var chunk in chunks)
             {
-                contents = new[] { new { parts = new[] { new { text = transcript } } } },
-                generationConfig = new
+                var dialogueText = string.Join("\n", chunk.Select(l => $"{l.Speaker}: {l.Text}"));
+                var transcript = ttsAccent != null
+                    ? $"[Accent instruction: {ttsAccent}]\n{speakerInstruction}\n\n{dialogueText}"
+                    : $"{speakerInstruction}\n\n{dialogueText}";
+                var body = new
                 {
-                    responseModalities = new[] { "AUDIO" },
-                    speechConfig = new
+                    contents = new[] { new { parts = new[] { new { text = transcript } } } },
+                    generationConfig = new
                     {
-                        multiSpeakerVoiceConfig = new
+                        responseModalities = new[] { "AUDIO" },
+                        speechConfig = new
                         {
-                            speakerVoiceConfigs = new[]
+                            multiSpeakerVoiceConfig = new
                             {
-                                new { speaker = "Speaker1", voiceConfig = new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice1 } } },
-                                new { speaker = "Speaker2", voiceConfig = new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice2 } } },
+                                speakerVoiceConfigs = new[]
+                                {
+                                    new { speaker = "Speaker1", voiceConfig = new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice1 } } },
+                                    new { speaker = "Speaker2", voiceConfig = new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice2 } } },
+                                }
                             }
                         }
                     }
+                };
+
+                using var response = await client.PostAsync(
+                    url,
+                    new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
+                    cancellationToken);
+
+                var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new HttpRequestException(
+                        $"Gemini TTS failed with status {(int)response.StatusCode} for model '{audioModel}'. Body: {TruncateForLog(json)}",
+                        null,
+                        response.StatusCode);
                 }
-            };
 
-            using var response = await client.PostAsync(
-                url,
-                new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
-                cancellationToken);
+                using var document = JsonDocument.Parse(json);
+                var inlineData = document.RootElement
+                    .GetProperty("candidates")[0]
+                    .GetProperty("content")
+                    .GetProperty("parts")[0]
+                    .GetProperty("inlineData");
 
-            var json = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new HttpRequestException(
-                    $"Gemini TTS failed with status {(int)response.StatusCode} for model '{audioModel}'. Body: {TruncateForLog(json)}",
-                    null,
-                    response.StatusCode);
+                var base64Data = inlineData.GetProperty("data").GetString()
+                    ?? throw new InvalidOperationException("No audio data in Gemini response.");
+                var mime = inlineData.TryGetProperty("mimeType", out var mt) ? mt.GetString() ?? "" : "";
+                var rateMatch = Regex.Match(mime, @"rate=(\d+)");
+                var rate = rateMatch.Success ? int.Parse(rateMatch.Groups[1].Value) : 24000;
+                var bytes = Convert.FromBase64String(base64Data);
+                if (chunks.Length > 1 && !IsRawPcmMimeType(mime))
+                    throw new InvalidOperationException($"Cannot join TTS chunks with audio type '{mime}'.");
+                if (combinedRate is not null && combinedRate != rate)
+                    throw new InvalidOperationException("Gemini TTS chunks returned different sample rates.");
+                if (combinedRate is not null)
+                    combined.Write(new byte[rate * 2 / 5]); // 200 ms of silence between sections.
+                combined.Write(bytes);
+                combinedRate = rate;
+                combinedMime = mime;
             }
 
-            var inlineData = JsonDocument.Parse(json).RootElement
-                .GetProperty("candidates")[0]
-                .GetProperty("content")
-                .GetProperty("parts")[0]
-                .GetProperty("inlineData");
+            if (chunks.Length > 1)
+                await events.RecordAsync(AiPipelineSeverity.Info, "tts", "audio_chunked",
+                    "Long dialogue audio was generated in shorter sections.",
+                    new { chunks = chunks.Length, lines = dialogue.Lines.Length, sampleRate = combinedRate }, audioModel);
 
-            var base64Data = inlineData.GetProperty("data").GetString()
-                ?? throw new InvalidOperationException("No audio data in Gemini response.");
-            var mime = inlineData.TryGetProperty("mimeType", out var mt) ? mt.GetString() ?? "" : "";
-            var rateMatch = Regex.Match(mime, @"rate=(\d+)");
-            return (Convert.FromBase64String(base64Data), rateMatch.Success ? int.Parse(rateMatch.Groups[1].Value) : 24000, mime);
+            return (combined.ToArray(), combinedRate ?? 24000, combinedMime ?? "");
         }, cancellationToken);
 
         // 2.5 TTS returns "audio/L16;codec=pcm;rate=24000"; 3.1 returns "audio/l16; rate=24000; channels=1".
-        var isRawPcm = mimeType.Contains("l16", StringComparison.OrdinalIgnoreCase) || mimeType.Contains("pcm", StringComparison.OrdinalIgnoreCase);
+        var isRawPcm = IsRawPcmMimeType(mimeType);
         var durationMs = (int)((double)pcm.Length / (sampleRate * 2) * 1000);
         if (!isRawPcm)
         {
@@ -659,6 +707,10 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             ? new GeneratedAudio(mp3, Mp3Encoder.ContentType, ".mp3", durationMs)
             : new GeneratedAudio(PcmToWav(pcm, sampleRate), "audio/wav", ".wav", durationMs);
     }
+
+    private static bool IsRawPcmMimeType(string mimeType) =>
+        mimeType.Contains("l16", StringComparison.OrdinalIgnoreCase)
+        || mimeType.Contains("pcm", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// What the TTS model is told about accent. The script alone does not decide it for

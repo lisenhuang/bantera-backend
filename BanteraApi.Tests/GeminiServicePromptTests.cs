@@ -61,6 +61,22 @@ public class GeminiServicePromptTests
         Assert.DoesNotContain("Aim for approximately", prompt);
         Assert.DoesNotContain("words total across all speakers", prompt);
         Assert.Contains("One character must be male and the other female", prompt);
+        Assert.Contains("Choose names natural to the target language and locale", prompt);
+    }
+
+    [Fact]
+    public async Task GenerateDialogueAsync_RestaurantPresetDoesNotRequirePizzaForOlderApps()
+    {
+        var handler = new CapturingHandler();
+        var service = CreateService(handler);
+
+        await service.GenerateDialogueAsync("English", "en-US",
+            "Two friends argue lightheartedly about what to order at a pizza restaurant.",
+            60, "restaurant_order");
+
+        var prompt = handler.GetPrompt();
+        Assert.Contains("Do not default to pizza", prompt);
+        Assert.DoesNotContain("at a pizza restaurant", prompt);
     }
 
     [Fact]
@@ -95,6 +111,33 @@ public class GeminiServicePromptTests
         var dialogue = new GeneratedDialogue("Coffee", "Kore", "Aoede", [], []);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateAudioAsync(dialogue, "en-US"));
+    }
+
+    [Fact]
+    public async Task GenerateAudioAsync_PreviewModelReassertsBothVoicesInEveryChunk()
+    {
+        var handler = new PreviewAudioHandler();
+        var service = CreateService(handler, new AiModelSelection("text", "gemini-2.5-flash-preview-tts", null, null));
+        var lines = Enumerable.Range(0, 10)
+            .Select(i => new DialogueLine(i % 2 == 0 ? "Speaker1" : "Speaker2", $"Line {i}"))
+            .ToArray();
+        var dialogue = new GeneratedDialogue("Chat", "Kore", "Puck", lines, []);
+
+        var audio = await service.GenerateAudioAsync(dialogue, "en-US");
+
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.True(audio.DurationMs >= 400);
+        foreach (var request in handler.Requests)
+        {
+            using var document = JsonDocument.Parse(request);
+            var config = document.RootElement.GetProperty("generationConfig")
+                .GetProperty("speechConfig").GetProperty("multiSpeakerVoiceConfig")
+                .GetProperty("speakerVoiceConfigs");
+            Assert.Equal("Kore", config[0].GetProperty("voiceConfig").GetProperty("prebuiltVoiceConfig").GetProperty("voiceName").GetString());
+            Assert.Equal("Puck", config[1].GetProperty("voiceConfig").GetProperty("prebuiltVoiceConfig").GetProperty("voiceName").GetString());
+            Assert.Contains("Speaker1 has a female voice and Speaker2 has a male voice", document.RootElement
+                .GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString());
+        }
     }
 
     [Fact]
@@ -220,6 +263,31 @@ public class GeminiServicePromptTests
     private sealed class StaticHttpClientFactory(HttpClient client) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => client;
+    }
+
+    private sealed class PreviewAudioHandler : HttpMessageHandler
+    {
+        public List<string> Requests { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            var body = JsonSerializer.Serialize(new
+            {
+                candidates = new[] { new { content = new { parts = new[]
+                {
+                    new { inlineData = new
+                    {
+                        data = Convert.ToBase64String(new byte[9600]),
+                        mimeType = "audio/L16;codec=pcm;rate=24000",
+                    } },
+                } } } },
+            });
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            };
+        }
     }
 
     private sealed class FallbackHandler(bool audio, bool rejectPrimary = false) : HttpMessageHandler
