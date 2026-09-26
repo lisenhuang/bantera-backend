@@ -13,6 +13,7 @@ public class GeminiService(
     IHttpClientFactory httpClientFactory,
     IOptions<GeminiSettings> options,
     AiModelSettingsService modelSettings,
+    GeminiKeyHealthService keyHealth,
     Mp3Encoder mp3Encoder,
     AiPipelineEventRecorder events,
     ILogger<GeminiService> logger)
@@ -1456,8 +1457,18 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
     private async Task<T> WithGeminiKeyAsync<T>(string operation, Func<string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false, string? model = null, bool fallbackAvailable = false)
     {
         var stage = operation.Replace(' ', '_').Replace("(", "").Replace(")", "");
-        var keys = SelectKeys(Settings.ApiKeys, webSearch, Settings.WebSearchKeyPrefix);
-        if (keys.Length == 0) throw new InvalidOperationException("No Gemini API keys configured.");
+        var configuredKeys = SelectKeys(Settings.ApiKeys, webSearch, Settings.WebSearchKeyPrefix);
+        if (configuredKeys.Length == 0) throw new InvalidOperationException("No Gemini API keys configured.");
+        var keys = await keyHealth.EligibleKeysAsync(configuredKeys, model, cancellationToken);
+        if (keys.Length == 0)
+        {
+            await events.RecordAsync(
+                fallbackAvailable ? AiPipelineSeverity.Warning : AiPipelineSeverity.Error,
+                stage, "all_keys_unavailable",
+                "Every configured key is disabled or temporarily cooling down.",
+                new { configuredKeys = configuredKeys.Length, model }, model);
+            throw new InvalidOperationException($"No eligible Gemini API keys for {operation}.");
+        }
 
         Exception? lastEx = null;
         for (var attempt = 0; attempt < keys.Length; attempt++)
@@ -1476,14 +1487,30 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
             {
                 // Includes HttpClient timeouts (TaskCanceledException without our token cancelled).
                 lastEx = ex;
+                var keyHint = MaskKey(key);
+                var failureKind = GeminiKeyHealthService.Classify(ex);
                 logger.LogWarning(
                     "Gemini {Operation} failed with key {Key} (attempt {Attempt}/{Total}); trying the next key. {Error}",
-                    operation, MaskKey(key), attempt + 1, keys.Length, TruncateForLog(ex.Message, 400));
+                    operation, keyHint, attempt + 1, keys.Length, TruncateForLog(ex.Message, 400));
                 await events.RecordAsync(
                     AiPipelineSeverity.Warning, stage, "key_failed",
                     TruncateForLog(ex.Message, 1000),
-                    new { attempt = attempt + 1, total = keys.Length, status = (ex as HttpRequestException)?.StatusCode is { } code ? (int)code : (int?)null, exception = ex.GetType().Name },
-                    model, MaskKey(key));
+                    new { attempt = attempt + 1, total = keys.Length, status = (ex as HttpRequestException)?.StatusCode is { } code ? (int)code : (int?)null, exception = ex.GetType().Name, failureKind = failureKind.ToString() },
+                    model, keyHint);
+                if (failureKind == GeminiKeyFailureKind.QuotaLimited)
+                {
+                    var retryAt = keyHealth.CoolDown(key, model);
+                    await events.RecordAsync(AiPipelineSeverity.Warning, stage, "key_quota_cooldown",
+                        "Quota-limited key is temporarily paused for this model.",
+                        new { retryAt, model }, model, keyHint);
+                }
+                else if (failureKind == GeminiKeyFailureKind.InvalidKey)
+                {
+                    await keyHealth.MarkInvalidAsync(key, "Invalid, revoked, or blocked key", cancellationToken);
+                    await events.RecordAsync(AiPipelineSeverity.Error, stage, "key_disabled",
+                        "A confirmed invalid key was disabled until an admin retries it.",
+                        new { model }, model, keyHint);
+                }
             }
         }
         await events.RecordAsync(

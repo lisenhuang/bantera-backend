@@ -135,6 +135,20 @@ public class GeminiServicePromptTests
     }
 
     [Fact]
+    public async Task GenerateDialogueAsync_SkipsQuotaLimitedKeyOnNextRequest()
+    {
+        var handler = new QuotaOnceHandler();
+        var service = CreateService(handler, apiKeys: ["first-project-key", "second-project-key"]);
+
+        await service.GenerateDialogueAsync("English", "en-US", "ordering coffee", 60);
+        await service.GenerateDialogueAsync("English", "en-US", "ordering coffee", 60);
+
+        Assert.Equal(3, handler.Keys.Count);
+        Assert.NotEqual(handler.Keys[0], handler.Keys[1]);
+        Assert.Equal(handler.Keys[1], handler.Keys[2]);
+    }
+
+    [Fact]
     public void UpdateAiSettingsRequest_DistinguishesOldClientsFromClearingFallbacks()
     {
         var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
@@ -149,7 +163,8 @@ public class GeminiServicePromptTests
         Assert.Equal(JsonValueKind.Null, clearFallbacks.FallbackAudioModel.ValueKind);
     }
 
-    private static GeminiService CreateService(HttpMessageHandler handler, AiModelSelection? selection = null)
+    private static GeminiService CreateService(
+        HttpMessageHandler handler, AiModelSelection? selection = null, string[]? apiKeys = null)
     {
         var client = new HttpClient(handler)
         {
@@ -158,7 +173,7 @@ public class GeminiServicePromptTests
 
         var settings = Options.Create(new GeminiSettings
         {
-            ApiKeys = ["test-key"],
+            ApiKeys = apiKeys ?? ["test-key"],
             TextModel = "test-text-model",
             LatestNewsTextModel = "test-news-model",
         });
@@ -171,11 +186,17 @@ public class GeminiServicePromptTests
             cache,
             settings,
             NullLogger<AiModelSettingsService>.Instance);
+        var keyHealth = new GeminiKeyHealthService(
+            services.GetRequiredService<IServiceScopeFactory>(),
+            cache,
+            settings,
+            NullLogger<GeminiKeyHealthService>.Instance);
 
         return new GeminiService(
             new StaticHttpClientFactory(client),
             settings,
             modelSettings,
+            keyHealth,
             new BanteraApi.Audio.Mp3Encoder(NullLogger<BanteraApi.Audio.Mp3Encoder>.Instance),
             new BanteraApi.Diagnostics.AiPipelineEventRecorder(
                 services.GetRequiredService<IServiceScopeFactory>(),
@@ -231,6 +252,29 @@ public class GeminiServicePromptTests
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json"),
             };
+        }
+    }
+
+    private sealed class QuotaOnceHandler : HttpMessageHandler
+    {
+        public List<string> Keys { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var key = request.RequestUri!.Query.Split("key=")[1].Split('&')[0];
+            Keys.Add(key);
+            if (Keys.Count == 1)
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                {
+                    Content = new StringContent("RESOURCE_EXHAUSTED"),
+                });
+
+            var dialogue = "{\"title\":\"Coffee\",\"speaker1_gender\":\"female\",\"speaker2_gender\":\"male\",\"lines\":[{\"speaker\":\"Speaker1\",\"text\":\"Hello\",\"shortCues\":[\"Hello\"]}]}";
+            var body = JsonSerializer.Serialize(new { candidates = new[] { new { content = new { parts = new[] { new { text = dialogue } } } } } });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            });
         }
     }
 

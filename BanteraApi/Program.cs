@@ -81,6 +81,7 @@ builder.Services.AddHttpClient("gemini", c =>
     c.Timeout = TimeSpan.FromSeconds(180);
 });
 builder.Services.AddScoped<GeminiService>();
+builder.Services.AddSingleton<GeminiKeyHealthService>();
 builder.Services.AddSingleton<AiModelSettingsService>();
 builder.Services.AddSingleton<CueTimingSettingsService>();
 builder.Services.AddSingleton<BanteraApi.Audio.Mp3Encoder>();

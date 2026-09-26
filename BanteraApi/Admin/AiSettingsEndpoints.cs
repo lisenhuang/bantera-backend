@@ -17,6 +17,9 @@ public static partial class AiSettingsEndpoints
     [GeneratedRegex("^[a-z0-9][a-z0-9.\\-]{1,99}$")]
     private static partial Regex ModelNamePattern();
 
+    [GeneratedRegex("^[a-f0-9]{64}$")]
+    private static partial Regex KeyIdPattern();
+
     public static void Map(WebApplication app)
     {
         var group = app.MapGroup("/api/admin/ai-settings").RequireAuthorization("Admin");
@@ -35,6 +38,24 @@ public static partial class AiSettingsEndpoints
             return Results.Ok(await BuildResponseAsync(settings, cueTiming, alignmentSettings, geminiOptions.Value, catalog, ct));
         })
         .WithName("AdminGetAiSettings");
+
+        group.MapGet("/keys", async (GeminiKeyHealthService keyHealth, CancellationToken ct) =>
+            Results.Ok(await keyHealth.GetSnapshotAsync(ct)))
+            .WithName("AdminGetGeminiKeyHealth");
+
+        group.MapPost("/keys/{id}/retry", async (
+            string id,
+            GeminiKeyHealthService keyHealth,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            if (!KeyIdPattern().IsMatch(id) || !await keyHealth.ReenableAsync(id, ct))
+                return Results.NotFound();
+            loggerFactory.CreateLogger("AiSettings").LogInformation(
+                "Admin re-enabled Gemini key with fingerprint {KeyId}.", id);
+            return Results.Ok(await keyHealth.GetSnapshotAsync(ct));
+        })
+        .WithName("AdminRetryGeminiKey");
 
         // PUT /api/admin/ai-settings/playback — sentence start switch for AI audio.
         group.MapPut("/playback", async (
