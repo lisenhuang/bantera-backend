@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using BanteraApi.Diagnostics;
 using BanteraApi.Videos;
+using Microsoft.Extensions.Options;
 
 namespace BanteraApi.Gemini;
 
@@ -22,6 +23,7 @@ public sealed class AiAudioTimingService(
     GeminiService gemini,
     AiAudioAlignmentSettingsService alignmentSettings,
     AiPipelineEventRecorder events,
+    IOptions<GeminiSettings> geminiOptions,
     ILogger<AiAudioTimingService> logger)
 {
     /// <summary>More estimated words than this means the transcript did not fit the script.</summary>
@@ -51,9 +53,17 @@ public sealed class AiAudioTimingService(
         {
             if (!await alignmentSettings.GetAsync(cancellationToken))
             {
-                var words = await gemini.TranscribeWordsAsync(audio.Bytes, audio.ContentType, languageCode, cancellationToken);
-                var direct = TranscriptionTimingBuilder.Build(words, audio.DurationMs);
-                if (direct is null) return null;
+                var (words, _) = await TranscribeAsync(audio, languageCode, "direct", cancellationToken);
+                var direct = TranscriptionTimingBuilder.Build(words, audio.DurationMs, out var timingIssue);
+                if (direct is null)
+                {
+                    await events.RecordAsync(
+                        AiPipelineSeverity.Warning, "transcription", "transcription_timing_rejected",
+                        $"Transcript timing was rejected: {timingIssue?.Code ?? "unknown"}.",
+                        new { issue = timingIssue, returnedWords = words.Count, audioDurationMs = audio.DurationMs },
+                        model: geminiOptions.Value.TranscribeModel);
+                    return null;
+                }
                 await events.RecordAsync(
                     AiPipelineSeverity.Info, "timing", "timing_completed",
                     $"Used {direct.WordTiming.Count} transcribed words without script alignment.",
@@ -115,7 +125,14 @@ public sealed class AiAudioTimingService(
             }
 
             var cues = WordTimingAligner.BuildLineCues(lineTexts, alignment, audio.DurationMs);
-            if (cues is null) return null;
+            if (cues is null)
+            {
+                await events.RecordAsync(
+                    AiPipelineSeverity.Warning, "timing", "script_cues_unmatched",
+                    "Transcribed words could not produce timing for every dialogue line.",
+                    new { lineCount = lines.Length, timedTokens = alignment.Tokens.Count, mode = best.Mode, retried });
+                return null;
+            }
             var shortCues = buildShortCues ? WordTimingAligner.BuildShortCues(lines, alignment, audio.DurationMs) : null;
             if (buildShortCues && shortCues is null)
                 await events.RecordAsync(AiPipelineSeverity.Warning, "timing", "short_cues_unmatched", "Short cue texts did not line up with the line's words.");
@@ -147,11 +164,8 @@ public sealed class AiAudioTimingService(
         string languageCode,
         CancellationToken cancellationToken)
     {
+        var (words, transcribeMs) = await TranscribeAsync(audio, languageCode, "script", cancellationToken);
         var clock = Stopwatch.StartNew();
-        var words = await gemini.TranscribeWordsAsync(audio.Bytes, audio.ContentType, languageCode, cancellationToken);
-        var transcribeMs = clock.ElapsedMilliseconds;
-
-        clock.Restart();
         var matches = WordTimingAligner.AlignByCharacters(tokens, words);
         var mode = "geminiTranscribe";
         if (tokens.Where((t, i) => !WordTimingAligner.IsExact(t, matches[i], words)).Any())
@@ -172,6 +186,43 @@ public sealed class AiAudioTimingService(
 
         var alignment = WordTimingAligner.Resolve(tokens, words, matches, audio.DurationMs);
         return new Attempt(words, alignment, mode, transcribeMs, clock.ElapsedMilliseconds);
+    }
+
+    private async Task<(IReadOnlyList<TranscribedWord> Words, long DurationMs)> TranscribeAsync(
+        GeneratedAudio audio, string languageCode, string mode, CancellationToken cancellationToken)
+    {
+        var clock = Stopwatch.StartNew();
+        try
+        {
+            var words = await gemini.TranscribeWordsAsync(audio.Bytes, audio.ContentType, languageCode, cancellationToken);
+            clock.Stop();
+            await events.RecordAsync(
+                AiPipelineSeverity.Info, "transcription", "transcription_completed",
+                $"Gemini returned {words.Count} timed words for {mode} timing.",
+                new
+                {
+                    mode,
+                    returnedWords = words.Count,
+                    firstStartMs = words.Count > 0 ? words.Min(w => w.StartMs) : (int?)null,
+                    lastEndMs = words.Count > 0 ? words.Max(w => w.EndMs) : (int?)null,
+                    audioDurationMs = audio.DurationMs,
+                    nonPositiveDurations = words.Count(w => w.EndMs <= w.StartMs),
+                    wordsPastAudioEnd = words.Count(w => w.EndMs > (long)audio.DurationMs + 1000),
+                },
+                model: geminiOptions.Value.TranscribeModel,
+                durationMs: (int)Math.Min(clock.ElapsedMilliseconds, int.MaxValue));
+            return (words, clock.ElapsedMilliseconds);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await events.RecordAsync(
+                AiPipelineSeverity.Warning, "transcription", "transcription_failed",
+                "Gemini transcription did not return usable timed words.",
+                new { mode, exception = ex.GetType().Name, httpStatus = (ex as HttpRequestException)?.StatusCode is { } status ? (int?)status : null },
+                model: geminiOptions.Value.TranscribeModel,
+                durationMs: (int)Math.Min(clock.ElapsedMilliseconds, int.MaxValue));
+            throw;
+        }
     }
 
     private static CoverageIssue? FindCoverageIssue(DialogueLine[] lines, Attempt attempt, int durationMs)

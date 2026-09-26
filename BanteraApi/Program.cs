@@ -1573,6 +1573,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
     var objectKey = string.Empty;
     RevAiTranscriptDiagnostics? transcriptDiagnostics = null;
     UserAudioJob? job = null;
+    IDisposable? v2PipelineContext = null;
 
     try
     {
@@ -1584,7 +1585,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
         };
         db.UserAudioJobs.Add(job);
         await db.SaveChangesAsync(genToken);
-        using var v2PipelineContext = pipelineEvents.BeginContext(userId.Value, job.Id, req.LanguageCode, "generate/v2");
+        v2PipelineContext = pipelineEvents.BeginContext(userId.Value, job.Id, req.LanguageCode, "generate/v2");
         await SendSafe(new { step = "started", jobId = job.Id });
 
         var dialogue = await geminiService.GenerateDialogueAsync(
@@ -1930,6 +1931,35 @@ app.MapPost("/api/me/audio/generate/v2", async (
 
         if (cues is null)
         {
+            await pipelineEvents.RecordAsync(
+                "error", "aligning", "cue_alignment_failed",
+                "No usable cue timing was produced after the available alignment attempts.",
+                new
+                {
+                    mode = longAlignmentMode,
+                    revAiRequired,
+                    boundaryFailure = boundaryLongAlignmentFailure is null ? null : new
+                    {
+                        boundaryLongAlignmentFailure.LineIndex,
+                        boundaryLongAlignmentFailure.MatchedWords,
+                        boundaryLongAlignmentFailure.ExpectedWords,
+                        boundaryLongAlignmentFailure.MatchRatio,
+                    },
+                    strictFailure = strictLongAlignmentFailure is null ? null : new
+                    {
+                        strictLongAlignmentFailure.LineIndex,
+                        strictLongAlignmentFailure.MatchedWords,
+                        strictLongAlignmentFailure.ExpectedWords,
+                        strictLongAlignmentFailure.MatchRatio,
+                    },
+                    tolerantFailure = tolerantLongAlignmentFailure is null ? null : new
+                    {
+                        tolerantLongAlignmentFailure.LineIndex,
+                        tolerantLongAlignmentFailure.MatchedWords,
+                        tolerantLongAlignmentFailure.ExpectedWords,
+                        tolerantLongAlignmentFailure.MatchRatio,
+                    },
+                });
             throw new InvalidOperationException("Required cue alignment did not produce valid timing.");
         }
         if (geminiTiming is null)
@@ -2124,6 +2154,10 @@ app.MapPost("/api/me/audio/generate/v2", async (
         }
         await SendSafe(new { step = "error", message = generationFailedMessage });
     }
+    finally
+    {
+        v2PipelineContext?.Dispose();
+    }
 })
 .WithName("GenerateAiAudioV2")
 .RequireAuthorization();
@@ -2190,12 +2224,13 @@ app.MapPost("/api/me/audio/generate/v3",
         async Task SendSafeV3(object payload) { try { await SendV3(payload); } catch { } }
 
         UserAudioJob? v3Job = null;
+        IDisposable? v3PipelineContext = null;
         try
         {
             v3Job = new UserAudioJob { UserId = userId.Value, LanguageCode = req.LanguageCode, ScenarioId = req.ScenarioId };
             db.UserAudioJobs.Add(v3Job);
             await db.SaveChangesAsync(genToken);
-            using var v3PipelineContext = pipelineEvents.BeginContext(userId.Value, v3Job.Id, req.LanguageCode, "generate/v3");
+            v3PipelineContext = pipelineEvents.BeginContext(userId.Value, v3Job.Id, req.LanguageCode, "generate/v3");
             await SendSafeV3(new { step = "started", jobId = v3Job.Id });
 
             var v3Dialogue = await geminiService.GenerateDialogueAsync(
@@ -2304,6 +2339,10 @@ app.MapPost("/api/me/audio/generate/v3",
                 try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
             }
             await SendSafeV3(new { step = "error", message = "Something went wrong while creating the practice audio. Please try again." });
+        }
+        finally
+        {
+            v3PipelineContext?.Dispose();
         }
     })
 .WithName("GenerateAiAudioV3")

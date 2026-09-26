@@ -2,6 +2,8 @@ using System.Text;
 
 namespace BanteraApi.Gemini;
 
+public sealed record TranscriptionTimingIssue(string Code, int? WordIndex = null, int? StartMs = null, int? EndMs = null);
+
 /// <summary>Builds displayed cues and word timing from the transcription alone.</summary>
 public static class TranscriptionTimingBuilder
 {
@@ -9,18 +11,27 @@ public static class TranscriptionTimingBuilder
     private const int PauseBoundaryMs = 700;
 
     public static AiAudioTimingResult? Build(IReadOnlyList<TranscribedWord> words, int durationMs)
+        => Build(words, durationMs, out _);
+
+    public static AiAudioTimingResult? Build(
+        IReadOnlyList<TranscribedWord> words, int durationMs, out TranscriptionTimingIssue? issue)
     {
-        if (words.Count == 0 || durationMs <= 0) return null;
+        issue = null;
+        if (durationMs <= 0) { issue = new("invalid_audio_duration"); return null; }
+        if (words.Count == 0) { issue = new("no_words"); return null; }
         var lexicalWords = words.Where(w => WordTimingAligner.Tokenize([w.Text]).Count > 0).ToList();
-        if (lexicalWords.Count == 0) return null;
+        if (lexicalWords.Count == 0) { issue = new("no_lexical_words"); return null; }
 
         // A missing or malformed timestamp cannot highlight the spoken word accurately.
         var previousStart = -1;
-        foreach (var word in lexicalWords)
+        for (var i = 0; i < lexicalWords.Count; i++)
         {
-            if (word.StartMs < previousStart || word.StartMs < 0 || word.EndMs <= word.StartMs
-                || word.EndMs > durationMs + 1000)
-                return null;
+            var word = lexicalWords[i];
+            var code = word.StartMs < 0 ? "negative_word_start"
+                : word.StartMs < previousStart ? "timestamps_out_of_order"
+                : word.EndMs <= word.StartMs ? "non_positive_word_duration"
+                : word.EndMs > (long)durationMs + 1000 ? "word_past_audio_end" : null;
+            if (code is not null) { issue = new(code, i, word.StartMs, word.EndMs); return null; }
             previousStart = word.StartMs;
         }
 
@@ -69,10 +80,10 @@ public static class TranscriptionTimingBuilder
             }
         }
 
-        if (lines.Count == 0 || tokens.Count == 0) return null;
+        if (lines.Count == 0 || tokens.Count == 0) { issue = new("empty_transcript_cue"); return null; }
         var alignment = new WordAlignment(tokens, tokens.Count, 0, 0, 0);
         var cues = WordTimingAligner.BuildLineCues(lines.Select(l => l.Text).ToArray(), alignment, durationMs);
-        if (cues is null) return null;
+        if (cues is null) { issue = new("line_cues_unmatched"); return null; }
         // These cues are already short transcript segments and match the timed words exactly.
         return new AiAudioTimingResult(
             WordTimingAligner.ToWordTiming(alignment), cues, cues,

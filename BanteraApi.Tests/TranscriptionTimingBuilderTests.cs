@@ -44,6 +44,21 @@ public class TranscriptionTimingBuilderTests
         Assert.Null(TranscriptionTimingBuilder.Build([new("hello", 0, 0)], 1000));
     }
 
+    [Theory]
+    [InlineData(0, 0, 1000, "non_positive_word_duration")]
+    [InlineData(100, 2200, 1000, "word_past_audio_end")]
+    [InlineData(-1, 100, 1000, "negative_word_start")]
+    public void ExplainsInvalidTranscriptionTiming(int start, int end, int duration, string code)
+    {
+        var result = TranscriptionTimingBuilder.Build([new("hello", start, end)], duration, out var issue);
+
+        Assert.Null(result);
+        Assert.Equal(code, issue?.Code);
+        Assert.Equal(0, issue?.WordIndex);
+        Assert.Equal(start, issue?.StartMs);
+        Assert.Equal(end, issue?.EndMs);
+    }
+
     [Fact]
     public void SplitsSpeakerTurnsWithoutUsingOriginalDialogueLines()
     {
