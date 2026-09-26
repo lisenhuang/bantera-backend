@@ -7,8 +7,8 @@ public sealed record TranscriptionTimingIssue(string Code, int? WordIndex = null
 /// <summary>Builds displayed cues and word timing from the transcription alone.</summary>
 public static class TranscriptionTimingBuilder
 {
-    private const int MaxWordsPerCue = 18;
-    private const int PauseBoundaryMs = 700;
+    private const int TargetWordsPerCue = 18;
+    private const int MinWordsBeforeSoftBoundary = TargetWordsPerCue * 2 / 3;
     private const int MinEstimatedWordMs = 80;
     private const int MaxEstimatedWordMs = 250;
     private const int DefaultEstimatedWordMs = 120;
@@ -145,17 +145,22 @@ public static class TranscriptionTimingBuilder
             || !current.Any(w => WordTimingAligner.Tokenize([w.Text]).Count > 0))
             return false;
         var last = current[^1];
-        if (next.StartMs - last.EndMs >= PauseBoundaryMs)
-            return true;
         if (!string.IsNullOrWhiteSpace(last.Speaker) && !string.IsNullOrWhiteSpace(next.Speaker)
             && last.Speaker != next.Speaker)
             return true;
-        var text = last.Text.TrimEnd();
+        // A pause or a word count cannot justify cutting a sentence in half.
+        // Gemini sometimes returns long turns with no punctuation; keep those intact.
+        var text = string.Concat(current.Select(word => word.Text.Trim()));
         var cjk = current.Any(w => ContainsCjkScript(w.Text)) || ContainsCjkScript(next.Text);
         if (cjk)
             return EndsAtCuePunctuation(text);
-        return current.Count >= MaxWordsPerCue
-            || current.Count >= 5 && text.Length > 0 && ".?!。？！".Contains(text[^1]);
+        if (!EndsAtCuePunctuation(text))
+            return false;
+        // Eighteen words is a length target, never a forced break. A complete
+        // sentence can stand alone; wait for a reasonably long phrase before
+        // using a comma, and keep going past the target if there is no punctuation.
+        return EndsAtSentenceStop(text)
+            || current.Count(word => WordTimingAligner.Tokenize([word.Text]).Count > 0) >= MinWordsBeforeSoftBoundary;
     }
 
     private static bool ContainsCjkScript(string text) => text.EnumerateRunes().Any(r =>
@@ -167,8 +172,18 @@ public static class TranscriptionTimingBuilder
     {
         for (var i = text.Length - 1; i >= 0; i--)
         {
-            if (ClosingQuotes.Contains(text[i])) continue;
+            if (ClosingQuotes.Contains(text[i]) || char.IsWhiteSpace(text[i])) continue;
             return CuePunctuation.Contains(text[i]);
+        }
+        return false;
+    }
+
+    private static bool EndsAtSentenceStop(string text)
+    {
+        for (var i = text.Length - 1; i >= 0; i--)
+        {
+            if (ClosingQuotes.Contains(text[i]) || char.IsWhiteSpace(text[i])) continue;
+            return ".!?。！？".Contains(text[i]);
         }
         return false;
     }

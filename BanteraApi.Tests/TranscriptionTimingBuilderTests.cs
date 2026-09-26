@@ -101,6 +101,57 @@ public class TranscriptionTimingBuilderTests
     }
 
     [Fact]
+    public void LongEnglishSentenceWaitsForPunctuationDespiteWordLimitAndPause()
+    {
+        const string sentence = "They also do a grilled fish with sambal and lime that gets great reviews, or we could get the salt and pepper tofu.";
+        var words = sentence.Split(' ').Select((text, i) =>
+            new TranscribedWord(text, i * 100 + (i >= 18 ? 800 : 0),
+                i * 100 + (i >= 18 ? 800 : 0) + 80, "Speaker1")).ToArray();
+
+        var result = TranscriptionTimingBuilder.Build(words, words[^1].EndMs + 200);
+
+        Assert.NotNull(result);
+        Assert.Equal([
+            "They also do a grilled fish with sambal and lime that gets great reviews,",
+            "or we could get the salt and pepper tofu.",
+        ], result.Cues.Select(c => c.Text));
+        Assert.Equal(result.Cues, result.ShortCues);
+    }
+
+    [Fact]
+    public void EnglishSentenceBoundaryAvoidsThePublishedMidSentenceSplit()
+    {
+        const string sentence = "That makes complete sense. In that case, do you want to share a few smaller plates instead of getting separate mains?";
+        var words = sentence.Split(' ').Select((text, i) =>
+            new TranscribedWord(text, i * 100, i * 100 + 80, "Speaker1")).ToArray();
+
+        var result = TranscriptionTimingBuilder.Build(words, words[^1].EndMs + 200);
+
+        Assert.NotNull(result);
+        Assert.Equal([
+            "That makes complete sense.",
+            "In that case, do you want to share a few smaller plates instead of getting separate mains?",
+        ], result.Cues.Select(c => c.Text));
+    }
+
+    [Fact]
+    public void EnglishWithoutPunctuationStaysInOneCueUntilSpeakerChanges()
+    {
+        var words = Enumerable.Range(0, 22)
+            .Select(i => new TranscribedWord($"word{i}", i * 100 + (i >= 18 ? 800 : 0),
+                i * 100 + (i >= 18 ? 800 : 0) + 80, "Speaker1"))
+            .Append(new TranscribedWord("Okay.", 3100, 3400, "Speaker2"))
+            .ToArray();
+
+        var result = TranscriptionTimingBuilder.Build(words, 3600);
+
+        Assert.NotNull(result);
+        Assert.Equal(2, result.Cues.Count);
+        Assert.Equal(string.Join(" ", words.Take(22).Select(w => w.Text)), result.Cues[0].Text);
+        Assert.Equal("Okay.", result.Cues[1].Text);
+    }
+
+    [Fact]
     public void ChineseCuesWaitForCommaInsteadOfCuttingAfterEighteenCharacters()
     {
         const string first = "我们今天下午准备先去市中心的图书馆看书，";

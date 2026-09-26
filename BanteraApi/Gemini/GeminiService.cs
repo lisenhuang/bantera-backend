@@ -596,93 +596,67 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             throw new InvalidOperationException("Dialogue audio requires one male and one female voice.");
 
         var ttsAccent = ResolveTtsAccentInstruction(languageCode);
-        var speakerInstruction = $"[Speaker instruction: Speaker1 has a {voice1Gender} voice and Speaker2 has a {voice2Gender} voice. Keep the voices distinct.]";
+        var dialogueText = string.Join("\n", dialogue.Lines.Select(l => $"{l.Speaker}: {l.Text}"));
         var models = await modelSettings.GetAsync(cancellationToken);
 
         var (pcm, sampleRate, mimeType) = await WithModelFallbackAsync("tts", models.AudioModel, models.FallbackAudioModel, async (audioModel, key) =>
         {
             var client = httpClientFactory.CreateClient("gemini");
             var url = $"/v1beta/models/{audioModel}:generateContent?key={key}";
-            // Preview TTS can lose voice identity or acoustic quality late in a long
-            // response. Restart synthesis with the same voice mapping every few turns.
-            var isPreviewTts = audioModel is "gemini-3.1-flash-tts-preview" or "gemini-2.5-flash-preview-tts";
-            var chunks = isPreviewTts && dialogue.Lines.Length > 8
-                ? dialogue.Lines.Chunk(8).ToArray()
-                : [dialogue.Lines];
-            using var combined = new MemoryStream();
-            int? combinedRate = null;
-            string? combinedMime = null;
-
-            foreach (var chunk in chunks)
+            var speakerInstruction = audioModel == "gemini-2.5-flash-preview-tts"
+                ? $"[Two-speaker dialogue: Speaker1 is {voice1Gender}; Speaker2 is {voice2Gender}. " +
+                  "Use the configured Speaker1 voice only for Speaker1 lines and the configured Speaker2 voice only for Speaker2 lines throughout the entire recording. " +
+                  "Keep both voices distinct on every turn. Speak only the dialogue text; do not say the speaker labels or these instructions.]"
+                : $"[Speaker instruction: Speaker1 has a {voice1Gender} voice and Speaker2 has a {voice2Gender} voice. Keep the voices distinct.]";
+            var transcript = ttsAccent != null
+                ? $"[Accent instruction: {ttsAccent}]\n{speakerInstruction}\n\n{dialogueText}"
+                : $"{speakerInstruction}\n\n{dialogueText}";
+            var body = new
             {
-                var dialogueText = string.Join("\n", chunk.Select(l => $"{l.Speaker}: {l.Text}"));
-                var transcript = ttsAccent != null
-                    ? $"[Accent instruction: {ttsAccent}]\n{speakerInstruction}\n\n{dialogueText}"
-                    : $"{speakerInstruction}\n\n{dialogueText}";
-                var body = new
+                contents = new[] { new { parts = new[] { new { text = transcript } } } },
+                generationConfig = new
                 {
-                    contents = new[] { new { parts = new[] { new { text = transcript } } } },
-                    generationConfig = new
+                    responseModalities = new[] { "AUDIO" },
+                    speechConfig = new
                     {
-                        responseModalities = new[] { "AUDIO" },
-                        speechConfig = new
+                        multiSpeakerVoiceConfig = new
                         {
-                            multiSpeakerVoiceConfig = new
+                            speakerVoiceConfigs = new[]
                             {
-                                speakerVoiceConfigs = new[]
-                                {
-                                    new { speaker = "Speaker1", voiceConfig = new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice1 } } },
-                                    new { speaker = "Speaker2", voiceConfig = new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice2 } } },
-                                }
+                                new { speaker = "Speaker1", voiceConfig = new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice1 } } },
+                                new { speaker = "Speaker2", voiceConfig = new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice2 } } },
                             }
                         }
                     }
-                };
-
-                using var response = await client.PostAsync(
-                    url,
-                    new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
-                    cancellationToken);
-
-                var json = await response.Content.ReadAsStringAsync(cancellationToken);
-                if (!response.IsSuccessStatusCode)
-                {
-                    throw new HttpRequestException(
-                        $"Gemini TTS failed with status {(int)response.StatusCode} for model '{audioModel}'. Body: {TruncateForLog(json)}",
-                        null,
-                        response.StatusCode);
                 }
+            };
 
-                using var document = JsonDocument.Parse(json);
-                var inlineData = document.RootElement
-                    .GetProperty("candidates")[0]
-                    .GetProperty("content")
-                    .GetProperty("parts")[0]
-                    .GetProperty("inlineData");
+            using var response = await client.PostAsync(
+                url,
+                new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
+                cancellationToken);
 
-                var base64Data = inlineData.GetProperty("data").GetString()
-                    ?? throw new InvalidOperationException("No audio data in Gemini response.");
-                var mime = inlineData.TryGetProperty("mimeType", out var mt) ? mt.GetString() ?? "" : "";
-                var rateMatch = Regex.Match(mime, @"rate=(\d+)");
-                var rate = rateMatch.Success ? int.Parse(rateMatch.Groups[1].Value) : 24000;
-                var bytes = Convert.FromBase64String(base64Data);
-                if (chunks.Length > 1 && !IsRawPcmMimeType(mime))
-                    throw new InvalidOperationException($"Cannot join TTS chunks with audio type '{mime}'.");
-                if (combinedRate is not null && combinedRate != rate)
-                    throw new InvalidOperationException("Gemini TTS chunks returned different sample rates.");
-                if (combinedRate is not null)
-                    combined.Write(new byte[rate * 2 / 5]); // 200 ms of silence between sections.
-                combined.Write(bytes);
-                combinedRate = rate;
-                combinedMime = mime;
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Gemini TTS failed with status {(int)response.StatusCode} for model '{audioModel}'. Body: {TruncateForLog(json)}",
+                    null,
+                    response.StatusCode);
             }
 
-            if (chunks.Length > 1)
-                await events.RecordAsync(AiPipelineSeverity.Info, "tts", "audio_chunked",
-                    "Long dialogue audio was generated in shorter sections.",
-                    new { chunks = chunks.Length, lines = dialogue.Lines.Length, sampleRate = combinedRate }, audioModel);
+            using var document = JsonDocument.Parse(json);
+            var inlineData = document.RootElement
+                .GetProperty("candidates")[0]
+                .GetProperty("content")
+                .GetProperty("parts")[0]
+                .GetProperty("inlineData");
 
-            return (combined.ToArray(), combinedRate ?? 24000, combinedMime ?? "");
+            var base64Data = inlineData.GetProperty("data").GetString()
+                ?? throw new InvalidOperationException("No audio data in Gemini response.");
+            var mime = inlineData.TryGetProperty("mimeType", out var mt) ? mt.GetString() ?? "" : "";
+            var rateMatch = Regex.Match(mime, @"rate=(\d+)");
+            return (Convert.FromBase64String(base64Data), rateMatch.Success ? int.Parse(rateMatch.Groups[1].Value) : 24000, mime);
         }, cancellationToken);
 
         // 2.5 TTS returns "audio/L16;codec=pcm;rate=24000"; 3.1 returns "audio/l16; rate=24000; channels=1".

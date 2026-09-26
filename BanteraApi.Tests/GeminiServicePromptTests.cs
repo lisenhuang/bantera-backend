@@ -113,11 +113,13 @@ public class GeminiServicePromptTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateAudioAsync(dialogue, "en-US"));
     }
 
-    [Fact]
-    public async Task GenerateAudioAsync_PreviewModelReassertsBothVoicesInEveryChunk()
+    [Theory]
+    [InlineData("gemini-2.5-flash-preview-tts")]
+    [InlineData("gemini-3.1-flash-tts-preview")]
+    public async Task GenerateAudioAsync_PreviewModelSendsWholeDialogueWithBothVoices(string model)
     {
         var handler = new PreviewAudioHandler();
-        var service = CreateService(handler, new AiModelSelection("text", "gemini-2.5-flash-preview-tts", null, null));
+        var service = CreateService(handler, new AiModelSelection("text", model, null, null));
         var lines = Enumerable.Range(0, 10)
             .Select(i => new DialogueLine(i % 2 == 0 ? "Speaker1" : "Speaker2", $"Line {i}"))
             .ToArray();
@@ -125,18 +127,28 @@ public class GeminiServicePromptTests
 
         var audio = await service.GenerateAudioAsync(dialogue, "en-US");
 
-        Assert.Equal(2, handler.Requests.Count);
-        Assert.True(audio.DurationMs >= 400);
-        foreach (var request in handler.Requests)
+        Assert.Single(handler.Requests);
+        Assert.True(audio.DurationMs >= 200);
+        using var document = JsonDocument.Parse(handler.Requests[0]);
+        var config = document.RootElement.GetProperty("generationConfig")
+            .GetProperty("speechConfig").GetProperty("multiSpeakerVoiceConfig")
+            .GetProperty("speakerVoiceConfigs");
+        Assert.Equal("Kore", config[0].GetProperty("voiceConfig").GetProperty("prebuiltVoiceConfig").GetProperty("voiceName").GetString());
+        Assert.Equal("Puck", config[1].GetProperty("voiceConfig").GetProperty("prebuiltVoiceConfig").GetProperty("voiceName").GetString());
+        var transcript = document.RootElement.GetProperty("contents")[0]
+            .GetProperty("parts")[0].GetProperty("text").GetString()!;
+        Assert.Contains("Speaker1: Line 0", transcript);
+        Assert.Contains("Speaker2: Line 9", transcript);
+        if (model == "gemini-2.5-flash-preview-tts")
         {
-            using var document = JsonDocument.Parse(request);
-            var config = document.RootElement.GetProperty("generationConfig")
-                .GetProperty("speechConfig").GetProperty("multiSpeakerVoiceConfig")
-                .GetProperty("speakerVoiceConfigs");
-            Assert.Equal("Kore", config[0].GetProperty("voiceConfig").GetProperty("prebuiltVoiceConfig").GetProperty("voiceName").GetString());
-            Assert.Equal("Puck", config[1].GetProperty("voiceConfig").GetProperty("prebuiltVoiceConfig").GetProperty("voiceName").GetString());
-            Assert.Contains("Speaker1 has a female voice and Speaker2 has a male voice", document.RootElement
-                .GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString());
+            Assert.Contains("Speaker1 is female; Speaker2 is male", transcript);
+            Assert.Contains("throughout the entire recording", transcript);
+            Assert.Contains("do not say the speaker labels", transcript);
+        }
+        else
+        {
+            Assert.Contains("Speaker1 has a female voice and Speaker2 has a male voice", transcript);
+            Assert.DoesNotContain("throughout the entire recording", transcript);
         }
     }
 
