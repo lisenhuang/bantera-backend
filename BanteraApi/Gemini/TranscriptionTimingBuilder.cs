@@ -12,6 +12,8 @@ public static class TranscriptionTimingBuilder
     private const int MinEstimatedWordMs = 80;
     private const int MaxEstimatedWordMs = 250;
     private const int DefaultEstimatedWordMs = 120;
+    private const string CuePunctuation = ",.!?;:，。！？；：、";
+    private const string ClosingQuotes = "\"'”’」』）】";
 
     public static AiAudioTimingResult? Build(IReadOnlyList<TranscribedWord> words, int durationMs)
         => Build(words, durationMs, out _);
@@ -67,9 +69,20 @@ public static class TranscriptionTimingBuilder
             previousStart = word.StartMs;
         }
 
+        var cueWords = new List<TranscribedWord>(normalizedWords.Length);
+        var repairedCueWords = new HashSet<TranscribedWord>(ReferenceEqualityComparer.Instance);
+        foreach (var word in normalizedWords)
+        {
+            foreach (var fragment in SplitAtCjkPunctuation(word))
+            {
+                cueWords.Add(fragment);
+                if (repaired.Contains(word)) repairedCueWords.Add(fragment);
+            }
+        }
+
         var groups = new List<List<TranscribedWord>>();
         var current = new List<TranscribedWord>();
-        foreach (var word in normalizedWords)
+        foreach (var word in cueWords)
         {
             if (current.Count > 0 && ShouldSplit(current, word))
             {
@@ -108,7 +121,7 @@ public static class TranscriptionTimingBuilder
                     used += Math.Max(1, piece.Key.Length);
                     var end = word.StartMs + (int)Math.Round((double)(word.EndMs - word.StartMs) * used / total);
                     tokens.Add(new TimedToken(line, piece.Text, start, Math.Max(start + 1, end),
-                        repaired.Contains(word) ? TokenTimingStatus.Estimated : TokenTimingStatus.Exact, globalWord));
+                        repairedCueWords.Contains(word) ? TokenTimingStatus.Estimated : TokenTimingStatus.Exact, globalWord));
                 }
             }
         }
@@ -126,14 +139,83 @@ public static class TranscriptionTimingBuilder
 
     private static bool ShouldSplit(IReadOnlyList<TranscribedWord> current, TranscribedWord next)
     {
+        // Keep standalone punctuation with a spoken word, even if its timestamp or
+        // speaker tag differs from the preceding word.
+        if (WordTimingAligner.Tokenize([next.Text]).Count == 0
+            || !current.Any(w => WordTimingAligner.Tokenize([w.Text]).Count > 0))
+            return false;
         var last = current[^1];
-        if (current.Count >= MaxWordsPerCue || next.StartMs - last.EndMs >= PauseBoundaryMs)
+        if (next.StartMs - last.EndMs >= PauseBoundaryMs)
             return true;
         if (!string.IsNullOrWhiteSpace(last.Speaker) && !string.IsNullOrWhiteSpace(next.Speaker)
             && last.Speaker != next.Speaker)
             return true;
         var text = last.Text.TrimEnd();
-        return current.Count >= 5 && text.Length > 0 && ".?!。？！".Contains(text[^1]);
+        var cjk = current.Any(w => ContainsCjkScript(w.Text)) || ContainsCjkScript(next.Text);
+        if (cjk)
+            return EndsAtCuePunctuation(text);
+        return current.Count >= MaxWordsPerCue
+            || current.Count >= 5 && text.Length > 0 && ".?!。？！".Contains(text[^1]);
+    }
+
+    private static bool ContainsCjkScript(string text) => text.EnumerateRunes().Any(r =>
+        WordTimingAligner.IsCjk(r) || r.Value is >= 0x1100 and <= 0x11FF
+            or >= 0x3130 and <= 0x318F or >= 0xA960 and <= 0xA97F
+            or >= 0xAC00 and <= 0xD7AF or >= 0xD7B0 and <= 0xD7FF);
+
+    private static bool EndsAtCuePunctuation(string text)
+    {
+        for (var i = text.Length - 1; i >= 0; i--)
+        {
+            if (ClosingQuotes.Contains(text[i])) continue;
+            return CuePunctuation.Contains(text[i]);
+        }
+        return false;
+    }
+
+    private static IReadOnlyList<TranscribedWord> SplitAtCjkPunctuation(TranscribedWord word)
+    {
+        var text = word.Text;
+        if (!ContainsCjkScript(text)) return [word];
+
+        var segments = new List<string>();
+        var start = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (!CuePunctuation.Contains(text[i])
+                || i > 0 && i + 1 < text.Length && char.IsDigit(text[i - 1]) && char.IsDigit(text[i + 1]))
+                continue;
+            var end = i + 1;
+            while (end < text.Length && (ClosingQuotes.Contains(text[end]) || CuePunctuation.Contains(text[end]))) end++;
+            if (end < text.Length && WordTimingAligner.Tokenize([text[start..end]]).Count > 0
+                && WordTimingAligner.Tokenize([text[end..]]).Count > 0)
+            {
+                segments.Add(text[start..end]);
+                start = end;
+            }
+            i = end - 1;
+        }
+        if (segments.Count == 0) return [word];
+        segments.Add(text[start..]);
+
+        var duration = word.EndMs - word.StartMs;
+        if (duration < segments.Count) return [word];
+        var weights = segments.Select(segment => Math.Max(1,
+            WordTimingAligner.Tokenize([segment]).Sum(token => Math.Max(1, token.Key.Length)))).ToArray();
+        var total = weights.Sum();
+        var used = 0;
+        var cursorMs = word.StartMs;
+        var fragments = new List<TranscribedWord>(segments.Count);
+        for (var i = 0; i < segments.Count; i++)
+        {
+            used += weights[i];
+            var targetEnd = word.StartMs + (int)Math.Round((double)duration * used / total);
+            var fragmentEnd = i == segments.Count - 1 ? word.EndMs
+                : Math.Clamp(targetEnd, cursorMs + 1, word.EndMs - (segments.Count - i - 1));
+            fragments.Add(word with { Text = segments[i], StartMs = cursorMs, EndMs = fragmentEnd });
+            cursorMs = fragmentEnd;
+        }
+        return fragments;
     }
 
     private static string JoinWords(IReadOnlyList<TranscribedWord> words)

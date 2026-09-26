@@ -99,4 +99,56 @@ public class TranscriptionTimingBuilderTests
         Assert.Equal(["Speaker1", "Speaker2"], result.DisplayLines.Select(l => l.Speaker));
         Assert.Equal(["Hi", "Hello"], result.WordTiming.Select(w => w.Word));
     }
+
+    [Fact]
+    public void ChineseCuesWaitForCommaInsteadOfCuttingAfterEighteenCharacters()
+    {
+        const string first = "我们今天下午准备先去市中心的图书馆看书，";
+        const string second = "然后再去吃晚饭。";
+        var words = (first + second).Select((ch, i) => new TranscribedWord(ch.ToString(), i * 100, (i + 1) * 100)).ToArray();
+
+        var result = TranscriptionTimingBuilder.Build(words, words.Length * 100 + 200);
+
+        Assert.True(first.Length > 18);
+        Assert.NotNull(result);
+        Assert.Equal([first, second], result.Cues.Select(c => c.Text));
+        Assert.Equal(result.Cues.Select(c => c.Text), result.DisplayLines.Select(line => line.Text));
+    }
+
+    [Fact]
+    public void JapaneseAndKoreanCuesAlsoSplitAtPunctuation()
+    {
+        var japanese = "今日は図書館で本を読んで、それから食事に行きます。";
+        var japaneseWords = japanese.Select((ch, i) => new TranscribedWord(ch.ToString(), i * 100, (i + 1) * 100)).ToArray();
+        var japaneseResult = TranscriptionTimingBuilder.Build(japaneseWords, japaneseWords.Length * 100 + 200);
+        var koreanResult = TranscriptionTimingBuilder.Build(
+            [new("오늘은", 0, 300), new("도서관에", 300, 700), new("갑니다,", 700, 1100),
+             new("그다음", 1100, 1500), new("밥을", 1500, 1800), new("먹어요.", 1800, 2200)], 2400);
+
+        Assert.NotNull(japaneseResult);
+        Assert.Equal(["今日は図書館で本を読んで、", "それから食事に行きます。"], japaneseResult.Cues.Select(c => c.Text));
+        Assert.NotNull(koreanResult);
+        Assert.Equal(["오늘은 도서관에 갑니다,", "그다음 밥을 먹어요."], koreanResult.Cues.Select(c => c.Text));
+    }
+
+    [Fact]
+    public void SplitsPunctuationInsideOneTranscribedChineseWord()
+    {
+        var result = TranscriptionTimingBuilder.Build([new("你好，世界。再见", 100, 900)], 1000);
+
+        Assert.NotNull(result);
+        Assert.Equal(["你好，", "世界。", "再见"], result.Cues.Select(c => c.Text));
+        Assert.Equal("你好，世界。再见", string.Concat(result.Cues.Select(c => c.Text)));
+        Assert.All(result.WordTiming, word => Assert.True(word.EndMs > word.StartMs));
+    }
+
+    [Fact]
+    public void KeepsStandalonePunctuationWithItsChineseCueDespiteTimestampGap()
+    {
+        var result = TranscriptionTimingBuilder.Build(
+            [new("你好", 100, 300, "A"), new("，", 1200, 1200, "B"), new("世界。", 1300, 1600, "A")], 1800);
+
+        Assert.NotNull(result);
+        Assert.Equal(["你好，", "世界。"], result.Cues.Select(c => c.Text));
+    }
 }
