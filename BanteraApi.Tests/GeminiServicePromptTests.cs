@@ -123,7 +123,7 @@ public class GeminiServicePromptTests
     }
 
     [Fact]
-    public async Task GenerateDialogueAsync_DoesNotFallbackOnTopicRejection()
+    public async Task GenerateDialogueAsync_RetriesTopicRejectionWithoutChangingModel()
     {
         var handler = new FallbackHandler(audio: false, rejectPrimary: true);
         var service = CreateService(handler, new AiModelSelection("primary-text", "primary-tts", "backup-text", null));
@@ -131,7 +131,20 @@ public class GeminiServicePromptTests
         await Assert.ThrowsAsync<ContentRejectedException>(() =>
             service.GenerateDialogueAsync("English", "en-US", "a rejected topic", 60));
 
-        Assert.Equal(["primary-text"], handler.Models);
+        Assert.Equal(["primary-text", "primary-text", "primary-text"], handler.Models);
+    }
+
+    [Fact]
+    public async Task GenerateDialogueAsync_RecoversFromOneTopicRejection()
+    {
+        var handler = new RejectionOnceHandler();
+        var service = CreateService(handler);
+
+        var dialogue = await service.GenerateDialogueAsync("English", "en-US", "ordering coffee", 60);
+
+        Assert.NotEmpty(dialogue.Lines);
+        Assert.Equal(2, handler.RequestCount);
+        Assert.Contains("Reconsider whether a neutral everyday interpretation", handler.LastPrompt);
     }
 
     [Fact]
@@ -274,6 +287,27 @@ public class GeminiServicePromptTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            });
+        }
+    }
+
+    private sealed class RejectionOnceHandler : HttpMessageHandler
+    {
+        public int RequestCount { get; private set; }
+        public string LastPrompt { get; private set; } = "";
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            using var body = JsonDocument.Parse(request.Content!.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult());
+            LastPrompt = body.RootElement.GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
+            var text = RequestCount == 1
+                ? "{\"rejected\":true,\"reason\":\"other\"}"
+                : "{\"title\":\"Coffee\",\"speaker1_gender\":\"female\",\"speaker2_gender\":\"male\",\"lines\":[{\"speaker\":\"Speaker1\",\"text\":\"Hello\",\"shortCues\":[\"Hello\"]}]}";
+            var response = JsonSerializer.Serialize(new { candidates = new[] { new { content = new { parts = new[] { new { text } } } } } });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(response, Encoding.UTF8, "application/json"),
             });
         }
     }

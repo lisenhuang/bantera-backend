@@ -1448,9 +1448,16 @@ app.MapPost("/api/me/audio/generate", async (
         await httpContext.Response.Body.FlushAsync(cancellationToken);
     }
 
-    using var v1PipelineContext = pipelineEvents.BeginContext(userId.Value, null, req.LanguageCode, "generate/v1");
+    UserAudioJob? v1Job = null;
+    IDisposable? v1PipelineContext = null;
     try
     {
+        v1Job = new UserAudioJob { UserId = userId.Value, LanguageCode = req.LanguageCode, ScenarioId = req.ScenarioId };
+        db.UserAudioJobs.Add(v1Job);
+        await db.SaveChangesAsync(cancellationToken);
+        v1PipelineContext = pipelineEvents.BeginContext(userId.Value, v1Job.Id, req.LanguageCode, "generate/v1");
+        await pipelineEvents.RecordAsync("info", "generation", "generation_started", "Generation started.",
+            new { req.ScenarioId, scenarioPreview = req.Scenario.Length > 240 ? req.Scenario[..240] : req.Scenario, req.DurationSeconds, useWebSearch = false });
         var dialogue = await geminiService.GenerateDialogueAsync(
             req.Language,
             req.LanguageCode,
@@ -1466,17 +1473,50 @@ app.MapPost("/api/me/audio/generate", async (
         var audio = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
         var timing = await aiAudioTimingService.TryBuildAsync(dialogue.Lines, audio, req.LanguageCode, buildShortCues: false, cancellationToken);
         var cues = timing?.Cues ?? geminiService.EstimateCues(dialogue.Lines, audio.DurationMs);
+        await pipelineEvents.RecordAsync("info", "save", "save_started", "Saving generated audio.");
         var videoResponse = await videoService.SaveAiAudioAsync(userId.Value, dialogue.Title, audio, req.Language, req.LanguageCode, cues, isTranscriptionEstimated: timing is null, httpContext, cancellationToken);
+        await pipelineEvents.RecordAsync("info", "save", "save_succeeded", "Generated audio was saved.", new { videoId = videoResponse.Id });
+        v1Job.Status = "done";
+        v1Job.VideoId = videoResponse.Id;
+        v1Job.CompletedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        await pipelineEvents.RecordAsync("info", "generation", "generation_completed", "Generation completed.",
+            new { videoId = videoResponse.Id, audio.DurationMs, timingMode = timing?.Mode ?? "estimated" });
         await SendAsync(new { step = "done", video = videoResponse });
     }
     catch (ContentRejectedException ex)
     {
         await pipelineEvents.RecordAsync("info", "dialogue", "content_rejected", ex.Message);
+        if (v1Job is not null)
+        {
+            v1Job.Status = "failed";
+            v1Job.ErrorMessage = ex.Message;
+            v1Job.CompletedAt = DateTime.UtcNow;
+            try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
+        }
         await SendAsync(new { step = "error", message = ex.Message });
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+        await pipelineEvents.RecordAsync("warning", "generation", "generation_canceled", "The generation request was canceled.");
+        if (v1Job is { Status: "processing" })
+        {
+            v1Job.Status = "failed";
+            v1Job.ErrorMessage = "Generation was canceled.";
+            v1Job.CompletedAt = DateTime.UtcNow;
+            try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
+        }
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {
         await pipelineEvents.RecordAsync("error", "generation", "generation_failed", ex.Message, new { exception = ex.GetType().Name });
+        if (v1Job is { Status: "processing" })
+        {
+            v1Job.Status = "failed";
+            v1Job.ErrorMessage = generationFailedMessage;
+            v1Job.CompletedAt = DateTime.UtcNow;
+            try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
+        }
         app.Logger.LogError(
             ex,
             "Practice audio generation failed for user {UserId}, locale {LanguageCode}, scenarioId {ScenarioId}",
@@ -1484,6 +1524,10 @@ app.MapPost("/api/me/audio/generate", async (
             req.LanguageCode,
             req.ScenarioId);
         await SendAsync(new { step = "error", message = generationFailedMessage });
+    }
+    finally
+    {
+        v1PipelineContext?.Dispose();
     }
 })
 .WithName("GenerateAiAudio")
@@ -1587,6 +1631,8 @@ app.MapPost("/api/me/audio/generate/v2", async (
         db.UserAudioJobs.Add(job);
         await db.SaveChangesAsync(genToken);
         v2PipelineContext = pipelineEvents.BeginContext(userId.Value, job.Id, req.LanguageCode, "generate/v2");
+        await pipelineEvents.RecordAsync("info", "generation", "generation_started", "Generation started.",
+            new { req.ScenarioId, scenarioPreview = req.Scenario.Length > 240 ? req.Scenario[..240] : req.Scenario, req.DurationSeconds, req.UseWebSearch });
         await SendSafe(new { step = "started", jobId = job.Id });
 
         var dialogue = await geminiService.GenerateDialogueAsync(
@@ -1975,6 +2021,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             shortCueNullReason ??= "NoWordTimingForShortCueAlignment";
 
         lastStep = "saving";
+        await pipelineEvents.RecordAsync("info", "save", "save_started", "Saving generated audio.");
         var videoResponse = await videoService.SaveAiAudioV2Async(
             userId.Value,
             dialogue.Title,
@@ -1991,6 +2038,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             durationMs,
             httpContext,
             genToken);
+        await pipelineEvents.RecordAsync("info", "save", "save_succeeded", "Generated audio was saved.", new { videoId = videoResponse.Id });
         if (videoResponse.TranscriptShortCues is null)
         {
             await diagnosticFileWriter.WriteShortCueNullAsync(new
@@ -2086,6 +2134,8 @@ app.MapPost("/api/me/audio/generate/v2", async (
             job.CompletedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(genToken);
         }
+        await pipelineEvents.RecordAsync("info", "generation", "generation_completed", "Generation completed.",
+            new { videoId = videoResponse.Id, audio.DurationMs, timingMode = longAlignmentMode });
         await SendSafe(new { step = "done", video = videoResponse });
         lastStep = "done";
     }
@@ -2232,6 +2282,8 @@ app.MapPost("/api/me/audio/generate/v3",
             db.UserAudioJobs.Add(v3Job);
             await db.SaveChangesAsync(genToken);
             v3PipelineContext = pipelineEvents.BeginContext(userId.Value, v3Job.Id, req.LanguageCode, "generate/v3");
+            await pipelineEvents.RecordAsync("info", "generation", "generation_started", "Generation started.",
+                new { req.ScenarioId, scenarioPreview = req.Scenario.Length > 240 ? req.Scenario[..240] : req.Scenario, req.DurationSeconds, req.UseWebSearch });
             await SendSafeV3(new { step = "started", jobId = v3Job.Id });
 
             var v3Dialogue = await geminiService.GenerateDialogueAsync(
@@ -2243,7 +2295,9 @@ app.MapPost("/api/me/audio/generate/v3",
             var v3Audio = await geminiService.GenerateAudioAsync(v3Dialogue, req.LanguageCode, genToken);
             var v3DurMs = v3Audio.DurationMs;
             var v3ObjKey = $"videos/{userId.Value}/{Guid.NewGuid():N}{v3Audio.FileExtension}";
+            await pipelineEvents.RecordAsync("info", "upload", "upload_started", "Uploading generated audio.", new { bytes = v3Audio.Bytes.LongLength });
             await r2StorageService.UploadObjectAsync(v3ObjKey, new MemoryStream(v3Audio.Bytes), v3Audio.ContentType, genToken);
+            await pipelineEvents.RecordAsync("info", "upload", "upload_succeeded", "Generated audio was uploaded.");
             await SendSafeV3(new { step = "audio" });
             await SendSafeV3(new { step = "aligning" });
 
@@ -2288,12 +2342,14 @@ app.MapPost("/api/me/audio/generate/v3",
                     new { mode = v3Cues is null ? "estimatedFallback" : "revAi", hasWordTiming = v3WordTiming is not null });
             }
             var v3FinalCues = v3Cues ?? geminiService.EstimateCues(v3Dialogue.Lines, v3DurMs);
+            await pipelineEvents.RecordAsync("info", "save", "save_started", "Saving generated audio.");
             var v3Video = await videoService.SaveAiAudioV2Async(
                 userId.Value, v3Dialogue.Title, v3ObjKey, v3Audio.Bytes.LongLength,
                 v3Audio.ContentType, v3Audio.FileExtension,
                 req.Language, req.LanguageCode,
                 v3Timing?.DisplayLines ?? v3Dialogue.Lines, v3WordTiming, v3FinalCues, v3ShortCues,
                 v3DurMs, httpContext, genToken);
+            await pipelineEvents.RecordAsync("info", "save", "save_succeeded", "Generated audio was saved.", new { videoId = v3Video.Id });
 
             if (v3Job is not null)
             {
@@ -2302,6 +2358,8 @@ app.MapPost("/api/me/audio/generate/v3",
                 v3Job.CompletedAt = DateTime.UtcNow;
                 try { await db.SaveChangesAsync(CancellationToken.None); } catch { }
             }
+            await pipelineEvents.RecordAsync("info", "generation", "generation_completed", "Generation completed.",
+                new { videoId = v3Video.Id, durationMs = v3DurMs, timingMode = v3Timing?.Mode ?? "fallback" });
             await SendSafeV3(new { step = "done", video = v3Video });
         }
         catch (ContentRejectedException ex)
@@ -2879,6 +2937,7 @@ startupLogger.LogInformation("[Startup] All checks passed — starting server.")
 AdminEndpoints.Map(app);
 AiSettingsEndpoints.Map(app);
 AiPipelineEndpoints.Map(app);
+AdminPipelineRunEndpoints.Map(app);
 McpOAuthEndpoints.Map(app);
 McpEndpoints.Map(app);
 

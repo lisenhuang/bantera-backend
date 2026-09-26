@@ -338,7 +338,7 @@ Search from the internet to follow this instruction: {{searchInstruction}}
 - If fewer suitable real recent stories are found, go ahead and generate the dialogue using every suitable story found.
 - One suitable real recent story is enough to proceed, from either requested region when native and learning-language regions differ.
 - Do not invent, pad, or fabricate missing stories to satisfy the requested count or regional mix.
-- If you cannot find any suitable real recent story, refuse by returning ONLY this exact JSON (no markdown, no other text): {"rejected":true}
+- If you cannot find any suitable real recent story, refuse by returning ONLY this exact JSON (no markdown, no other text): {"rejected":true,"reason":"no_suitable_news"}
 - Prefer safe, public-interest topics suitable for conversational language practice, such as culture, science, technology, travel, sports, weather, business, education, infrastructure, or community events.
 - Avoid politics, government, elections, diplomacy, war, crime, disasters, deaths, injuries, or graphic/distressing events.
 - Exclude any story that centers on Chinese politics, the Chinese government or ruling party, or any current or former Chinese government or party leader by name or title, even if the news is from another country.
@@ -358,7 +358,7 @@ CONTENT POLICY (follow strictly):
 - Do NOT mention the names or titles of any current or former Chinese government leaders or Chinese Communist Party leaders anywhere in accepted output, even incidentally.
 - Do NOT generate content about any country's government, political leaders, elections, or politically sensitive current events when those would dominate the scene.
 - If the user's scenario OR any honest interpretation of it would require violating the above, you MUST refuse by returning ONLY this exact JSON (no markdown, no other text):
-{"rejected":true}
+{"rejected":true,"reason":"restricted_topic"}
 - If you accept the scenario, the title and every line must stay fully clear of those topics.
 
 {{accentInstruction}}
@@ -371,7 +371,7 @@ Use enough turns to fit the requested duration without padding or rushing the co
 
 Generate a natural, realistic spoken dialogue between exactly TWO people.
 - One character must be male and the other female. Either speaker may have either gender, but keep each character's name, pronouns, and dialogue consistent with that gender throughout.
-- If the scenario explicitly requires two characters of the same gender, refuse by returning ONLY {"rejected":true} rather than changing their genders.
+- If the scenario explicitly requires two characters of the same gender, refuse by returning ONLY {"rejected":true,"reason":"same_gender_required"} rather than changing their genders.
 - In the JSON structure below, strictly use "Speaker1" and "Speaker2" as the labels for the speakers.
 - Inside the actual dialogue text (the "text" fields), give the characters realistic names natural to the target language and locale.
 - Characters should address each other by these real names, NEVER as "Speaker 1" or "Speaker 2".
@@ -421,89 +421,116 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             var client = httpClientFactory.CreateClient("gemini");
             var url = $"/v1beta/models/{selectedModel}:generateContent?key={key}";
             RawDialogue? parsed = null;
+            const int maxContentAttempts = 3;
+            var contentRejections = 0;
 
-            for (var genderAttempt = 0; genderAttempt < 2; genderAttempt++)
+            for (var contentAttempt = 1; contentAttempt <= maxContentAttempts && parsed is null; contentAttempt++)
             {
-                var requestPrompt = genderAttempt == 0
-                    ? prompt
-                    : $"{prompt}\n\nYour previous response did not assign one male and one female speaker. Regenerate the entire dialogue with opposite speaker genders, or return the rejection JSON if the scenario requires two people of the same gender.";
-                object body = useGoogleSearch
-                    ? new
+                var rejected = false;
+                for (var genderAttempt = 0; genderAttempt < 2; genderAttempt++)
+                {
+                    var retryInstruction = contentAttempt == 1 ? "" :
+                        "\n\nYour previous answer rejected this request. Reconsider whether a neutral everyday interpretation satisfies every rule above. If it does, write that dialogue. If it cannot, return the rejection JSON again. Never include a restricted topic to avoid rejection.";
+                    var requestPrompt = genderAttempt == 0
+                        ? prompt + retryInstruction
+                        : $"{prompt}{retryInstruction}\n\nYour previous response did not assign one male and one female speaker. Regenerate the entire dialogue with opposite speaker genders, or return the rejection JSON if the scenario requires two people of the same gender.";
+                    object body = useGoogleSearch
+                        ? new
+                        {
+                            contents = new[] { new { parts = new[] { new { text = requestPrompt } } } },
+                            tools = new[] { new { google_search = new { } } }
+                        }
+                        : new
+                        {
+                            contents = new[] { new { parts = new[] { new { text = requestPrompt } } } }
+                        };
+
+                    using var response = await client.PostAsync(
+                        url,
+                        new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
+                        cancellationToken);
+
+                    var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                    if (!response.IsSuccessStatusCode)
                     {
-                        contents = new[] { new { parts = new[] { new { text = requestPrompt } } } },
-                        tools = new[] { new { google_search = new { } } }
+                        throw new HttpRequestException(
+                            $"Gemini generateContent failed with status {(int)response.StatusCode} for model '{selectedModel}'. Body: {TruncateForLog(json)}",
+                            null,
+                            response.StatusCode);
                     }
-                    : new
+
+                    var root = JsonDocument.Parse(json).RootElement;
+                    var raw = root
+                        .GetProperty("candidates")[0]
+                        .GetProperty("content")
+                        .GetProperty("parts")[0]
+                        .GetProperty("text")
+                        .GetString() ?? "";
+
+                    var cleaned = raw
+                        .Replace("```json", "").Replace("```", "")
+                        .Trim();
+
+                    // A refusal is a content result, not a bad key or model. Reconsider it
+                    // a limited number of times with the same key and model.
+                    if (cleaned.Contains("\"rejected\"", StringComparison.OrdinalIgnoreCase))
                     {
-                        contents = new[] { new { parts = new[] { new { text = requestPrompt } } } }
-                    };
+                        try
+                        {
+                            using var rejDoc = JsonDocument.Parse(cleaned);
+                            if (rejDoc.RootElement.TryGetProperty("rejected", out var rVal) && rVal.ValueKind == JsonValueKind.True)
+                            {
+                                var reason = rejDoc.RootElement.TryGetProperty("reason", out var reasonValue) && reasonValue.ValueKind == JsonValueKind.String
+                                    ? TruncateForLog(reasonValue.GetString(), 120) : "unspecified";
+                                contentRejections++;
+                                await events.RecordAsync(AiPipelineSeverity.Warning, "dialogue", "content_rejected_attempt",
+                                    contentAttempt < maxContentAttempts
+                                        ? "The text model rejected the scenario; retrying the content."
+                                        : "The text model rejected the scenario on the final content attempt.",
+                                    new { contentAttempt, maxContentAttempts, reason, scenarioId, scenarioPreview = TruncateForLog(scenario, 240), useGoogleSearch },
+                                    selectedModel, MaskKey(key));
+                                rejected = true;
+                                break;
+                            }
+                        }
+                        catch (JsonException) { /* not a rejection payload, continue normal parsing */ }
+                    }
 
-                using var response = await client.PostAsync(
-                    url,
-                    new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
-                    cancellationToken);
-
-                var json = await response.Content.ReadAsStringAsync(cancellationToken);
-                if (!response.IsSuccessStatusCode)
-                {
-                    throw new HttpRequestException(
-                        $"Gemini generateContent failed with status {(int)response.StatusCode} for model '{selectedModel}'. Body: {TruncateForLog(json)}",
-                        null,
-                        response.StatusCode);
-                }
-
-                var root = JsonDocument.Parse(json).RootElement;
-                var raw = root
-                    .GetProperty("candidates")[0]
-                    .GetProperty("content")
-                    .GetProperty("parts")[0]
-                    .GetProperty("text")
-                    .GetString() ?? "";
-
-                var cleaned = raw
-                    .Replace("```json", "").Replace("```", "")
-                    .Trim();
-
-                // Check if Gemini refused the scenario.
-                if (cleaned.Contains("\"rejected\"", StringComparison.OrdinalIgnoreCase))
-                {
+                    RawDialogue? attemptParsed;
                     try
                     {
-                        using var rejDoc = JsonDocument.Parse(cleaned);
-                        if (rejDoc.RootElement.TryGetProperty("rejected", out var rVal) && rVal.GetBoolean())
-                            throw new ContentRejectedException("This topic cannot be used for generation. Please choose a different scenario.");
+                        attemptParsed = JsonSerializer.Deserialize<RawDialogue>(cleaned, JsonOpts);
                     }
-                    catch (ContentRejectedException) { throw; }
-                    catch { /* not a rejection payload, continue normal parsing */ }
-                }
+                    catch
+                    {
+                        var start = cleaned.IndexOf('{');
+                        var end = cleaned.LastIndexOf('}');
+                        if (start < 0 || end < 0) throw new InvalidOperationException("Could not parse dialogue JSON from Gemini response.");
+                        attemptParsed = JsonSerializer.Deserialize<RawDialogue>(cleaned[start..(end + 1)], JsonOpts);
+                    }
 
-                RawDialogue? attemptParsed;
-                try
-                {
-                    attemptParsed = JsonSerializer.Deserialize<RawDialogue>(cleaned, JsonOpts);
-                }
-                catch
-                {
-                    var start = cleaned.IndexOf('{');
-                    var end = cleaned.LastIndexOf('}');
-                    if (start < 0 || end < 0) throw new InvalidOperationException("Could not parse dialogue JSON from Gemini response.");
-                    attemptParsed = JsonSerializer.Deserialize<RawDialogue>(cleaned[start..(end + 1)], JsonOpts);
-                }
+                    if (attemptParsed is null) throw new InvalidOperationException("Gemini returned null dialogue.");
 
-                if (attemptParsed is null) throw new InvalidOperationException("Gemini returned null dialogue.");
-
-                var firstGender = attemptParsed.Speaker1Gender?.Trim().ToLowerInvariant();
-                var secondGender = attemptParsed.Speaker2Gender?.Trim().ToLowerInvariant();
-                if (firstGender is ("male" or "female") &&
-                    secondGender is ("male" or "female") && firstGender != secondGender)
-                {
-                    parsed = attemptParsed;
-                    break;
+                    var firstGender = attemptParsed.Speaker1Gender?.Trim().ToLowerInvariant();
+                    var secondGender = attemptParsed.Speaker2Gender?.Trim().ToLowerInvariant();
+                    if (firstGender is ("male" or "female") &&
+                        secondGender is ("male" or "female") && firstGender != secondGender)
+                    {
+                        parsed = attemptParsed;
+                        break;
+                    }
                 }
+                if (!rejected && parsed is null)
+                    throw new InvalidOperationException("Gemini did not generate one male and one female dialogue speaker.");
             }
 
             if (parsed is null)
-                throw new InvalidOperationException("Gemini did not generate one male and one female dialogue speaker.");
+                throw new ContentRejectedException("This topic cannot be used for generation. Please choose a different scenario.");
+
+            if (contentRejections > 0)
+                await events.RecordAsync(AiPipelineSeverity.Info, "dialogue", "content_rejection_recovered",
+                    "Dialogue generation succeeded after a content rejection.",
+                    new { rejectedAttempts = contentRejections, scenarioId }, selectedModel, MaskKey(key));
 
             var gender1 = parsed.Speaker1Gender!.Trim().ToLowerInvariant();
             var gender2 = parsed.Speaker2Gender!.Trim().ToLowerInvariant();
@@ -1475,9 +1502,17 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
         {
             cancellationToken.ThrowIfCancellationRequested();
             var key = keys[attempt];
+            var keyHint = MaskKey(key);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                return await fn(key);
+                await events.RecordAsync(AiPipelineSeverity.Info, stage, "model_attempt_started",
+                    "A model attempt started.", new { attempt = attempt + 1, total = keys.Length }, model, keyHint);
+                var result = await fn(key);
+                await events.RecordAsync(AiPipelineSeverity.Info, stage, "model_attempt_succeeded",
+                    "A model attempt succeeded.", new { attempt = attempt + 1, total = keys.Length },
+                    model, keyHint, (int)Math.Min(clock.ElapsedMilliseconds, int.MaxValue));
+                return result;
             }
             catch (ContentRejectedException)
             {
@@ -1487,7 +1522,6 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
             {
                 // Includes HttpClient timeouts (TaskCanceledException without our token cancelled).
                 lastEx = ex;
-                var keyHint = MaskKey(key);
                 var failureKind = GeminiKeyHealthService.Classify(ex);
                 logger.LogWarning(
                     "Gemini {Operation} failed with key {Key} (attempt {Attempt}/{Total}); trying the next key. {Error}",
