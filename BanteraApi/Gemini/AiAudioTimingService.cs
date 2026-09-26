@@ -54,20 +54,26 @@ public sealed class AiAudioTimingService(
             if (!await alignmentSettings.GetAsync(cancellationToken))
             {
                 var (words, _) = await TranscribeAsync(audio, languageCode, "direct", cancellationToken);
-                var direct = TranscriptionTimingBuilder.Build(words, audio.DurationMs, out var timingIssue);
+                var direct = TranscriptionTimingBuilder.Build(words, audio.DurationMs, out var timingIssue, out var repairedWords);
                 if (direct is null)
                 {
                     await events.RecordAsync(
                         AiPipelineSeverity.Warning, "transcription", "transcription_timing_rejected",
                         $"Transcript timing was rejected: {timingIssue?.Code ?? "unknown"}.",
-                        new { issue = timingIssue, returnedWords = words.Count, audioDurationMs = audio.DurationMs },
+                        new { issue = timingIssue, returnedWords = words.Count, repairedWords, audioDurationMs = audio.DurationMs },
                         model: geminiOptions.Value.TranscribeModel);
                     return null;
                 }
+                if (repairedWords > 0)
+                    await events.RecordAsync(
+                        AiPipelineSeverity.Warning, "transcription", "transcription_timing_repaired",
+                        $"Estimated timing for {repairedWords} zero-length transcribed words.",
+                        new { repairedWords, returnedWords = words.Count, audioDurationMs = audio.DurationMs },
+                        model: geminiOptions.Value.TranscribeModel);
                 await events.RecordAsync(
                     AiPipelineSeverity.Info, "timing", "timing_completed",
                     $"Used {direct.WordTiming.Count} transcribed words without script alignment.",
-                    new { mode = direct.Mode, words = direct.WordTiming.Count });
+                    new { mode = direct.Mode, words = direct.WordTiming.Count, repairedWords });
                 return direct;
             }
 

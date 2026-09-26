@@ -39,13 +39,42 @@ public class TranscriptionTimingBuilderTests
     }
 
     [Fact]
-    public void RejectsMissingWordTimestamps()
+    public void RepairsZeroLengthChineseWordWithoutDiscardingOtherTiming()
     {
-        Assert.Null(TranscriptionTimingBuilder.Build([new("hello", 0, 0)], 1000));
+        TranscribedWord[] words = [new("你好", 100, 100), new("世界", 250, 650)];
+
+        var result = TranscriptionTimingBuilder.Build(words, 800, out var issue, out var repairedWords);
+
+        Assert.NotNull(result);
+        Assert.Null(issue);
+        Assert.Equal(1, repairedWords);
+        Assert.Equal(100, result.WordTiming[0].StartMs);
+        Assert.Equal(250, result.WordTiming[0].EndMs);
+        Assert.Equal(0.0, result.WordTiming[0].Confidence);
+        Assert.Equal(250, result.WordTiming[1].StartMs);
+        Assert.Equal(650, result.WordTiming[1].EndMs);
+        Assert.Equal(1.0, result.WordTiming[1].Confidence);
+        Assert.Equal(["你", "好"], result.WordTiming[0].Parts!.Select(p => p.Word));
+        Assert.Equal(["你", "好", "世", "界"], result.Cues.SelectMany(c => WordTimingAligner.Tokenize([c.Text])).Select(t => t.Text));
+        Assert.Equal(100, words[0].EndMs); // The provider response is left untouched.
+    }
+
+    [Fact]
+    public void KeepsDirectTimingWhenSeveralChineseWordsHaveZeroLength()
+    {
+        var result = TranscriptionTimingBuilder.Build(
+            [new("我", 100, 100), new("们", 100, 100), new("好", 200, 200), new("世界", 300, 600)],
+            800, out var issue, out var repairedWords);
+
+        Assert.NotNull(result);
+        Assert.Null(issue);
+        Assert.Equal(3, repairedWords);
+        Assert.Equal("我们好世界", result.Cues[0].Text);
+        Assert.All(result.WordTiming, word => Assert.True(word.EndMs > word.StartMs));
     }
 
     [Theory]
-    [InlineData(0, 0, 1000, "non_positive_word_duration")]
+    [InlineData(100, 50, 1000, "non_positive_word_duration")]
     [InlineData(100, 2200, 1000, "word_past_audio_end")]
     [InlineData(-1, 100, 1000, "negative_word_start")]
     public void ExplainsInvalidTranscriptionTiming(int start, int end, int duration, string code)
