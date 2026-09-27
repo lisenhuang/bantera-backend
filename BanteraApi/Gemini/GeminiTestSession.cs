@@ -108,6 +108,12 @@ public sealed class GeminiTestSession(string textModel, string audioModel, IRead
         public string? TransportError { get; set; }
     }
 
+    public async Task RecordVoiceSelectionAsync(object selection)
+    {
+        Calls.Add(new { stage = "voice_selection", at = DateTime.UtcNow, model = AudioModel, selection });
+        if (PersistAsync is not null) await PersistAsync();
+    }
+
     public string ToJson() => Sanitize(JsonSerializer.Serialize(Calls, JsonOptions));
 
     public string ErrorJson(Exception error, string stage) => Sanitize(JsonSerializer.Serialize(new

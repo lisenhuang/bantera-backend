@@ -230,6 +230,27 @@ public class GeminiServicePromptTests
         Assert.Contains(model, session.ToJson());
     }
 
+    [Theory]
+    [InlineData("gemini-3.8-flash-tts")]
+    [InlineData("gemini-3.8-flash-lite-tts")]
+    public async Task GenerateAudioAsync_UsesRegionalVoiceIdsAndRecordsTheirAccents(string model)
+    {
+        var handler = new PreviewAudioHandler(regional: true);
+        var service = CreateService(handler, new("text", model, null, null));
+        var session = new GeminiTestSession("text", model, ["test-key"]);
+        var dialogue = new GeneratedDialogue("Chat", "Kore", "Puck",
+            [new("Speaker1", "Hello."), new("Speaker2", "Hi.")], []);
+        await service.GenerateAudioAsync(dialogue, "en-AU", testSession: session);
+        using var body = JsonDocument.Parse(Assert.Single(handler.Requests));
+        var voices = body.RootElement.GetProperty("generationConfig").GetProperty("speechConfig")
+            .GetProperty("multiSpeakerVoiceConfig").GetProperty("speakerVoiceConfigs");
+        Assert.Equal("au-female", voices[0].GetProperty("voiceConfig").GetProperty("voice").GetString());
+        Assert.Equal("au-male", voices[1].GetProperty("voiceConfig").GetProperty("voice").GetString());
+        Assert.DoesNotContain("prebuiltVoiceConfig", handler.Requests[0]);
+        Assert.Contains("Australian", session.ToJson());
+        Assert.Contains("voice_selection", session.ToJson());
+    }
+
     [Fact]
     public async Task GenerateDialogueAsync_UsesFallbackTextModelAfterPrimaryFails()
     {
@@ -399,6 +420,7 @@ public class GeminiServicePromptTests
             settings,
             modelSettings,
             keyHealth,
+            new GeminiVoiceCatalog(new StaticHttpClientFactory(client), cache),
             new BanteraApi.Audio.Mp3Encoder(NullLogger<BanteraApi.Audio.Mp3Encoder>.Instance),
             new BanteraApi.Diagnostics.AiPipelineEventRecorder(
                 services.GetRequiredService<IServiceScopeFactory>(),
@@ -411,12 +433,16 @@ public class GeminiServicePromptTests
         public HttpClient CreateClient(string name) => client;
     }
 
-    private sealed class PreviewAudioHandler(HttpStatusCode? firstFailure = null) : HttpMessageHandler
+    private sealed class PreviewAudioHandler(HttpStatusCode? firstFailure = null, bool regional = false) : HttpMessageHandler
     {
         public List<string> Requests { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (request.Method == HttpMethod.Get)
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(regional
+                    ? """{"voices":[{"id":"au-female","language_code":"en-AU","gender":"female","accent":"Australian"},{"id":"au-male","language_code":"en-AU","gender":"male","accent":"Australian"}]}"""
+                    : "{\"voices\":[]}") };
             Requests.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
             if (Requests.Count == 1 && firstFailure is { } status)
                 return new HttpResponseMessage(status) { Content = new StringContent("Provider error") };

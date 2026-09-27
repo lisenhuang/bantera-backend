@@ -8,4 +8,5 @@ public record GenerateAudioRequest(
     string? ScenarioId = null,
     string? NativeLanguage = null,
     string? NativeLanguageCode = null,
-    bool UseWebSearch = false);
+    bool UseWebSearch = false,
+    Guid? ClientJobId = null);

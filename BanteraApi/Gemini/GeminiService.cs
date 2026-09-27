@@ -14,6 +14,7 @@ public class GeminiService(
     IOptions<GeminiSettings> options,
     AiModelSettingsService modelSettings,
     GeminiKeyHealthService keyHealth,
+    GeminiVoiceCatalog voiceCatalog,
     Mp3Encoder mp3Encoder,
     AiPipelineEventRecorder events,
     ILogger<GeminiService> logger)
@@ -606,6 +607,22 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
         {
             var client = httpClientFactory.CreateClient("gemini");
             var url = $"/v1beta/models/{audioModel}:generateContent?key={key}";
+            var structuredSpeech = audioModel is "gemini-3.8-flash-tts" or "gemini-3.8-flash-lite-tts";
+            var regionalVoices = structuredSpeech
+                ? await voiceCatalog.ResolveAsync(key, languageCode, voice1Gender, voice2Gender,
+                    dialogue.Voice1, dialogue.Voice2, audioModel, testSession, cancellationToken)
+                : null;
+            if (structuredSpeech)
+            {
+                var selection = new { languageCode, speaker1 = regionalVoices?.Speaker1,
+                    speaker2 = regionalVoices?.Speaker2, originalVoice1 = dialogue.Voice1, originalVoice2 = dialogue.Voice2 };
+                await events.RecordAsync(regionalVoices is null ? AiPipelineSeverity.Warning : AiPipelineSeverity.Info,
+                    "tts", regionalVoices is null ? "accent_voice_unavailable" : "accent_voices_selected",
+                    regionalVoices is null ? "No regional male/female voice pair was available; using the configured voices with accent instructions."
+                        : "Selected male and female voices matching the requested regional language.",
+                    selection, audioModel, MaskKey(key));
+                if (testSession is not null) await testSession.RecordVoiceSelectionAsync(selection);
+            }
             var speakerInstruction = audioModel == "gemini-2.5-flash-preview-tts"
                 ? $"[Two-speaker dialogue: Speaker1 is {voice1Gender}; Speaker2 is {voice2Gender}. " +
                   "Use the configured Speaker1 voice only for Speaker1 lines and the configured Speaker2 voice only for Speaker2 lines throughout the entire recording. " +
@@ -616,14 +633,14 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                 : $"{speakerInstruction}\n\n{dialogueText}";
             // 3.8 reads text verbatim and requires metadata on every turn. Older
             // preview models reject speech_metadata, so keep their prompt format.
-            object[] parts = audioModel is "gemini-3.8-flash-tts" or "gemini-3.8-flash-lite-tts"
+            object[] parts = structuredSpeech
                 ? dialogue.Lines.Select(line => (object)new
                 {
                     text = line.Text,
                     speech_metadata = new
                     {
                         speaker = line.Speaker,
-                        style = ttsAccent is null
+                        style = regionalVoices is not null || ttsAccent is null
                             ? "Natural conversational delivery."
                             : $"Natural conversational delivery. {ttsAccent}",
                     },
@@ -641,8 +658,12 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                         {
                             speakerVoiceConfigs = new[]
                             {
-                                new { speaker = "Speaker1", voiceConfig = new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice1 } } },
-                                new { speaker = "Speaker2", voiceConfig = new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice2 } } },
+                                new { speaker = "Speaker1", voiceConfig = regionalVoices is null
+                                    ? (object)new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice1 } }
+                                    : new { voice = regionalVoices.Speaker1.Id } },
+                                new { speaker = "Speaker2", voiceConfig = regionalVoices is null
+                                    ? (object)new { prebuiltVoiceConfig = new { voiceName = dialogue.Voice2 } }
+                                    : new { voice = regionalVoices.Speaker2.Id } },
                             }
                         }
                     }

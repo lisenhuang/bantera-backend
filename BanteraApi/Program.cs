@@ -81,6 +81,7 @@ builder.Services.AddHttpClient("gemini", c =>
     c.Timeout = TimeSpan.FromSeconds(180);
 });
 builder.Services.AddScoped<GeminiService>();
+builder.Services.AddSingleton<GeminiVoiceCatalog>();
 builder.Services.AddHostedService<AdminAudioTestWorker>();
 builder.Services.AddSingleton<GeminiKeyHealthService>();
 builder.Services.AddSingleton<AiModelSettingsService>();
@@ -1588,24 +1589,8 @@ app.MapPost("/api/me/audio/generate/v2", async (
     httpContext.Response.Headers["Cache-Control"] = "no-cache";
     httpContext.Response.Headers["X-Accel-Buffering"] = "no";
 
-    var sseOpts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-    async Task SendAsync(object payload)
-    {
-        var json = JsonSerializer.Serialize(payload, sseOpts);
-        await httpContext.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
-        await httpContext.Response.Body.FlushAsync(cancellationToken);
-    }
-    async Task SendSafe(object payload)
-    {
-        try
-        {
-            await SendAsync(payload);
-        }
-        catch
-        {
-            // Ignore client disconnects. Generation continues in the background.
-        }
-    }
+    await using var progress = new GenerationProgressStream(httpContext.Response, cancellationToken);
+    Task SendSafe(object payload) => progress.SendAsync(payload);
 
     var diagnosticsOptions = aiAudioDiagnosticsOptions.Value;
     var lastStep = "started";
@@ -1625,6 +1610,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
     {
         job = new UserAudioJob
         {
+            Id = req.ClientJobId is { } requestedId && requestedId != Guid.Empty ? requestedId : Guid.NewGuid(),
             UserId = userId.Value,
             LanguageCode = req.LanguageCode,
             ScenarioId = req.ScenarioId,
@@ -2266,20 +2252,14 @@ app.MapPost("/api/me/audio/generate/v3",
         httpContext.Response.Headers["Cache-Control"] = "no-cache";
         httpContext.Response.Headers["X-Accel-Buffering"] = "no";
 
-        var v3SseOpts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-        async Task SendV3(object payload)
-        {
-            var json = JsonSerializer.Serialize(payload, v3SseOpts);
-            await httpContext.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
-            await httpContext.Response.Body.FlushAsync(cancellationToken);
-        }
-        async Task SendSafeV3(object payload) { try { await SendV3(payload); } catch { } }
+        await using var progress = new GenerationProgressStream(httpContext.Response, cancellationToken);
+        Task SendSafeV3(object payload) => progress.SendAsync(payload);
 
         UserAudioJob? v3Job = null;
         IDisposable? v3PipelineContext = null;
         try
         {
-            v3Job = new UserAudioJob { UserId = userId.Value, LanguageCode = req.LanguageCode, ScenarioId = req.ScenarioId };
+            v3Job = new UserAudioJob { Id = req.ClientJobId is { } requestedId && requestedId != Guid.Empty ? requestedId : Guid.NewGuid(), UserId = userId.Value, LanguageCode = req.LanguageCode, ScenarioId = req.ScenarioId };
             db.UserAudioJobs.Add(v3Job);
             await db.SaveChangesAsync(genToken);
             v3PipelineContext = pipelineEvents.BeginContext(userId.Value, v3Job.Id, req.LanguageCode, "generate/v3");
@@ -2375,7 +2355,7 @@ app.MapPost("/api/me/audio/generate/v3",
             }
             await SendSafeV3(new { step = "error", message = ex.Message });
         }
-        catch (OperationCanceledException) when (genToken.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (genToken.IsCancellationRequested)
         {
             await pipelineEvents.RecordAsync("error", "generation", "generation_timeout", "Generation timed out.");
             if (v3Job is not null)
@@ -2407,6 +2387,21 @@ app.MapPost("/api/me/audio/generate/v3",
     })
 .WithName("GenerateAiAudioV3")
 .RequireAuthorization();
+
+// Job recovery is owner-only, including when the resulting lesson is public.
+app.MapGet("/api/me/audio/jobs/{jobId:guid}", async (
+    Guid jobId, System.Security.Claims.ClaimsPrincipal user, HttpContext context,
+    AppDbContext db, VideoService videos, CancellationToken ct) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return Results.Unauthorized();
+    var job = await db.UserAudioJobs.AsNoTracking()
+        .SingleOrDefaultAsync(j => j.Id == jobId && j.UserId == userId.Value, ct);
+    if (job is null) return Results.NotFound();
+    var video = job.Status == "done" && job.VideoId is { } videoId
+        ? await videos.GetVideoAsync(videoId, userId, context, ct) : null;
+    return Results.Ok(new { job.Id, job.Status, job.VideoId, job.ErrorMessage, video });
+}).WithName("GetAudioGenerationJob").RequireAuthorization();
 
 app.MapGet("/api/me/audio/jobs/pending", async (
     System.Security.Claims.ClaimsPrincipal user,
