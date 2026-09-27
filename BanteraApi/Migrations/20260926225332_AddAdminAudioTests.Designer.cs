@@ -3,6 +3,7 @@ using System;
 using BanteraApi.Database;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BanteraApi.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260926225332_AddAdminAudioTests")]
+    partial class AddAdminAudioTests
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -347,25 +350,6 @@ namespace BanteraApi.Migrations
                     b.HasIndex("ThreadId", "CreatedAt");
 
                     b.ToTable("chat_messages", (string)null);
-                });
-
-            modelBuilder.Entity("BanteraApi.Database.Entities.ChatMessageDeletion", b =>
-                {
-                    b.Property<Guid>("MessageId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("DeletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("ThreadId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("MessageId");
-
-                    b.HasIndex("ThreadId");
-
-                    b.ToTable("chat_message_deletions", (string)null);
                 });
 
             modelBuilder.Entity("BanteraApi.Database.Entities.ChatMessageReceipt", b =>
@@ -1241,15 +1225,6 @@ namespace BanteraApi.Migrations
                     b.Navigation("SenderUser");
 
                     b.Navigation("Thread");
-                });
-
-            modelBuilder.Entity("BanteraApi.Database.Entities.ChatMessageDeletion", b =>
-                {
-                    b.HasOne("BanteraApi.Database.Entities.ChatThread", null)
-                        .WithMany()
-                        .HasForeignKey("ThreadId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("BanteraApi.Database.Entities.ChatMessageReceipt", b =>

@@ -18,6 +18,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ChatThread> ChatThreads => Set<ChatThread>();
     public DbSet<ChatThreadMembership> ChatThreadMemberships => Set<ChatThreadMembership>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatMessageDeletion> ChatMessageDeletions => Set<ChatMessageDeletion>();
     public DbSet<ChatMessageReceipt> ChatMessageReceipts => Set<ChatMessageReceipt>();
     public DbSet<ChatBlock> ChatBlocks => Set<ChatBlock>();
     public DbSet<UserPushToken> UserPushTokens => Set<UserPushToken>();
@@ -28,6 +29,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<McpAuditLog> McpAuditLogs => Set<McpAuditLog>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<AiPipelineEvent> AiPipelineEvents => Set<AiPipelineEvent>();
+    public DbSet<AdminAudioTest> AdminAudioTests => Set<AdminAudioTest>();
 
     // Stores a string list as a JSON array. Explicit rather than relying on provider
     // defaults, which map List<string> to text[] unless told otherwise.
@@ -42,6 +44,32 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.Entity<ChatMessageDeletion>(e =>
+        {
+            e.ToTable("chat_message_deletions");
+            e.HasKey(x => x.MessageId);
+            e.HasIndex(x => x.ThreadId);
+            e.HasOne<ChatThread>().WithMany().HasForeignKey(x => x.ThreadId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<AdminAudioTest>(e =>
+        {
+            e.ToTable("admin_audio_tests");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.Property(x => x.Stage).HasMaxLength(30);
+            e.Property(x => x.LanguageCode).HasMaxLength(16);
+            e.Property(x => x.Language).HasMaxLength(100);
+            e.Property(x => x.TextModel).HasMaxLength(100);
+            e.Property(x => x.AudioModel).HasMaxLength(100);
+            e.Property(x => x.DialogueJson).HasColumnType("jsonb");
+            e.Property(x => x.DiagnosticsJson).HasColumnType("jsonb");
+            e.Property(x => x.ErrorJson).HasColumnType("jsonb");
+            e.HasIndex(x => new { x.Status, x.CreatedAt });
+            e.HasIndex(x => x.CreatedAt);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         b.Entity<User>(e =>
         {
             e.ToTable("users");

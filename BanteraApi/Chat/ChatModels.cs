@@ -69,7 +69,8 @@ public record ChatBootstrapResponse(
     bool GlobalNotificationsEnabled,
     IReadOnlyList<ChatThreadSummaryResponse> Groups,
     IReadOnlyList<ChatUserResponse> OnlineUsers,
-    IReadOnlyList<ChatThreadSummaryResponse> DirectMessages
+    IReadOnlyList<ChatThreadSummaryResponse> DirectMessages,
+    IReadOnlyList<Guid>? DeletedMessageIds = null
 );
 
 public sealed class SendChatAudioRequest

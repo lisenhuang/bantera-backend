@@ -106,11 +106,17 @@ public class ChatService(
                 directMessages.Add(summary);
         }
 
+        var visibleThreadIds = groups.Concat(directMessages).Select(t => t.ThreadId).ToArray();
+        var deletedMessageIds = await db.ChatMessageDeletions.AsNoTracking()
+            .Where(d => visibleThreadIds.Contains(d.ThreadId))
+            .Select(d => d.MessageId).ToListAsync(cancellationToken);
+
         return new ChatBootstrapResponse(
             user.ChatNotificationsEnabled,
             groups.OrderBy(g => GroupBadgeOrder(g.RoleBadges)).ThenBy(g => g.Title, StringComparer.OrdinalIgnoreCase).ToList(),
             filteredOnlineUsers,
-            directMessages);
+            directMessages,
+            deletedMessageIds);
     }
 
     public async Task<IReadOnlyList<ChatMessageResponse>?> ListMessagesAsync(
@@ -231,12 +237,17 @@ public class ChatService(
             new { type = "message.created", payload = new { threadId = thread.Id, messageId = message.Id } },
             cancellationToken);
 
-        if (recipient.ChatNotificationsEnabled && !recipientMembership.IsMuted && !IsUserVisibleOnline(recipient))
+        // Presence is not delivery: a websocket (or AlwaysOnline profile) may remain
+        // online while iOS is suspended or the recipient is using another device.
+        if (recipient.ChatNotificationsEnabled && !recipientMembership.IsMuted)
         {
             var tokens = await db.UserPushTokens
                 .AsNoTracking()
                 .Where(t => t.UserId == otherUserId)
                 .ToListAsync(cancellationToken);
+            logger.LogInformation(
+                "[ChatPush] Voice DM delivery. RecipientId={RecipientId} ThreadId={ThreadId} Tokens={Tokens} SandboxTokens={SandboxTokens} ProductionTokens={ProductionTokens}",
+                otherUserId, thread.Id, tokens.Count, tokens.Count(t => t.IsSandbox), tokens.Count(t => !t.IsSandbox));
             await pushNotificationService.SendAsync(
                 tokens,
                 sender.Name ?? "Bantera user",
@@ -245,6 +256,7 @@ public class ChatService(
                 {
                     ["threadId"] = thread.Id.ToString(),
                     ["threadType"] = ChatThreadTypes.DirectMessage,
+                    ["messageId"] = message.Id.ToString(),
                 },
                 cancellationToken);
         }
@@ -273,7 +285,6 @@ public class ChatService(
 
         var thread = await GetOrCreateGroupThreadAsync(descriptor, cancellationToken);
         var now = DateTime.UtcNow;
-        var expiresAt = now.AddDays(7);
         var blockPairs = await LoadBlockPairsAsync(cancellationToken);
         var audience = await db.Users
             .Where(u => u.DeletedAt == null && u.Status == "active")
@@ -322,7 +333,6 @@ public class ChatService(
             SpokenLanguageCode = descriptor.OriginalCode,
             DurationMs = request.DurationMs,
             CreatedAt = now,
-            ExpiresAt = expiresAt,
         };
 
         await using (var input = request.File!.OpenReadStream())
@@ -401,7 +411,7 @@ public class ChatService(
         var message = await db.ChatMessages
             .Include(m => m.Thread)
             .FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
-        if (message is null || message.Thread.Type != ChatThreadTypes.DirectMessage)
+        if (message is null || message.Thread.Type != ChatThreadTypes.DirectMessage || message.SenderUserId == userId)
             return false;
 
         var membershipExists = await db.ChatThreadMemberships
@@ -420,7 +430,7 @@ public class ChatService(
                 UserId = userId,
                 ReceivedAt = now,
             });
-            message.ExpiresAt = now.AddDays(7);
+            message.ExpiresAt ??= now.AddDays(7);
             await db.SaveChangesAsync(cancellationToken);
         }
 
@@ -693,6 +703,10 @@ public class ChatService(
             .Select(m => m.UserId)
             .ToListAsync(cancellationToken);
 
+        db.ChatMessageDeletions.Add(new ChatMessageDeletion
+        {
+            MessageId = message.Id, ThreadId = message.ThreadId, DeletedAt = DateTime.UtcNow,
+        });
         db.ChatMessages.Remove(message);
         await db.SaveChangesAsync(cancellationToken);
 

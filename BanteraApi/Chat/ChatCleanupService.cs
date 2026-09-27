@@ -1,4 +1,5 @@
 using BanteraApi.Database;
+using BanteraApi.Database.Entities;
 using BanteraApi.Storage;
 using Microsoft.EntityFrameworkCore;
 
@@ -38,7 +39,7 @@ public class ChatCleanupService(
 
         var now = DateTime.UtcNow;
         var expired = await db.ChatMessages
-            .Where(m => m.ExpiresAt != null && m.ExpiresAt <= now)
+            .Where(m => m.Thread.Type == ChatThreadTypes.DirectMessage && m.ExpiresAt != null && m.ExpiresAt <= now)
             .OrderBy(m => m.ExpiresAt)
             .Take(100)
             .Select(m => new
@@ -52,11 +53,13 @@ public class ChatCleanupService(
         if (expired.Count == 0)
             return;
 
+        var deletedIds = new HashSet<Guid>();
         foreach (var message in expired)
         {
             try
             {
                 await r2Storage.DeleteObjectAsync(message.AudioObjectKey, cancellationToken);
+                deletedIds.Add(message.Id);
             }
             catch (Exception ex)
             {
@@ -64,6 +67,8 @@ public class ChatCleanupService(
             }
         }
 
+        expired = expired.Where(m => deletedIds.Contains(m.Id)).ToList();
+        if (expired.Count == 0) return;
         var expiredIds = expired.Select(x => x.Id).ToHashSet();
         var affectedThreadIds = expired.Select(x => x.ThreadId).Distinct().ToList();
         var affectedUsers = await db.ChatThreadMemberships

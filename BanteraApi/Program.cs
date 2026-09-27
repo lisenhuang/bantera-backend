@@ -81,6 +81,7 @@ builder.Services.AddHttpClient("gemini", c =>
     c.Timeout = TimeSpan.FromSeconds(180);
 });
 builder.Services.AddScoped<GeminiService>();
+builder.Services.AddHostedService<AdminAudioTestWorker>();
 builder.Services.AddSingleton<GeminiKeyHealthService>();
 builder.Services.AddSingleton<AiModelSettingsService>();
 builder.Services.AddSingleton<CueTimingSettingsService>();
@@ -2936,6 +2937,7 @@ startupLogger.LogInformation("[Startup] All checks passed — starting server.")
 
 AdminEndpoints.Map(app);
 AiSettingsEndpoints.Map(app);
+AdminAudioTestEndpoints.Map(app);
 AiPipelineEndpoints.Map(app);
 AdminPipelineRunEndpoints.Map(app);
 McpOAuthEndpoints.Map(app);

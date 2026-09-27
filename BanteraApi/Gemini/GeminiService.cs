@@ -267,7 +267,8 @@ public class GeminiService(
         string? nativeLanguage = null,
         string? nativeLanguageCode = null,
         bool useWebSearchForCustom = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        GeminiTestSession? testSession = null)
     {
         var accentInstruction = AccentInstructions.GetValueOrDefault(languageCode,
             $"Write the dialogue naturally in the appropriate language for locale '{languageCode}'.");
@@ -280,7 +281,7 @@ public class GeminiService(
         var useGoogleSearch = IsLatestNewsScenario(scenarioId)
             || (useWebSearchForCustom && !string.IsNullOrWhiteSpace(scenario));
         var models = await modelSettings.GetAsync(cancellationToken);
-        var textModel = useGoogleSearch ? Settings.LatestNewsTextModel : models.TextModel;
+        var textModel = testSession?.TextModel ?? (useGoogleSearch ? Settings.LatestNewsTextModel : models.TextModel);
         var fallbackTextModel = useGoogleSearch ? null : models.FallbackTextModel;
         var todayUtc = DateTime.UtcNow.Date;
         var recentStartUtc = DateTime.UtcNow.AddDays(-1);
@@ -439,13 +440,13 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             var client = httpClientFactory.CreateClient("gemini");
             var url = $"/v1beta/models/{selectedModel}:generateContent?key={key}";
             RawDialogue? parsed = null;
-            const int maxContentAttempts = 3;
+            var maxContentAttempts = testSession is null ? 3 : 1;
             var contentRejections = 0;
 
             for (var contentAttempt = 1; contentAttempt <= maxContentAttempts && parsed is null; contentAttempt++)
             {
                 var rejected = false;
-                for (var genderAttempt = 0; genderAttempt < 2; genderAttempt++)
+                for (var genderAttempt = 0; genderAttempt < (testSession is null ? 2 : 1); genderAttempt++)
                 {
                     var retryInstruction = contentAttempt == 1 ? "" :
                         "\n\nYour previous answer rejected this request. Reconsider whether a neutral everyday interpretation satisfies every rule above. If it does, write that dialogue. If it cannot, return the rejection JSON again. Never include a restricted topic to avoid rejection.";
@@ -463,10 +464,11 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                             contents = new[] { new { parts = new[] { new { text = requestPrompt } } } }
                         };
 
-                    using var response = await client.PostAsync(
-                        url,
-                        new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
-                        cancellationToken);
+                    using var response = testSession is null
+                        ? await client.PostAsync(url,
+                            new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
+                            cancellationToken)
+                        : await testSession.SendAsync(client, url, "dialogue", selectedModel, key, body, cancellationToken);
 
                     var json = await response.Content.ReadAsStringAsync(cancellationToken);
                     if (!response.IsSuccessStatusCode)
@@ -582,13 +584,14 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                 Voice2: voice2,
                 Lines: dialogueLines.ToArray(),
                 ShortCueValidationFailures: shortCueValidationFailures);
-        }, cancellationToken, webSearch: useGoogleSearch);
+        }, cancellationToken, webSearch: useGoogleSearch, singleAttempt: testSession is not null);
     }
 
     public async Task<GeneratedAudio> GenerateAudioAsync(
         GeneratedDialogue dialogue,
         string languageCode,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        GeminiTestSession? testSession = null)
     {
         var voice1Gender = VoiceLibrary.FirstOrDefault(v => v.Name == dialogue.Voice1)?.Gender;
         var voice2Gender = VoiceLibrary.FirstOrDefault(v => v.Name == dialogue.Voice2)?.Gender;
@@ -599,7 +602,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
         var dialogueText = string.Join("\n", dialogue.Lines.Select(l => $"{l.Speaker}: {l.Text}"));
         var models = await modelSettings.GetAsync(cancellationToken);
 
-        var (pcm, sampleRate, mimeType) = await WithModelFallbackAsync("tts", models.AudioModel, models.FallbackAudioModel, async (audioModel, key) =>
+        var (pcm, sampleRate, mimeType) = await WithModelFallbackAsync("tts", testSession?.AudioModel ?? models.AudioModel, models.FallbackAudioModel, async (audioModel, key) =>
         {
             var client = httpClientFactory.CreateClient("gemini");
             var url = $"/v1beta/models/{audioModel}:generateContent?key={key}";
@@ -631,10 +634,11 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                 }
             };
 
-            using var response = await client.PostAsync(
-                url,
-                new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
-                cancellationToken);
+            using var response = testSession is null
+                ? await client.PostAsync(url,
+                    new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
+                    cancellationToken)
+                : await testSession.SendAsync(client, url, "tts", audioModel, key, body, cancellationToken);
 
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
@@ -657,7 +661,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             var mime = inlineData.TryGetProperty("mimeType", out var mt) ? mt.GetString() ?? "" : "";
             var rateMatch = Regex.Match(mime, @"rate=(\d+)");
             return (Convert.FromBase64String(base64Data), rateMatch.Success ? int.Parse(rateMatch.Groups[1].Value) : 24000, mime);
-        }, cancellationToken);
+        }, cancellationToken, singleAttempt: testSession is not null);
 
         // 2.5 TTS returns "audio/L16;codec=pcm;rate=24000"; 3.1 returns "audio/l16; rate=24000; channels=1".
         var isRawPcm = IsRawPcmMimeType(mimeType);
@@ -1471,15 +1475,15 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
     /// <summary>Try every eligible key on the primary model before trying the configured fallback.</summary>
     private async Task<T> WithModelFallbackAsync<T>(
         string operation, string primaryModel, string? fallbackModel,
-        Func<string, string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false)
+        Func<string, string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false, bool singleAttempt = false)
     {
-        if (string.Equals(primaryModel, fallbackModel, StringComparison.Ordinal))
+        if (singleAttempt || string.Equals(primaryModel, fallbackModel, StringComparison.Ordinal))
             fallbackModel = null;
 
         try
         {
             return await WithGeminiKeyAsync(operation, key => fn(primaryModel, key), cancellationToken,
-                webSearch: webSearch, model: primaryModel, fallbackAvailable: fallbackModel is not null);
+                webSearch: webSearch, model: primaryModel, fallbackAvailable: fallbackModel is not null, singleAttempt: singleAttempt);
         }
         catch (Exception primaryError) when (fallbackModel is not null &&
             primaryError is not ContentRejectedException &&
@@ -1507,7 +1511,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
     /// Runs one step with each key in turn (shuffled per step) until one succeeds. A content
     /// rejection is final and is not retried with other keys.
     /// </summary>
-    private async Task<T> WithGeminiKeyAsync<T>(string operation, Func<string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false, string? model = null, bool fallbackAvailable = false)
+    private async Task<T> WithGeminiKeyAsync<T>(string operation, Func<string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false, string? model = null, bool fallbackAvailable = false, bool singleAttempt = false)
     {
         var stage = operation.Replace(' ', '_').Replace("(", "").Replace(")", "");
         var configuredKeys = SelectKeys(Settings.ApiKeys, webSearch, Settings.WebSearchKeyPrefix);
@@ -1523,6 +1527,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
             throw new InvalidOperationException($"No eligible Gemini API keys for {operation}.");
         }
 
+        if (singleAttempt) keys = keys.Take(1).ToArray();
         Exception? lastEx = null;
         for (var attempt = 0; attempt < keys.Length; attempt++)
         {
@@ -1578,7 +1583,9 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
             TruncateForLog(lastEx?.Message, 1000),
             new { keys = keys.Length, webSearch },
             model);
-        throw new InvalidOperationException($"All Gemini API keys failed for {operation}.", lastEx);
+        throw new InvalidOperationException(singleAttempt
+            ? $"The selected Gemini model failed for {operation}; no retry or fallback was attempted."
+            : $"All Gemini API keys failed for {operation}.", lastEx);
     }
 
     // ── Internal deserialization types ───────────────────────────────

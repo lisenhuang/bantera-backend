@@ -231,6 +231,62 @@ public class GeminiServicePromptTests
         Assert.Equal(JsonValueKind.Null, clearFallbacks.FallbackAudioModel.ValueKind);
     }
 
+    [Fact]
+    public async Task AudioTest_FailureUsesOnlySelectedModelAndOneKey()
+    {
+        var handler = new FallbackHandler(audio: true);
+        var service = CreateService(handler, new("primary-text", "default-audio", "fallback-text", "fallback-audio"),
+            ["first-key", "second-key"]);
+        var session = new GeminiTestSession("test-text", "primary-selected-tts", ["first-key", "second-key"]);
+        var dialogue = new GeneratedDialogue("Test", "Kore", "Puck",
+            [new("Speaker1", "Hello."), new("Speaker2", "Hi.")], []);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.GenerateAudioAsync(dialogue, "en-US", testSession: session));
+
+        Assert.Equal(["primary-selected-tts"], handler.Models);
+        Assert.Contains("no retry or fallback", error.Message);
+        using var diagnostics = JsonDocument.Parse(session.ToJson());
+        var call = Assert.Single(diagnostics.RootElement.EnumerateArray());
+        Assert.Equal(503, call.GetProperty("httpStatus").GetInt32());
+        Assert.Contains("unavailable", call.GetProperty("responseBody").GetString());
+    }
+
+    [Fact]
+    public async Task AudioTest_RejectionIsRecordedWithoutRetryingContent()
+    {
+        var handler = new RejectionOnceHandler();
+        var service = CreateService(handler);
+        var session = new GeminiTestSession("test-text", "test-tts", ["test-key"]);
+        await Assert.ThrowsAsync<ContentRejectedException>(() => service.GenerateDialogueAsync(
+            "English", "en-US", "", 60, testSession: session));
+        Assert.Equal(1, handler.RequestCount);
+        Assert.Contains("rejected", session.ToJson());
+    }
+
+    [Fact]
+    public async Task AudioTest_GenderValidationDoesNotRetry()
+    {
+        var handler = new CapturingHandler([("female", "female"), ("female", "male")]);
+        var service = CreateService(handler, apiKeys: ["first-key", "second-key"]);
+        var session = new GeminiTestSession("test-text", "test-tts", ["first-key", "second-key"]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateDialogueAsync(
+            "English", "en-US", "", 240, testSession: session));
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task AudioTest_QuotaDoesNotTryAnotherKey()
+    {
+        var handler = new QuotaOnceHandler();
+        var service = CreateService(handler, apiKeys: ["first-key", "second-key"]);
+        var session = new GeminiTestSession("test-text", "test-tts", ["first-key", "second-key"]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateDialogueAsync(
+            "English", "en-US", "", 120, testSession: session));
+        Assert.Single(handler.Keys);
+        Assert.Contains("429", session.ToJson());
+    }
+
     private static GeminiService CreateService(
         HttpMessageHandler handler, AiModelSelection? selection = null, string[]? apiKeys = null)
     {
