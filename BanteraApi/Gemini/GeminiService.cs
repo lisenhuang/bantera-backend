@@ -614,9 +614,24 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             var transcript = ttsAccent != null
                 ? $"[Accent instruction: {ttsAccent}]\n{speakerInstruction}\n\n{dialogueText}"
                 : $"{speakerInstruction}\n\n{dialogueText}";
+            // 3.8 reads text verbatim and requires metadata on every turn. Older
+            // preview models reject speech_metadata, so keep their prompt format.
+            object[] parts = audioModel is "gemini-3.8-flash-tts" or "gemini-3.8-flash-lite-tts"
+                ? dialogue.Lines.Select(line => (object)new
+                {
+                    text = line.Text,
+                    speech_metadata = new
+                    {
+                        speaker = line.Speaker,
+                        style = ttsAccent is null
+                            ? "Natural conversational delivery."
+                            : $"Natural conversational delivery. {ttsAccent}",
+                    },
+                }).ToArray()
+                : [new { text = transcript }];
             var body = new
             {
-                contents = new[] { new { parts = new[] { new { text = transcript } } } },
+                contents = new[] { new { parts } },
                 generationConfig = new
                 {
                     responseModalities = new[] { "AUDIO" },

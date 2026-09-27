@@ -115,6 +115,7 @@ public class GeminiServicePromptTests
 
     [Theory]
     [InlineData("gemini-2.5-flash-preview-tts")]
+    [InlineData("gemini-2.5-pro-preview-tts")]
     [InlineData("gemini-3.1-flash-tts-preview")]
     public async Task GenerateAudioAsync_PreviewModelSendsWholeDialogueWithBothVoices(string model)
     {
@@ -139,6 +140,7 @@ public class GeminiServicePromptTests
             .GetProperty("parts")[0].GetProperty("text").GetString()!;
         Assert.Contains("Speaker1: Line 0", transcript);
         Assert.Contains("Speaker2: Line 9", transcript);
+        Assert.DoesNotContain("speech_metadata", handler.Requests[0]);
         if (model == "gemini-2.5-flash-preview-tts")
         {
             Assert.Contains("Speaker1 is female; Speaker2 is male", transcript);
@@ -150,6 +152,82 @@ public class GeminiServicePromptTests
             Assert.Contains("Speaker1 has a female voice and Speaker2 has a male voice", transcript);
             Assert.DoesNotContain("throughout the entire recording", transcript);
         }
+    }
+
+    [Theory]
+    [InlineData("gemini-3.8-flash-tts", false)]
+    [InlineData("gemini-3.8-flash-tts", true)]
+    [InlineData("gemini-3.8-flash-lite-tts", false)]
+    [InlineData("gemini-3.8-flash-lite-tts", true)]
+    public async Task GenerateAudioAsync_StructuredModelsKeepTurnsAndVoicesInOneRequest(string model, bool adminTest)
+    {
+        var handler = new PreviewAudioHandler();
+        var service = CreateService(handler, new("text", model, null, "unused-fallback"));
+        // Consecutive turns and Speaker2 first ensure mapping uses the dialogue's
+        // speaker IDs, not line position or alternating voices.
+        DialogueLine[] lines = [new("Speaker2", "你好。"), new("Speaker2", "想喝什麼？"), new("Speaker1", "茶，謝謝。")];
+        var dialogue = new GeneratedDialogue("Chat", "Kore", "Puck", lines, []);
+        var session = adminTest ? new GeminiTestSession("text", model, ["test-key"]) : null;
+
+        await service.GenerateAudioAsync(dialogue, "zh-TW", testSession: session);
+
+        using var document = JsonDocument.Parse(Assert.Single(handler.Requests));
+        var content = Assert.Single(document.RootElement.GetProperty("contents").EnumerateArray());
+        var parts = content.GetProperty("parts");
+        Assert.Equal(lines.Length, parts.GetArrayLength());
+        var voices = document.RootElement.GetProperty("generationConfig").GetProperty("speechConfig")
+            .GetProperty("multiSpeakerVoiceConfig").GetProperty("speakerVoiceConfigs")
+            .EnumerateArray().ToDictionary(v => v.GetProperty("speaker").GetString()!,
+                v => v.GetProperty("voiceConfig").GetProperty("prebuiltVoiceConfig").GetProperty("voiceName").GetString());
+        for (var i = 0; i < lines.Length; i++)
+        {
+            Assert.Equal(lines[i].Text, parts[i].GetProperty("text").GetString());
+            var metadata = parts[i].GetProperty("speech_metadata");
+            Assert.Equal(lines[i].Speaker, metadata.GetProperty("speaker").GetString());
+            Assert.Contains("Taiwan", metadata.GetProperty("style").GetString());
+            Assert.Equal(lines[i].Speaker == "Speaker1" ? "Kore" : "Puck", voices[lines[i].Speaker]);
+        }
+        if (session is not null)
+            Assert.Contains("speech_metadata", session.ToJson());
+    }
+
+    [Theory]
+    [InlineData("gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview")]
+    [InlineData("gemini-3.1-flash-tts-preview", "gemini-3.8-flash-lite-tts")]
+    public async Task GenerateAudioAsync_FallbackUsesItsOwnRequestFormat(string primary, string fallback)
+    {
+        var handler = new PreviewAudioHandler(HttpStatusCode.ServiceUnavailable);
+        var service = CreateService(handler, new("text", primary, null, fallback));
+        var dialogue = new GeneratedDialogue("Chat", "Kore", "Puck",
+            [new("Speaker1", "Hello."), new("Speaker2", "Hi.")], []);
+
+        await service.GenerateAudioAsync(dialogue, "en-US");
+
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(primary.Contains("3.8"), handler.Requests[0].Contains("speech_metadata"));
+        Assert.Equal(fallback.Contains("3.8"), handler.Requests[1].Contains("speech_metadata"));
+    }
+
+    [Theory]
+    [InlineData("gemini-3.8-flash-tts")]
+    [InlineData("gemini-3.8-flash-lite-tts")]
+    public async Task AudioTest_StructuredModelErrorPreservesStatusWithoutRetryOrFallback(string model)
+    {
+        var handler = new PreviewAudioHandler(HttpStatusCode.BadRequest);
+        var service = CreateService(handler, new("text", "default-tts", null, "fallback-tts"),
+            ["first-key", "second-key"]);
+        var session = new GeminiTestSession("text", model, ["first-key", "second-key"]);
+        var dialogue = new GeneratedDialogue("Chat", "Kore", "Puck",
+            [new("Speaker1", "Hello."), new("Speaker2", "Hi.")], []);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.GenerateAudioAsync(dialogue, "en-US", testSession: session));
+
+        Assert.Single(handler.Requests);
+        using var details = JsonDocument.Parse(session.ErrorJson(error, "tts"));
+        Assert.Equal(400, details.RootElement.GetProperty("httpStatus").GetInt32());
+        Assert.Contains("no retry or fallback", error.Message);
+        Assert.Contains(model, session.ToJson());
     }
 
     [Fact]
@@ -333,13 +411,15 @@ public class GeminiServicePromptTests
         public HttpClient CreateClient(string name) => client;
     }
 
-    private sealed class PreviewAudioHandler : HttpMessageHandler
+    private sealed class PreviewAudioHandler(HttpStatusCode? firstFailure = null) : HttpMessageHandler
     {
         public List<string> Requests { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            if (Requests.Count == 1 && firstFailure is { } status)
+                return new HttpResponseMessage(status) { Content = new StringContent("Provider error") };
             var body = JsonSerializer.Serialize(new
             {
                 candidates = new[] { new { content = new { parts = new[]

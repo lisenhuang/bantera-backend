@@ -8,6 +8,29 @@ namespace BanteraApi.Tests;
 public sealed class GeminiTestSessionTests
 {
     [Fact]
+    public void WrappedHttpErrorsRetainStatusAndRedaction()
+    {
+        var session = new GeminiTestSession("text", "tts", ["test-secret"]);
+        var error = new InvalidOperationException("Model failed", new InvalidOperationException("Key failed",
+            new HttpRequestException("Provider rejected test-secret", null, HttpStatusCode.BadRequest)));
+
+        var json = session.ErrorJson(error, "tts");
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal(400, doc.RootElement.GetProperty("httpStatus").GetInt32());
+        Assert.Contains("Provider rejected", json);
+        Assert.DoesNotContain("test-secret", json);
+    }
+
+    [Fact]
+    public void ErrorsWithoutHttpResponseKeepNullStatus()
+    {
+        var session = new GeminiTestSession("text", "tts", []);
+        using var doc = JsonDocument.Parse(session.ErrorJson(
+            new InvalidOperationException("Model failed", new HttpRequestException("Network failed")), "tts"));
+        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("httpStatus").ValueKind);
+    }
+
+    [Fact]
     public async Task DiagnosticsPreserveProviderErrorsAndRemoveSecretsAndAudio()
     {
         const string secret = "AIzaSySensitiveKeyForRedaction123456789";

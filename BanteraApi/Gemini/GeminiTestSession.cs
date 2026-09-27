@@ -114,8 +114,16 @@ public sealed class GeminiTestSession(string textModel, string audioModel, IRead
     {
         stage, at = DateTime.UtcNow, exception = error.GetType().FullName,
         message = error.Message, stackTrace = error.ToString(),
-        httpStatus = (error as HttpRequestException)?.StatusCode is { } status ? (int?)status : null,
+        httpStatus = FindHttpStatus(error),
     }, JsonOptions));
+
+    private static int? FindHttpStatus(Exception error)
+    {
+        for (Exception? current = error; current is not null; current = current.InnerException)
+            if (current is HttpRequestException { StatusCode: { } status })
+                return (int)status;
+        return null;
+    }
 
     private static void RemoveAudio(JsonNode? node)
     {
