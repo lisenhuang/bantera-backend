@@ -2550,16 +2550,13 @@ app.MapGet("/api/videos/public", async (
     [FromQuery] string? mediaType,
     [FromQuery] bool? includeV2,
     HttpContext httpContext,
-    System.Security.Claims.ClaimsPrincipal user,
     VideoService videoService,
     CancellationToken cancellationToken) =>
 {
     var safeLimit = Math.Clamp(limit <= 0 ? 20 : limit, 1, 50);
     var safeOffset = Math.Max(offset, 0);
-    var excludeUserId = TryGetUserId(user);
     var videos = await videoService.ListPublicVideosAsync(
         languageCode,
-        excludeUserId,
         safeLimit,
         safeOffset,
         search,
@@ -2576,7 +2573,7 @@ app.MapGet("/api/videos/public", async (
     """
     Returns public videos, newest first, optionally filtered by transcript language code
     and full-text searched across file name and transcript. Supports offset-based pagination.
-    When authenticated, videos owned by the caller are excluded.
+    Includes public videos owned by the caller; private videos are never returned.
     """))
 .Produces<IReadOnlyList<VideoUploadResponse>>(200)
 .AllowAnonymous();

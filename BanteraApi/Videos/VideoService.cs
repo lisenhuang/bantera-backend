@@ -149,11 +149,10 @@ public class VideoService(
     /// <paramref name="languageCode"/>, with optional full-text
     /// <paramref name="searchQuery"/> (matched against file name and transcript
     /// text), keyset-paged via <paramref name="offset"/> / <paramref name="limit"/>.
-    /// Videos owned by <paramref name="excludeUserId"/> are excluded when provided.
+    /// Includes public videos owned by the caller. Private videos remain excluded.
     /// </summary>
     public async Task<IReadOnlyList<VideoUploadResponse>> ListPublicVideosAsync(
         string? languageCode,
-        Guid? excludeUserId,
         int limit,
         int offset,
         string? searchQuery,
@@ -193,9 +192,6 @@ public class VideoService(
                     v.TranscriptLanguageCode.ToLower().StartsWith(normalizedCode + "-"));
             }
         }
-
-        if (excludeUserId.HasValue)
-            query = query.Where(v => v.UserId != excludeUserId.Value);
 
         // Full-text search across file name and transcript text.
         var search = searchQuery?.Trim().ToLower();
