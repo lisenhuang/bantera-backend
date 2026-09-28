@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Runtime.CompilerServices;
 
 namespace BanteraApi.Chat;
 
@@ -11,6 +12,7 @@ public class ChatRealtimeService(ILogger<ChatRealtimeService> logger)
     private static readonly TimeSpan PendingCallTimeout = TimeSpan.FromSeconds(45);
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, WebSocket>> _connections = new();
     private readonly ConcurrentDictionary<Guid, ChatCallSession> _calls = new();
+    private readonly ConditionalWeakTable<WebSocket, SemaphoreSlim> _sendLocks = new();
 
     public string Register(Guid userId, WebSocket socket)
     {
@@ -70,7 +72,8 @@ public class ChatRealtimeService(ILogger<ChatRealtimeService> logger)
 
         lock (current.SyncRoot)
         {
-            if (current.State != ChatCallStateKinds.Pending || current.CalleeUserId != userId)
+            if (current.State != ChatCallStateKinds.Pending || current.CalleeUserId != userId
+                || current.CreatedAtUtc < DateTime.UtcNow - PendingCallTimeout)
                 return false;
 
             current.State = ChatCallStateKinds.Accepted;
@@ -139,6 +142,9 @@ public class ChatRealtimeService(ILogger<ChatRealtimeService> logger)
                 if (current.State == ChatCallStateKinds.Ended || !current.ContainsUser(userId))
                     continue;
 
+                // A suspended callee can lose its socket while PushKit wakes it.
+                if (current.State == ChatCallStateKinds.Pending && current.CalleeUserId == userId)
+                    continue;
                 current.State = ChatCallStateKinds.Ended;
                 affected.Add(current.Clone());
             }
@@ -247,11 +253,13 @@ public class ChatRealtimeService(ILogger<ChatRealtimeService> logger)
                         continue;
                     }
 
-                    await pair.Value.SendAsync(
-                        new ArraySegment<byte>(message),
-                        WebSocketMessageType.Text,
-                        true,
-                        cancellationToken);
+                    // APNs wakeups, signalling and chat events can send concurrently.
+                    var gate = _sendLocks.GetValue(pair.Value, _ => new SemaphoreSlim(1));
+                    await gate.WaitAsync(cancellationToken);
+                    try {
+                        await pair.Value.SendAsync(new ArraySegment<byte>(message),
+                            WebSocketMessageType.Text, true, cancellationToken);
+                    } finally { gate.Release(); }
                 }
                 catch (Exception ex)
                 {

@@ -1066,6 +1066,45 @@ app.MapPut("/api/chat/push/apns-token", async (
 .Produces<ApiError>(401)
 .RequireAuthorization();
 
+app.MapPut("/api/chat/push/voip-token", async (
+    RegisterVoipTokenRequest request, System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return UnauthorizedResult();
+    if (string.IsNullOrWhiteSpace(request.Token) || request.Token.Length is < 32 or > 255 || !request.Token.All(Uri.IsHexDigit))
+        return Results.BadRequest();
+    await chatService.RegisterPushTokenAsync(userId.Value, request.Token, request.IsSandbox,
+        true, cancellationToken, voip: true);
+    // Disable the legacy call alert only on this device, after VoIP registration succeeds.
+    if (!string.IsNullOrWhiteSpace(request.AlertToken))
+        await db.UserPushTokens.Where(t => t.UserId == userId && t.Token == request.AlertToken
+            && t.Platform == "ios").ExecuteUpdateAsync(s => s.SetProperty(t => t.SupportsCalls, false), cancellationToken);
+    return Results.NoContent();
+}).RequireAuthorization();
+
+app.MapDelete("/api/chat/push/voip-token/{token}", async (
+    string token, System.Security.Claims.ClaimsPrincipal user, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return UnauthorizedResult();
+    await db.UserPushTokens.Where(t => t.UserId == userId && t.Token == token && t.Platform == "ios-voip")
+        .ExecuteDeleteAsync(cancellationToken);
+    return Results.NoContent();
+}).RequireAuthorization();
+
+app.MapGet("/api/chat/calls/{callId:guid}", (
+    Guid callId, System.Security.Claims.ClaimsPrincipal user, ChatRealtimeService realtime, HttpContext context) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return UnauthorizedResult();
+    context.Response.Headers.CacheControl = "no-store";
+    if (!realtime.TryGetCall(callId, userId.Value, out var call)) return Results.NotFound();
+    if (call.State == ChatCallStateKinds.Pending && call.CreatedAtUtc < DateTime.UtcNow.AddSeconds(-45))
+        return Results.NotFound();
+    return Results.Ok(new { callId, state = call.State });
+}).RequireAuthorization();
+
 app.MapPost("/api/chat/notifications/test", async (
     System.Security.Claims.ClaimsPrincipal user,
     ChatService chatService,
@@ -3046,9 +3085,7 @@ static async Task HandleChatCallRealtimeEventAsync(
             return;
 
         var isRecipientOnline = realtimeService.IsUserOnline(recipientUserId);
-        IReadOnlyList<UserPushToken> callCapableTokens = isRecipientOnline
-            ? []
-            : await chatService.ListCallCapablePushTokensForEnabledUserAsync(
+        IReadOnlyList<UserPushToken> callCapableTokens = await chatService.ListCallCapablePushTokensForEnabledUserAsync(
                 recipientUserId,
                 cancellationToken);
         if (!isRecipientOnline && callCapableTokens.Count == 0)
@@ -3128,6 +3165,10 @@ static async Task HandleChatCallRealtimeEventAsync(
                 session.MediaKind,
                 cancellationToken);
         }
+        await chatService.SendOfflineCallNotificationAsync(
+            callCapableTokens.Where(t => t.Platform == "ios-voip").ToList(),
+            caller, session.CallId, session.MediaKind, cancellationToken, voip: true,
+            callExpiresAt: new DateTimeOffset(session.CreatedAtUtc.AddSeconds(45)));
         return;
     }
 
@@ -3152,6 +3193,10 @@ static async Task HandleChatCallRealtimeEventAsync(
             return;
         }
 
+        await realtimeService.SendToUserAsync(userId, new {
+            type = "call.accepted.self",
+            payload = new { callId, deviceId = payload.TryGetProperty("deviceId", out var device) ? device.GetString() : null }
+        }, cancellationToken);
         await realtimeService.SendToUserAsync(
             session.CallerUserId,
             new
@@ -3168,6 +3213,9 @@ static async Task HandleChatCallRealtimeEventAsync(
         if (!realtimeService.TryRejectCall(callId, userId, out var session))
             return;
 
+        await realtimeService.SendToUserAsync(userId, new {
+            type = "call.ended", payload = new { callId, reason = "declined" }
+        }, cancellationToken);
         await realtimeService.SendToUserAsync(
             session.CallerUserId,
             new

@@ -21,10 +21,12 @@ public class ChatPushNotificationService(
         string body,
         IReadOnlyDictionary<string, string> data,
         CancellationToken cancellationToken = default,
-        DateTimeOffset? expiresAt = null)
+        DateTimeOffset? expiresAt = null,
+        bool voip = false)
     {
         var activeTokens = tokens
-            .Where(t => !string.IsNullOrWhiteSpace(t.Token))
+            .Where(t => !string.IsNullOrWhiteSpace(t.Token)
+                && (voip ? t.Platform == "ios-voip" : t.Platform != "ios-voip"))
             .GroupBy(t => (Token: t.Token.Trim(), t.IsSandbox))
             .Select(group => group.First())
             .ToList();
@@ -50,14 +52,16 @@ public class ChatPushNotificationService(
             request.Version = new Version(2, 0);
             request.VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher;
             request.Headers.Authorization = new AuthenticationHeaderValue("bearer", providerToken);
-            request.Headers.TryAddWithoutValidation("apns-topic", _settings.BundleId);
-            request.Headers.TryAddWithoutValidation("apns-push-type", "alert");
+            request.Headers.TryAddWithoutValidation("apns-topic", _settings.BundleId + (voip ? ".voip" : ""));
+            request.Headers.TryAddWithoutValidation("apns-push-type", voip ? "voip" : "alert");
             request.Headers.TryAddWithoutValidation("apns-priority", "10");
-            if (expiresAt is not null)
+            if (voip || expiresAt is not null)
                 request.Headers.TryAddWithoutValidation(
                     "apns-expiration",
-                    expiresAt.Value.ToUnixTimeSeconds().ToString());
-            request.Content = JsonContent.Create(BuildPayload(title, body, data));
+                    voip ? "0" : expiresAt!.Value.ToUnixTimeSeconds().ToString());
+            var payload = BuildPayload(title, body, data);
+            if (voip) payload["aps"] = new Dictionary<string, object>();
+            request.Content = JsonContent.Create(payload);
 
             try
             {

@@ -491,7 +491,8 @@ public class ChatService(
         string token,
         bool isSandbox,
         bool supportsCalls,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool voip = false)
     {
         var normalized = token.Trim();
         if (string.IsNullOrWhiteSpace(normalized))
@@ -511,7 +512,7 @@ public class ChatService(
             {
                 UserId = userId,
                 Token = normalized,
-                Platform = "ios",
+                Platform = voip ? "ios-voip" : "ios",
                 IsSandbox = isSandbox,
                 SupportsCalls = supportsCalls,
                 CreatedAt = now,
@@ -521,6 +522,7 @@ public class ChatService(
         }
         else
         {
+            existing.Platform = voip ? "ios-voip" : "ios";
             existing.IsSandbox = isSandbox;
             existing.SupportsCalls = supportsCalls;
             existing.LastSeenAt = now;
@@ -553,7 +555,9 @@ public class ChatService(
         ChatUserResponse caller,
         Guid callId,
         string mediaKind,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool voip = false,
+        DateTimeOffset? callExpiresAt = null)
     {
         if (tokens.Count == 0)
             return;
@@ -575,9 +579,11 @@ public class ChatService(
                 ["callerName"] = caller.Name,
                 ["callerAvatarUrl"] = caller.AvatarUrl ?? string.Empty,
                 ["mediaKind"] = mediaKind,
+                ["expiresAt"] = (callExpiresAt ?? DateTimeOffset.UtcNow.AddSeconds(45)).ToUnixTimeSeconds().ToString(),
+                ["recipientUserId"] = tokens[0].UserId.ToString(),
             },
             cancellationToken,
-            expiresAt: DateTimeOffset.UtcNow.AddSeconds(45));
+            expiresAt: DateTimeOffset.UtcNow.AddSeconds(45), voip: voip);
     }
 
     public async Task SendTestNotificationAsync(
