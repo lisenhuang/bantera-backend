@@ -62,7 +62,7 @@ public sealed class ChatIceServersServiceTests
     }
 
     [Fact]
-    public async Task Configured_ReturnsTemporaryRelayCredentialsAndOriginalStun()
+    public async Task Configured_ReturnsTemporaryRelayCredentialsAndOneCloudflareStun()
     {
         using var handler = new StubHandler(async (request, token) =>
         {
@@ -78,9 +78,9 @@ public sealed class ChatIceServersServiceTests
         using var client = new HttpClient(handler);
         var result = await CreateService(client).GetAsync();
 
-        Assert.Equal("stun:stun.l.google.com:19302", result.IceServers[0].Urls.Single());
-        Assert.Equal(3, result.IceServers.Count);
-        var relay = result.IceServers[2];
+        Assert.Equal("stun:stun.cloudflare.com:3478", result.IceServers[0].Urls.Single());
+        Assert.Equal(2, result.IceServers.Count);
+        var relay = result.IceServers[1];
         Assert.Equal("temporary-user", relay.Username);
         Assert.Equal("temporary-password", relay.Credential);
         Assert.Contains("turns:turn.cloudflare.com:443?transport=tcp", relay.Urls);
@@ -186,7 +186,7 @@ public sealed class ChatIceServersServiceTests
     private static void AssertStunOnly(ChatIceServersResponse response)
     {
         var server = Assert.Single(response.IceServers);
-        Assert.Equal("stun:stun.l.google.com:19302", Assert.Single(server.Urls));
+        Assert.Equal("stun:stun.cloudflare.com:3478", Assert.Single(server.Urls));
         Assert.Null(server.Username);
         Assert.Null(server.Credential);
     }

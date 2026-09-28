@@ -46,13 +46,14 @@ public sealed class ChatIceServersService(
                 return fallback;
             }
 
-            // Preserve the existing STUN service alongside Cloudflare's relays.
-            // WebRTC's default ICE policy still permits direct peer connections.
+            // Use the configured public STUN endpoint once, plus the generated relays.
+            // Provider responses also contain STUN entries; avoid duplicating them.
+            var relays = servers
+                .Select(s => s with { Urls = s.Urls.Where(IsTurnUrl).ToArray() })
+                .Where(s => s.Urls.Count > 0).ToArray();
             if (relayOnly)
-                return new ChatIceServersResponse(servers
-                    .Select(s => s with { Urls = s.Urls.Where(IsTurnUrl).ToArray() })
-                    .Where(s => s.Urls.Count > 0).ToArray(), "relay");
-            return new ChatIceServersResponse([.. fallback.IceServers, .. servers]);
+                return new ChatIceServersResponse(relays, "relay");
+            return new ChatIceServersResponse([.. fallback.IceServers, .. relays]);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

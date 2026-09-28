@@ -12,7 +12,7 @@ public class ChatRealtimeServiceTests
         var response = ChatRealtimeService.BuildDefaultIceServersResponse();
 
         Assert.Single(response.IceServers);
-        Assert.Contains("stun:stun.l.google.com:19302", response.IceServers[0].Urls);
+        Assert.Contains("stun:stun.cloudflare.com:3478", response.IceServers[0].Urls);
         Assert.Null(response.IceServers[0].Username);
         Assert.Null(response.IceServers[0].Credential);
     }

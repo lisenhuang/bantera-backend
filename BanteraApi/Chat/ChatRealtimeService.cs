@@ -215,7 +215,7 @@ public class ChatRealtimeService(ILogger<ChatRealtimeService> logger)
         return new ChatIceServersResponse(
             [
                 new ChatIceServerEntryResponse(
-                    ["stun:stun.l.google.com:19302"],
+                    ["stun:stun.cloudflare.com:3478"],
                     null,
                     null),
             ]);
