@@ -58,3 +58,11 @@ Every time any code is modified in this codebase, bump the version in `BanteraAp
 
 - Do not expose Gemini, AI provider, model, key/configuration, or other raw technical backend failure details in API responses shown to users.
 - Log detailed technical failures server-side / in the CLI logs, and return only generic user-facing messages unless the error is a deliberate product-level validation or policy message the user can act on.
+
+## Deployment must be performed by a human
+
+- **Agents must not deploy.** When changes are ready, explicitly ask a human to perform the deployment and provide the required steps, environment variables, migration notes, and smoke checks.
+- Agents may prepare code, run local builds/tests, configure deployment environment files when authorized, and commit/push when explicitly requested. Preparing or pushing changes is not permission to deploy them.
+- Do not run deployment scripts, trigger deployment workflows, apply production migrations, restart or recreate live services/containers, or promote a release. Leave those actions to the human.
+- Before pushing, check whether the push would trigger an automatic deployment. If it would, stop before pushing and ask the human to arrange a non-deploying push or perform the release themselves.
+- Keep running services unchanged while preparing a release, and clearly state what is ready and what the human still needs to deploy. Local development and test servers are not deployments.
