@@ -59,6 +59,12 @@ builder.Services.AddScoped<AccountDeletionService>();
 builder.Services.Configure<ApnsSettings>(builder.Configuration.GetSection(ApnsSettings.Section));
 builder.Services.AddSingleton<ChatRealtimeService>();
 builder.Services.AddScoped<ChatService>();
+builder.Services.AddScoped<ChatCallSettingsService>();
+builder.Services.Configure<CloudflareTurnSettings>(builder.Configuration.GetSection(CloudflareTurnSettings.Section));
+builder.Services.AddHttpClient<ChatIceServersService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
 builder.Services.AddHttpClient<ChatPushNotificationService>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(20);
@@ -1177,14 +1183,20 @@ app.MapGet("/api/chat/blocks", async (
 .Produces<ApiError>(401)
 .RequireAuthorization();
 
-app.MapGet("/api/chat/calls/ice-servers", (
-    System.Security.Claims.ClaimsPrincipal user) =>
+app.MapGet("/api/chat/calls/ice-servers", async (
+    System.Security.Claims.ClaimsPrincipal user,
+    HttpContext httpContext,
+    ChatIceServersService iceServersService,
+    ChatCallSettingsService callSettings,
+    CancellationToken cancellationToken) =>
 {
     var userId = TryGetUserId(user);
     if (userId is null)
         return UnauthorizedResult();
 
-    return Results.Ok(ChatRealtimeService.BuildDefaultIceServersResponse());
+    httpContext.Response.Headers.CacheControl = "private, no-store";
+    var policy = await callSettings.GetPolicyAsync(cancellationToken);
+    return Results.Ok(await iceServersService.GetAsync(cancellationToken, relayOnly: policy == "relay"));
 })
 .WithName("GetChatCallIceServers")
 .WithMetadata(new SwaggerOperationAttribute(
@@ -2929,6 +2941,7 @@ startupLogger.LogInformation("[Startup] All checks passed — starting server.")
 
 AdminEndpoints.Map(app);
 AiSettingsEndpoints.Map(app);
+ChatCallSettingsEndpoints.Map(app);
 AdminAudioTestEndpoints.Map(app);
 AiPipelineEndpoints.Map(app);
 AdminPipelineRunEndpoints.Map(app);

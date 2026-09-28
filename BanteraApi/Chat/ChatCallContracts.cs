@@ -26,5 +26,6 @@ public record ChatIceServerEntryResponse(
 );
 
 public record ChatIceServersResponse(
-    IReadOnlyList<ChatIceServerEntryResponse> IceServers
+    IReadOnlyList<ChatIceServerEntryResponse> IceServers,
+    string IceTransportPolicy = "all"
 );
