@@ -17,12 +17,14 @@ public sealed class ChatPushNotificationServiceTests
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var handler = new CapturingHandler();
         using var client = new HttpClient(handler);
-        var service = new ChatPushNotificationService(client, Options.Create(new ApnsSettings
+        var options = Options.Create(new ApnsSettings
         {
             KeyId = "test-key", TeamId = "test-team", BundleId = "test.bantera",
             PrivateKeyPem = key.ExportPkcs8PrivateKeyPem(),
             Environment = ApnsSettings.EnvironmentProduction,
-        }), NullLogger<ChatPushNotificationService>.Instance);
+        });
+        var service = new ChatPushNotificationService(client, options, NullLogger<ChatPushNotificationService>.Instance,
+            new ApnsProviderTokenProvider(options, TimeProvider.System));
 
         await service.SendAsync(
             [new() { Token = "development-token", IsSandbox = true },

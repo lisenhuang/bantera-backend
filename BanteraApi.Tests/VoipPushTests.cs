@@ -17,9 +17,11 @@ public class VoipPushTests
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var handler = new Capture();
         using var client = new HttpClient(handler);
-        var service = new ChatPushNotificationService(client, Options.Create(new ApnsSettings {
+        var options = Options.Create(new ApnsSettings {
             KeyId = "test", TeamId = "team", BundleId = "bantera.test", PrivateKeyPem = key.ExportPkcs8PrivateKeyPem()
-        }), NullLogger<ChatPushNotificationService>.Instance);
+        });
+        var service = new ChatPushNotificationService(client, options, NullLogger<ChatPushNotificationService>.Instance,
+            new ApnsProviderTokenProvider(options, TimeProvider.System));
         UserPushToken[] tokens = [new() {Token = "alert", Platform = "ios"},
             new() {Token = "voip-dev", Platform = "ios-voip", IsSandbox = true},
             new() {Token = "voip-prod", Platform = "ios-voip"}];

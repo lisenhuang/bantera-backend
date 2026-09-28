@@ -65,6 +65,8 @@ builder.Services.AddHttpClient<ChatIceServersService>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(5);
 });
+builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+builder.Services.AddSingleton<ApnsProviderTokenProvider>();
 builder.Services.AddHttpClient<ChatPushNotificationService>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(20);

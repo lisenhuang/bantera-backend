@@ -39,3 +39,9 @@ The iPhone's unlocked incoming-call presentation follows its system preferences.
 ## Rollback
 
 Old mobile apps remain compatible with this backend. Before rolling the backend back to a version that does not recognize `ios-voip`, remove only rows with that platform (or retain the transport filtering patch); otherwise the old sender can mistake VoIP tokens for ordinary notification tokens. New clients require the new call-status and acceptance acknowledgement endpoints/events for CallKit answering.
+
+## Notification toggle fix (backend 1.0.139)
+
+Re-enabling chat notifications sends a normal test alert. The previous push sender signed a fresh APNs provider JWT for every send; Apple rejected a production request with `429 TooManyProviderTokenUpdates`. The sender now shares one provider JWT across transient HTTP clients, normal alerts and VoIP pushes, and renews it on demand after 50 minutes. Concurrent sends and renewal are covered by regression tests. The JWT remains in process memory and is never logged.
+
+Deploy backend 1.0.139 for this fix; app 2.0.59+247 and older published clients remain compatible. No new environment variables or migration are required. After deployment, turn Bantera notifications off and on, then test an incoming audio call with the iPhone locked. Check server logs for `PushType=voip` and status 200; APNs acceptance alone does not establish that the phone rang or audio worked.

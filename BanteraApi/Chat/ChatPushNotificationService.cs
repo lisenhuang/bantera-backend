@@ -1,17 +1,15 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Security.Cryptography;
 using BanteraApi.Database.Entities;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
 
 namespace BanteraApi.Chat;
 
 public class ChatPushNotificationService(
     HttpClient httpClient,
     IOptions<ApnsSettings> settingsOptions,
-    ILogger<ChatPushNotificationService> logger)
+    ILogger<ChatPushNotificationService> logger,
+    ApnsProviderTokenProvider providerTokens)
 {
     private readonly ApnsSettings _settings = settingsOptions.Value;
 
@@ -42,7 +40,7 @@ public class ChatPushNotificationService(
             return;
         }
 
-        var providerToken = CreateProviderToken();
+        var providerToken = providerTokens.GetToken();
         foreach (var pushToken in activeTokens)
         {
             var effectiveSandbox = _settings.EffectiveSandbox(pushToken.IsSandbox);
@@ -69,8 +67,9 @@ public class ChatPushNotificationService(
                 if (response.IsSuccessStatusCode)
                 {
                     logger.LogInformation(
-                        "[ChatPush] APNs send succeeded. Status={Status} Routing=TokenSandbox EnvironmentModeIgnored={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType}",
+                        "[ChatPush] APNs send succeeded. Status={Status} PushType={PushType} Routing=TokenSandbox EnvironmentModeIgnored={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType}",
                         (int)response.StatusCode,
+                        voip ? "voip" : "alert",
                         _settings.EnvironmentMode,
                         pushToken.IsSandbox,
                         effectiveSandbox,
@@ -83,8 +82,9 @@ public class ChatPushNotificationService(
 
                 var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 logger.LogWarning(
-                    "[ChatPush] APNs send failed. Status={Status} Routing=TokenSandbox EnvironmentModeIgnored={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType} Body={Body}",
+                    "[ChatPush] APNs send failed. Status={Status} PushType={PushType} Routing=TokenSandbox EnvironmentModeIgnored={EnvironmentMode} TokenSandbox={TokenSandbox} EffectiveSandbox={EffectiveSandbox} Endpoint={Endpoint} TokenSuffix={TokenSuffix} ThreadId={ThreadId} ThreadType={ThreadType} Body={Body}",
                     (int)response.StatusCode,
+                    voip ? "voip" : "alert",
                     _settings.EnvironmentMode,
                     pushToken.IsSandbox,
                     effectiveSandbox,
@@ -149,44 +149,4 @@ public class ChatPushNotificationService(
         return payload;
     }
 
-    private string CreateProviderToken()
-    {
-        var ecdsa = ECDsa.Create();
-        ecdsa.ImportFromPem(NormalizePem(_settings.PrivateKeyPem!).ToCharArray());
-
-        var signingKey = new ECDsaSecurityKey(ecdsa)
-        {
-            KeyId = _settings.KeyId,
-        };
-        var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.EcdsaSha256)
-        {
-            // Bypass the global provider cache so each call uses a fresh ECDsa instance.
-            // Without this, a cached provider can hold a reference to a previously disposed ECDsa.
-            CryptoProviderFactory = new CryptoProviderFactory { CacheSignatureProviders = false },
-        };
-        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var header = new JwtHeader(credentials)
-        {
-            ["kid"] = _settings.KeyId!,
-        };
-        var payload = new JwtPayload
-        {
-            { "iss", _settings.TeamId! },
-            { "iat", now },
-        };
-
-        try
-        {
-            return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(header, payload));
-        }
-        finally
-        {
-            ecdsa.Dispose();
-        }
-    }
-
-    private static string NormalizePem(string pem)
-    {
-        return pem.Replace("\\n", "\n").Trim();
-    }
 }
