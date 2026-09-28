@@ -38,11 +38,11 @@ public class GeminiServicePromptTests
         Assert.Contains("Do not invent, pad, or fabricate missing stories", prompt);
         Assert.DoesNotContain("Weave all 4", prompt);
         Assert.DoesNotContain("Aim for approximately", prompt);
-        Assert.DoesNotContain("words total across all speakers", prompt);
+        Assert.Contains("words total across all speakers", prompt);
     }
 
     [Fact]
-    public async Task GenerateDialogueAsync_NonNewsPrompt_UsesDurationWithoutExplicitWordTarget()
+    public async Task GenerateDialogueAsync_NonNewsPrompt_IncludesExplicitWordTarget()
     {
         var handler = new CapturingHandler();
         var service = CreateService(handler);
@@ -57,9 +57,11 @@ public class GeminiServicePromptTests
 
         Assert.Contains("Target audio duration: approximately 2 minutes.", prompt);
         Assert.Contains("normal conversational pace", prompt);
+        Assert.Contains("Script length target: 350 words", prompt);
+        Assert.Contains("acceptable range: 315-385", prompt);
         Assert.Contains("Use enough turns to fit the requested duration", prompt);
         Assert.DoesNotContain("Aim for approximately", prompt);
-        Assert.DoesNotContain("words total across all speakers", prompt);
+        Assert.Contains("words total across all speakers", prompt);
         Assert.Contains("One character must be male and the other female", prompt);
         Assert.Contains("Choose names natural to the target language and locale", prompt);
     }
@@ -396,6 +398,114 @@ public class GeminiServicePromptTests
         Assert.Contains("429", session.ToJson());
     }
 
+    [Theory]
+    [InlineData(288)] // Regression: the four-minute example produced only 1:37 of speech.
+    [InlineData(1000)]
+    public async Task Duration_RepairsTextBeforeGeneratingAudioOnce(int initialWords)
+    {
+        var handler = new DurationHandler([initialWords, 700]);
+        var service = CreateService(handler);
+        var dialogue = await service.GenerateDialogueAsync("English", "en-NZ", "coffee", 240);
+        var audio = await service.GenerateAudioAsync(dialogue, "en-NZ");
+
+        Assert.Equal(2, handler.TextRequests.Count);
+        Assert.Contains("TEXT LENGTH CORRECTION", handler.TextRequests[1]);
+        Assert.Contains(initialWords < 700 ? "Expand" : "Shorten", handler.TextRequests[1]);
+        Assert.Equal(700, dialogue.DurationPlan!.Count(dialogue.Lines));
+        Assert.Equal(1, handler.AudioRequests);
+        // Even a very short successful TTS response never starts a duration regeneration loop.
+        Assert.Equal(200, audio.DurationMs);
+    }
+
+    [Theory]
+    [InlineData(288)]
+    [InlineData(0)]
+    public async Task Duration_StopsAfterTwoTextCorrectionsWithoutExtraProviderRetries(int words)
+    {
+        var handler = new DurationHandler([words]);
+        var service = CreateService(handler, new("primary-text", "tts", "backup-text", null),
+            ["first-key", "second-key"]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.GenerateDialogueAsync("English", "en-NZ", "coffee", 240));
+        Assert.Equal(3, handler.TextRequests.Count);
+        Assert.All(handler.Urls, url =>
+        {
+            Assert.Contains("primary-text", url);
+            Assert.True(url.Contains("first-key") || url.Contains("second-key"));
+        });
+        Assert.Equal(0, handler.AudioRequests);
+    }
+
+    [Fact]
+    public async Task Duration_NewsRepairPreservesFactsWithoutAnotherSearch()
+    {
+        var handler = new DurationHandler([288, 700]);
+        await CreateService(handler).GenerateDialogueAsync("English", "en-NZ", "", 240, "latest_news");
+        Assert.Contains("google_search", handler.TextRequests[0]);
+        Assert.DoesNotContain("google_search", handler.TextRequests[1]);
+        Assert.Contains("do not search again or add new factual claims", handler.TextRequests[1]);
+        Assert.Contains("Quoted previous draft", handler.TextRequests[1]);
+    }
+
+    [Fact]
+    public async Task Duration_AdminTestKeepsOneAttemptAndExposesShortDraft()
+    {
+        var handler = new DurationHandler([288]);
+        var session = new GeminiTestSession("test-text", "test-tts", ["test-key"]);
+        var dialogue = await CreateService(handler).GenerateDialogueAsync("English", "en-NZ", "coffee", 240,
+            testSession: session);
+        Assert.Single(handler.TextRequests);
+        Assert.Equal(288, dialogue.DurationPlan!.Count(dialogue.Lines));
+        Assert.DoesNotContain("DurationPlan", JsonSerializer.Serialize(dialogue));
+    }
+
+    [Fact]
+    public async Task Duration_AcceptedDraftDoesNotNeedTextCorrection()
+    {
+        var handler = new DurationHandler([700]);
+        await CreateService(handler).GenerateDialogueAsync("English", "en-NZ", "coffee", 240);
+        Assert.Single(handler.TextRequests);
+    }
+
+    private static string DialogueJson(int words, string first = "female", string second = "male") =>
+        JsonSerializer.Serialize(new
+        {
+            title = "Coffee", speaker1_gender = first, speaker2_gender = second,
+            lines = Enumerable.Range(0, words).Chunk(10).Select((chunk, i) => new
+            {
+                speaker = i % 2 == 0 ? "Speaker1" : "Speaker2",
+                text = string.Join(" ", chunk.Select(_ => "hello")),
+                shortCues = new[] { string.Join(" ", chunk.Select(_ => "hello")) },
+            }).ToArray(),
+        });
+
+    private sealed class DurationHandler(int[] wordCounts) : HttpMessageHandler
+    {
+        public List<string> TextRequests { get; } = [];
+        public List<string> Urls { get; } = [];
+        public int AudioRequests { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var json = await request.Content!.ReadAsStringAsync(cancellationToken);
+            object part;
+            if (json.Contains("responseModalities"))
+            {
+                AudioRequests++;
+                part = new { inlineData = new { data = Convert.ToBase64String(new byte[9600]), mimeType = "audio/L16;codec=pcm;rate=24000" } };
+            }
+            else
+            {
+                var count = wordCounts[Math.Min(TextRequests.Count, wordCounts.Length - 1)];
+                TextRequests.Add(json);
+                Urls.Add(request.RequestUri!.ToString());
+                part = new { text = DialogueJson(count) };
+            }
+            var body = JsonSerializer.Serialize(new { candidates = new[] { new { content = new { parts = new[] { part } } } } });
+            return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        }
+    }
+
     private static GeminiService CreateService(
         HttpMessageHandler handler, AiModelSelection? selection = null, string[]? apiKeys = null)
     {
@@ -507,7 +617,7 @@ public class GeminiServicePromptTests
                 });
             }
 
-            return Task.FromResult(JsonResponse("{\"title\":\"Coffee\",\"speaker1_gender\":\"female\",\"speaker2_gender\":\"male\",\"lines\":[{\"speaker\":\"Speaker1\",\"text\":\"Hello\",\"shortCues\":[\"Hello\"]}]}"));
+            return Task.FromResult(JsonResponse(DialogueJson(175)));
         }
 
         private static HttpResponseMessage JsonResponse(string text)
@@ -534,7 +644,7 @@ public class GeminiServicePromptTests
                     Content = new StringContent("RESOURCE_EXHAUSTED"),
                 });
 
-            var dialogue = "{\"title\":\"Coffee\",\"speaker1_gender\":\"female\",\"speaker2_gender\":\"male\",\"lines\":[{\"speaker\":\"Speaker1\",\"text\":\"Hello\",\"shortCues\":[\"Hello\"]}]}";
+            var dialogue = DialogueJson(175);
             var body = JsonSerializer.Serialize(new { candidates = new[] { new { content = new { parts = new[] { new { text = dialogue } } } } } });
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -555,7 +665,7 @@ public class GeminiServicePromptTests
             LastPrompt = body.RootElement.GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
             var text = RequestCount == 1
                 ? "{\"rejected\":true,\"reason\":\"other\"}"
-                : "{\"title\":\"Coffee\",\"speaker1_gender\":\"female\",\"speaker2_gender\":\"male\",\"lines\":[{\"speaker\":\"Speaker1\",\"text\":\"Hello\",\"shortCues\":[\"Hello\"]}]}";
+                : DialogueJson(175);
             var response = JsonSerializer.Serialize(new { candidates = new[] { new { content = new { parts = new[] { new { text } } } } } });
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -579,29 +689,9 @@ public class GeminiServicePromptTests
                 : ("female", "male");
             RequestCount++;
 
-            var dialogueJson = JsonSerializer.Serialize(new
-            {
-                title = "News Chat",
-                speaker1_gender = pair.Item1,
-                speaker1_styles = new[] { "friendly" },
-                speaker2_gender = pair.Item2,
-                speaker2_styles = new[] { "calm" },
-                lines = new[]
-                {
-                    new
-                    {
-                        speaker = "Speaker1",
-                        text = "Mia, did you see the latest science news?",
-                        shortCues = new[] { "Mia, did you see the latest science news?" },
-                    },
-                    new
-                    {
-                        speaker = "Speaker2",
-                        text = "Yes, Noah, it sounded useful.",
-                        shortCues = new[] { "Yes, Noah, it sounded useful." },
-                    },
-                },
-            });
+            var target = int.Parse(System.Text.RegularExpressions.Regex.Match(GetPrompt(),
+                @"Script length target: (\d+)").Groups[1].Value);
+            var dialogueJson = DialogueJson(target, pair.Item1, pair.Item2);
 
             var responseJson = JsonSerializer.Serialize(new
             {
