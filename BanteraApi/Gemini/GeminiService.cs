@@ -600,6 +600,15 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             throw new InvalidOperationException("Dialogue audio requires one male and one female voice.");
 
         var ttsAccent = ResolveTtsAccentInstruction(languageCode);
+        var regionalLanguage = LearningLanguageCatalog.Items.FirstOrDefault(
+            item => item.Identifier.Equals(languageCode, StringComparison.OrdinalIgnoreCase));
+        // Reinforce the chosen regional voice on every 3.8 turn, including when
+        // the voice catalogue matched. Keep instructions out of the spoken text.
+        var structuredSpeechStyle = regionalLanguage is not null
+            ? $"Speak {regionalLanguage.DisplayName} with a strong, clearly recognisable native regional accent throughout. " +
+              "Make its characteristic vowel and consonant sounds, rhythm, stress and intonation distinctly audible. " +
+              "Keep the delivery natural and every word clear."
+            : $"Natural conversational delivery. {ttsAccent}".Trim();
         var dialogueText = string.Join("\n", dialogue.Lines.Select(l => $"{l.Speaker}: {l.Text}"));
         var models = await modelSettings.GetAsync(cancellationToken);
 
@@ -615,7 +624,8 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             if (structuredSpeech)
             {
                 var selection = new { languageCode, speaker1 = regionalVoices?.Speaker1,
-                    speaker2 = regionalVoices?.Speaker2, originalVoice1 = dialogue.Voice1, originalVoice2 = dialogue.Voice2 };
+                    speaker2 = regionalVoices?.Speaker2, originalVoice1 = dialogue.Voice1, originalVoice2 = dialogue.Voice2,
+                    speechStyle = structuredSpeechStyle };
                 await events.RecordAsync(regionalVoices is null ? AiPipelineSeverity.Warning : AiPipelineSeverity.Info,
                     "tts", regionalVoices is null ? "accent_voice_unavailable" : "accent_voices_selected",
                     regionalVoices is null ? "No regional male/female voice pair was available; using the configured voices with accent instructions."
@@ -640,9 +650,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                     speech_metadata = new
                     {
                         speaker = line.Speaker,
-                        style = regionalVoices is not null || ttsAccent is null
-                            ? "Natural conversational delivery."
-                            : $"Natural conversational delivery. {ttsAccent}",
+                        style = structuredSpeechStyle,
                     },
                 }).ToArray()
                 : [new { text = transcript }];

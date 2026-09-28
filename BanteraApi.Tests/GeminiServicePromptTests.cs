@@ -247,6 +247,16 @@ public class GeminiServicePromptTests
         Assert.Equal("au-female", voices[0].GetProperty("voiceConfig").GetProperty("voice").GetString());
         Assert.Equal("au-male", voices[1].GetProperty("voiceConfig").GetProperty("voice").GetString());
         Assert.DoesNotContain("prebuiltVoiceConfig", handler.Requests[0]);
+        var parts = body.RootElement.GetProperty("contents")[0].GetProperty("parts");
+        for (var i = 0; i < dialogue.Lines.Length; i++)
+        {
+            // Matching a native voice must not remove the accent instructions.
+            Assert.Equal(dialogue.Lines[i].Text, parts[i].GetProperty("text").GetString());
+            var style = parts[i].GetProperty("speech_metadata").GetProperty("style").GetString();
+            Assert.Contains("English (Australia)", style);
+            Assert.Contains("strong, clearly recognisable native regional accent", style);
+        }
+        Assert.Contains("speechStyle", session.ToJson());
         Assert.Contains("Australian", session.ToJson());
         Assert.Contains("voice_selection", session.ToJson());
     }
