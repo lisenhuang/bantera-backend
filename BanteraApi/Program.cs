@@ -114,6 +114,7 @@ builder.Services.AddScoped<RevAiAlignmentService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<AdminService>();
 builder.Services.AddScoped<AdminAnalyticsService>();
+builder.Services.AddHostedService<BanteraApi.WebsiteAnalytics.WebsiteAnalyticsCleanup>();
 
 // ── Admin MCP server (OAuth 2.1 authorization server + resource server) ───────
 builder.Services.Configure<McpSettings>(builder.Configuration.GetSection(McpSettings.Section));
@@ -188,6 +189,9 @@ builder.Services.AddRateLimiter(opts =>
             QueueLimit = 0,
         }));
 
+    opts.AddPolicy("website-analytics", _ => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: "website", factory: _ => new FixedWindowRateLimiterOptions
+        { PermitLimit = 1200, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     opts.RejectionStatusCode = 429;
 });
 
@@ -2981,6 +2985,7 @@ startupLogger.LogInformation("[Startup] All checks passed — starting server.")
 // ─────────────────────────────────────────────────────────────────────────────
 
 AdminEndpoints.Map(app);
+BanteraApi.WebsiteAnalytics.WebsiteAnalyticsEndpoints.Map(app);
 AiSettingsEndpoints.Map(app);
 ChatCallSettingsEndpoints.Map(app);
 AdminAudioTestEndpoints.Map(app);

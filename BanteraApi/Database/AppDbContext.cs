@@ -44,6 +44,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.Entity<BanteraApi.WebsiteAnalytics.WebsiteEvent>(e =>
+        {
+            e.ToTable("website_events");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ReceivedAt);
+            e.HasIndex(x => new { x.SessionId, x.ReceivedAt });
+            foreach (var property in new[] { "Name", "Path", "LandingPath", "Source", "Evidence", "ReferrerHost", "Campaign", "Medium", "Language", "Device" })
+                e.Property<string>(property).HasMaxLength(253);
+        });
+
         b.Entity<ChatMessageDeletion>(e =>
         {
             e.ToTable("chat_message_deletions");
