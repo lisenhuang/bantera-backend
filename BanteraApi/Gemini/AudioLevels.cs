@@ -27,7 +27,7 @@ public static class AudioLevels
 
     public static string DialogueInstruction(string level) => level switch
     {
-        Beginner => "Difficulty: Beginner. Use very common words, simple grammar, short direct sentences, and concrete everyday ideas. Explain unavoidable unfamiliar terms simply. Avoid idioms, slang, implied meanings, and complex clauses. Keep the conversation useful and natural for an adult learner.",
+        Beginner => "Difficulty: Beginner. Use basic, simple words that a beginner can easily understand, simple grammar, short direct sentences, and concrete everyday ideas. Choose the simplest natural word for the meaning; avoid difficult or advanced words even when they are commonly used. Explain unavoidable unfamiliar terms using basic, simple words. Avoid idioms, slang, implied meanings, and complex clauses. Keep the conversation useful and natural for an adult learner.",
         Advanced => "Difficulty: Advanced. Use varied vocabulary and grammar, nuanced opinions, longer explanations, and implied meaning where natural. Include idiomatic expressions when they fit, without forcing slang or regional stereotypes. Keep the dialogue realistic and speakable, not academic prose.",
         _ => "Difficulty: Intermediate. Use everyday vocabulary, varied but accessible sentences, common expressions, and clear explanations. Keep the dialogue natural and easy to follow without specialist knowledge.",
     };

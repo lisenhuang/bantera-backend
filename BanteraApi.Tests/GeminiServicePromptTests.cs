@@ -14,7 +14,7 @@ namespace BanteraApi.Tests;
 public class GeminiServicePromptTests
 {
     [Theory]
-    [InlineData("beginner", "Difficulty: Beginner", "simple grammar")]
+    [InlineData("beginner", "Difficulty: Beginner", "Use basic, simple words that a beginner can easily understand")]
     [InlineData("intermediate", "Difficulty: Intermediate", "accessible sentences")]
     [InlineData("advanced", "Difficulty: Advanced", "nuanced opinions")]
     public async Task DialogueLevelChangesPromptAndSurvivesIntoSpeech(string level, string heading, string instruction)

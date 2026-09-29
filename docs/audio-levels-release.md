@@ -1,10 +1,12 @@
 # Audio levels release
 
-Backend: **1.0.143**. Flutter app: **2.0.64+252**.
+Backend: **1.0.144**. Flutter app: **2.0.66+254**.
 
 Discover initially shows All levels. Beginner, Intermediate, and Advanced use the same saved device preference as Generate with AI. Selecting All levels clears the generation choice, which displays Select level and disables generation until a specific level is selected. The choice persists across app restarts. Both menus use matching native bar icons and localized labels.
 
 Existing AI audio is returned and filtered as Intermediate. Uploaded content without a level is still visible under All levels. New AI audio stores its chosen level; dialogue complexity and speech delivery instructions use that level. Beginner uses a smaller script-length target for gentler speech. No existing recordings are regenerated.
+
+Version 1.0.144 strengthens the Beginner prompt to require basic, simple words and avoid difficult words even when they are commonly used. This follow-up adds no schema or configuration changes and requires only a backend deployment if the levels feature is already installed.
 
 ## Deployment decision
 
@@ -14,10 +16,10 @@ Migration `20260929013417_AddAudioLevel` adds nullable `user_videos.Level` (`var
 
 ## Human release steps
 
-1. Commit/publish the backend changes through your normal release process, then update the server checkout or image to version 1.0.143. These changes have not been committed or pushed by the agent.
+1. Update the server checkout or image to the backend 1.0.144 changes on main through your normal release process.
 2. Deploy the backend first, preserving the server's existing secrets and environment. For a server using the repository's source-build Compose configuration, run `docker compose build api` and then `docker compose up -d api` from that server checkout. If your server uses a prebuilt image, publish/pull the updated image through your normal image release process instead.
 3. Check startup logs for a successful database initialization and migration. Confirm a public-list request returns successfully before installing the new app.
-4. Install/update the app to 2.0.64 (build 252). Open `app/ios/Runner.xcworkspace`, select the phone and signing team, then Run, or distribute a signed build through your usual process. A clean uninstall is unnecessary. The local no-codesign build is compiled but is not a signed installable device release.
+4. Install/update the app to 2.0.66 (build 254). Open `app/ios/Runner.xcworkspace`, select the phone and signing team, then Run, or distribute a signed build through your usual process. A clean uninstall is unnecessary. The local no-codesign build is compiled but is not a signed installable device release.
 
 The checked-in `deploy/deploy.sh` pulls a GHCR image while the checked-in Compose file currently uses `build: .`; ensure your server's actual release path rebuilds or selects the updated image. Do not rely on pulling an image alone to update a source-built service.
 
@@ -33,10 +35,10 @@ No website changes or website deployment are needed.
 
 ## Local validation
 
-- Backend build passed; backend suite: 346 passed, 1 unrelated local analytics integration test skipped.
+- Backend build passed; the initial levels suite had 346 passed and 1 unrelated local analytics integration test skipped. The 1.0.144 vocabulary follow-up passed all 56 relevant prompt and level tests.
 - Generated migration SQL applied successfully to temporary local PostgreSQL tables. Legacy filtering, visibility, and pagination checks passed there; no production migration was run.
 - 16 focused Flutter tests passed, covering shared selectors, persistence, All-level reset, long translated labels, API parameters, legacy response parsing, generation, and existing stream recovery.
 - Dart analysis of changed application/test files: no issues.
-- `flutter build ios --debug --no-codesign` passed; Generated.xcconfig reports 2.0.64 / 252.
+- `flutter build ios --debug --no-codesign` passed; Generated.xcconfig reports 2.0.66 / 254.
 - Existing backend warnings remain, including the Microsoft.OpenApi 2.4.1 advisory and existing nullable/raw-SQL warnings. Dependency upgrades are outside this change.
 - No live deployment, physical-device installation, or paid AI generation was performed.
