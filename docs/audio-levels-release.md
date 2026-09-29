@@ -1,6 +1,6 @@
 # Audio levels release
 
-Backend: **1.0.146**. Flutter app: **2.0.66+254**.
+Backend: **1.0.147**. Flutter app: **2.0.66+254**.
 
 Discover initially shows All levels. Beginner, Intermediate, and Advanced use the same saved device preference as Generate with AI. Selecting All levels clears the generation choice, which displays Select level and disables generation until a specific level is selected. The choice persists across app restarts. Both menus use matching native bar icons and localized labels.
 
@@ -12,6 +12,8 @@ Version 1.0.145 adds optional `level` to MCP `submit_practice_audio`: `beginner`
 
 The subsequent 1.0.146 transcription-code audit and deployment steps are documented in [transcription-language-audit.md](transcription-language-audit.md).
 
+Version 1.0.147 makes dialogue length advisory for all languages and levels. The first valid dialogue proceeds to TTS even outside the estimated duration range. Length-only corrections and their terminal error are removed. The prompt keeps a suggested length target; `script_duration_checked` records `withinTargetRange` with `accepted: true` and `diagnosticOnly: true`. Empty spoken text still fails before TTS, and existing content/format/provider-error handling remains active. Requested duration is approximate and may differ from actual audio duration. No API, migration, environment, service-registration, or app changes are needed.
+
 ## Deployment decision
 
 **GO for backend deployment with the currently published app.** Changes are additive: generation requests that omit `level` still work and default to Intermediate, public-list requests without `level` retain all levels, and old clients can ignore the new response field. No new environment variables, secrets, or service registrations are required.
@@ -20,7 +22,7 @@ Migration `20260929013417_AddAudioLevel` adds nullable `user_videos.Level` (`var
 
 ## Human release steps
 
-1. Ensure the backend 1.0.146 changes have been committed and pushed, then update the server checkout or image through your normal release process.
+1. Ensure the backend 1.0.147 changes have been committed and pushed, then update the server checkout or image through your normal release process.
 2. Deploy the backend first, preserving the server's existing secrets and environment. For a server using the repository's source-build Compose configuration, run `docker compose build api` and then `docker compose up -d api` from that server checkout. If your server uses a prebuilt image, publish/pull the updated image through your normal image release process instead.
 3. Check startup logs for a successful database initialization and migration. Confirm a public-list request returns successfully before installing the new app.
 4. Install/update the app to 2.0.66 (build 254). Open `app/ios/Runner.xcworkspace`, select the phone and signing team, then Run, or distribute a signed build through your usual process. A clean uninstall is unnecessary. The local no-codesign build is compiled but is not a signed installable device release.
@@ -32,6 +34,7 @@ No website changes or website deployment are needed.
 
 ## Smoke checks after deployment
 
+- For 1.0.147, generate a two-minute Beginner Cantonese news lesson. A short valid draft should log one diagnostic length check and continue to TTS without length-correction requests. Verify audio, transcription, and saving complete; actual duration may be shorter than requested.
 - With the published old app, list existing content and generate an audio without a level; generation should remain supported.
 - Verify the refreshed MCP schema exposes optional `level`. On the next authored submission, use `level: "advanced"` and confirm both the submit response and `video_lookup` report Advanced and Discover's Advanced filter includes it. A retry must return the same item and saved level. Existing callers omitting the field should save Intermediate.
 - On the new app, start with All levels, choose Beginner in Discover, and confirm Generate with AI also shows Beginner. Change to Advanced there and confirm Discover updates.

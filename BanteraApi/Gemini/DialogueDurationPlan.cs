@@ -60,7 +60,7 @@ public sealed record DialogueDurationPlan(int RequestedSeconds, int UnitsPerMinu
 
     public string PromptInstruction =>
         $"Script length target: {TargetUnits} {UnitName} total across all speakers; " +
-        $"acceptable range: {MinimumUnits}-{MaximumUnits}. Count only spoken text in the lines, " +
+        $"suggested range: {MinimumUnits}-{MaximumUnits}. Count only spoken text in the lines, " +
         "excluding title, speaker labels, punctuation, and duplicate shortCues. " +
         "Plan enough meaningful turns to reach this length. Do not use repetition, filler, " +
         "invented news facts, or slower delivery to fill time.";

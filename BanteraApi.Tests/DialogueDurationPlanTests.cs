@@ -6,7 +6,7 @@ namespace BanteraApi.Tests;
 public class DialogueDurationPlanTests
 {
     [Fact]
-    public void FourMinuteEnglishRejectsTheShortProductionScript()
+    public void FourMinuteEnglishIdentifiesShortScriptsForDiagnostics()
     {
         var plan = DialogueDurationPlan.Create("en-NZ", 240);
         Assert.Equal(700, plan.TargetUnits);

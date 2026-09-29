@@ -239,7 +239,7 @@ public class GeminiServicePromptTests
         Assert.Contains("Target audio duration: approximately 2 minutes.", prompt);
         Assert.Contains("normal conversational pace", prompt);
         Assert.Contains("Script length target: 350 words", prompt);
-        Assert.Contains("acceptable range: 315-385", prompt);
+        Assert.Contains("suggested range: 315-385", prompt);
         Assert.Contains("Use enough turns to fit the requested duration", prompt);
         Assert.DoesNotContain("Aim for approximately", prompt);
         Assert.Contains("words total across all speakers", prompt);
@@ -580,52 +580,58 @@ public class GeminiServicePromptTests
     }
 
     [Theory]
-    [InlineData(288)] // Regression: the four-minute example produced only 1:37 of speech.
+    [InlineData(288)]
     [InlineData(1000)]
-    public async Task Duration_RepairsTextBeforeGeneratingAudioOnce(int initialWords)
+    public async Task Duration_FirstValidDraftProceedsToAudioWithoutLengthCorrections(int initialWords)
     {
         var handler = new DurationHandler([initialWords, 700]);
         var service = CreateService(handler);
         var dialogue = await service.GenerateDialogueAsync("English", "en-NZ", "coffee", 240);
         var audio = await service.GenerateAudioAsync(dialogue, "en-NZ");
 
-        Assert.Equal(2, handler.TextRequests.Count);
-        Assert.Contains("TEXT LENGTH CORRECTION", handler.TextRequests[1]);
-        Assert.Contains(initialWords < 700 ? "Expand" : "Shorten", handler.TextRequests[1]);
-        Assert.Equal(700, dialogue.DurationPlan!.Count(dialogue.Lines));
+        Assert.Single(handler.TextRequests);
+        Assert.Equal(initialWords, dialogue.DurationPlan!.Count(dialogue.Lines));
+        Assert.False(dialogue.DurationPlan.IsAcceptable(initialWords));
         Assert.Equal(1, handler.AudioRequests);
-        // Even a very short successful TTS response never starts a duration regeneration loop.
         Assert.Equal(200, audio.DurationMs);
     }
 
-    [Theory]
-    [InlineData(288)]
-    [InlineData(0)]
-    public async Task Duration_StopsAfterTwoTextCorrectionsWithoutExtraProviderRetries(int words)
+    [Fact]
+    public async Task Duration_EmptyDialogueStillFailsBeforeSpeech()
     {
-        var handler = new DurationHandler([words]);
-        var service = CreateService(handler, new("primary-text", "tts", "backup-text", null),
-            ["first-key", "second-key"]);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.GenerateDialogueAsync("English", "en-NZ", "coffee", 240));
-        Assert.Equal(3, handler.TextRequests.Count);
-        Assert.All(handler.Urls, url =>
-        {
-            Assert.Contains("primary-text", url);
-            Assert.True(url.Contains("first-key") || url.Contains("second-key"));
-        });
+        var handler = new DurationHandler([0]);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateService(handler).GenerateDialogueAsync("English", "en-NZ", "coffee", 240));
+        Assert.Contains("no spoken text", error.Message);
+        Assert.Single(handler.TextRequests);
         Assert.Equal(0, handler.AudioRequests);
     }
 
     [Fact]
-    public async Task Duration_NewsRepairPreservesFactsWithoutAnotherSearch()
+    public async Task Duration_ShortNewsDraftProceedsWithoutAnotherSearchOrRevision()
     {
         var handler = new DurationHandler([288, 700]);
-        await CreateService(handler).GenerateDialogueAsync("English", "en-NZ", "", 240, "latest_news");
-        Assert.Contains("google_search", handler.TextRequests[0]);
-        Assert.DoesNotContain("google_search", handler.TextRequests[1]);
-        Assert.Contains("do not search again or add new factual claims", handler.TextRequests[1]);
-        Assert.Contains("Quoted previous draft", handler.TextRequests[1]);
+        var dialogue = await CreateService(handler).GenerateDialogueAsync("English", "en-NZ", "", 240, "latest_news");
+        Assert.Contains("google_search", Assert.Single(handler.TextRequests));
+        Assert.Equal(288, dialogue.DurationPlan!.Count(dialogue.Lines));
+    }
+
+    [Theory]
+    [InlineData("yue-CN")]
+    [InlineData("zh-HK")]
+    [InlineData("zh-CN")]
+    public async Task Duration_ShortBeginnerChineseNewsKeepsTheFirstDraft(string locale)
+    {
+        // 54 five-letter tokens count as 270 characters, below the 303-character minimum.
+        var handler = new DurationHandler([54]);
+        var service = CreateService(handler);
+        var dialogue = await service.GenerateDialogueAsync("Chinese", locale, "", 120, "latest_news", level: "beginner");
+        await service.GenerateAudioAsync(dialogue, locale);
+        Assert.Single(handler.TextRequests);
+        Assert.Equal(270, dialogue.DurationPlan!.Count(dialogue.Lines));
+        Assert.Equal(303, dialogue.DurationPlan.MinimumUnits);
+        Assert.Equal("beginner", dialogue.Level);
+        Assert.Equal(1, handler.AudioRequests);
     }
 
     [Fact]
