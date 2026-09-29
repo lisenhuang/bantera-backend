@@ -159,7 +159,8 @@ public class VideoService(
         string? mediaType,
         HttpContext httpContext,
         bool includeV2 = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? level = null)
     {
         var normalizedCode = languageCode?.Trim().ToLowerInvariant();
 
@@ -172,6 +173,8 @@ public class VideoService(
 
         var query = ApplyV2Filter(db.UserVideos.AsNoTracking(), includeV2)
             .Where(v => v.IsPublic);
+
+        query = AudioLevels.Filter(query, level);
 
         var mt = mediaType?.Trim().ToLowerInvariant();
         if (!string.IsNullOrWhiteSpace(mt))
@@ -205,6 +208,7 @@ public class VideoService(
         var result = await query
             .Join(db.Users, v => v.UserId, u => u.Id, (v, u) => new { Video = v, CreatorName = u.Name })
             .OrderByDescending(x => x.Video.CreatedAt)
+            .ThenByDescending(x => x.Video.Id)
             .Skip(offset)
             .Take(limit)
             .ToListAsync(cancellationToken);
@@ -271,7 +275,8 @@ public class VideoService(
             creatorDisplayName,
             video.TranscriptionVersion,
             ParseDialogueLines(video.DialogueLinesJson),
-            ParseWordTiming(video.WordTimingJson));
+            ParseWordTiming(video.WordTimingJson),
+            AudioLevels.ForContent(video));
     }
 
     private static bool CanAccess(UserVideo video, Guid? requesterUserId)
@@ -428,7 +433,8 @@ public class VideoService(
         IReadOnlyList<Gemini.VideoTranscriptCueRecord> cues,
         bool isTranscriptionEstimated,
         HttpContext httpContext,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? level = null)
     {
         var objectKey = $"videos/{userId}/{Guid.NewGuid():N}{audio.FileExtension}";
         await r2StorageService.UploadObjectAsync(objectKey, new MemoryStream(audio.Bytes), audio.ContentType, cancellationToken);
@@ -456,6 +462,7 @@ public class VideoService(
             TranscriptCuesJson = cuesJson,
             IsPublic = true,
             IsAiGenerated = true,
+            Level = AudioLevels.ForGeneration(level),
             IsTranscriptionEstimated = isTranscriptionEstimated,
             CoverImageObjectKey = coverKey,
             FileSizeBytes = audio.Bytes.Length,
@@ -486,7 +493,8 @@ public class VideoService(
         IReadOnlyList<Gemini.VideoTranscriptCueRecord>? shortCues,
         int durationMs,
         HttpContext httpContext,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? level = null)
     {
         var coverKey = await TryGenerateAiAudioCoverAsync(
             userId,
@@ -522,6 +530,7 @@ public class VideoService(
                 : JsonSerializer.Serialize(wordTiming, TranscriptJsonOptions),
             IsPublic = true,
             IsAiGenerated = true,
+            Level = AudioLevels.ForGeneration(level),
             IsTranscriptionEstimated = false,
             CoverImageObjectKey = coverKey,
             FileSizeBytes = fileSizeBytes,

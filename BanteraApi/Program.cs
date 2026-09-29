@@ -1476,6 +1476,13 @@ app.MapPost("/api/me/audio/generate", async (
         return;
     }
 
+    if (req.Level is not null && !AudioLevels.IsValid(req.Level))
+    {
+        httpContext.Response.StatusCode = 400;
+        await httpContext.Response.WriteAsJsonAsync(new ApiError("invalid_level", "Select Beginner, Intermediate, or Advanced."), cancellationToken);
+        return;
+    }
+
     const int defaultDailyLimit = 5;
     var todayUtc = DateTime.UtcNow.Date;
     var todayCount = await db.UserVideos
@@ -1526,14 +1533,14 @@ app.MapPost("/api/me/audio/generate", async (
             req.NativeLanguage,
             req.NativeLanguageCode,
             false,
-            cancellationToken);
+            cancellationToken, level: req.Level);
         var flattenedShortCueTexts = BuildFlattenedShortCueTexts(dialogue.Lines);
 
         var audio = await geminiService.GenerateAudioAsync(dialogue, req.LanguageCode, cancellationToken);
         var timing = await aiAudioTimingService.TryBuildAsync(dialogue.Lines, audio, req.LanguageCode, buildShortCues: false, cancellationToken);
         var cues = timing?.Cues ?? geminiService.EstimateCues(dialogue.Lines, audio.DurationMs);
         await pipelineEvents.RecordAsync("info", "save", "save_started", "Saving generated audio.");
-        var videoResponse = await videoService.SaveAiAudioAsync(userId.Value, dialogue.Title, audio, req.Language, req.LanguageCode, cues, isTranscriptionEstimated: timing is null, httpContext, cancellationToken);
+        var videoResponse = await videoService.SaveAiAudioAsync(userId.Value, dialogue.Title, audio, req.Language, req.LanguageCode, cues, isTranscriptionEstimated: timing is null, httpContext, cancellationToken, level: req.Level);
         await pipelineEvents.RecordAsync("info", "save", "save_succeeded", "Generated audio was saved.", new { videoId = videoResponse.Id });
         v1Job.Status = "done";
         v1Job.VideoId = videoResponse.Id;
@@ -1620,6 +1627,13 @@ app.MapPost("/api/me/audio/generate/v2", async (
         return;
     }
 
+    if (req.Level is not null && !AudioLevels.IsValid(req.Level))
+    {
+        httpContext.Response.StatusCode = 400;
+        await httpContext.Response.WriteAsJsonAsync(new ApiError("invalid_level", "Select Beginner, Intermediate, or Advanced."), cancellationToken);
+        return;
+    }
+
     using var genCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
     var genToken = genCts.Token;
 
@@ -1688,7 +1702,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             req.NativeLanguage,
             req.NativeLanguageCode,
             req.UseWebSearch,
-            genToken);
+            genToken, level: req.Level);
         await SendSafe(new { step = "dialogue", lines = dialogue.Lines.Select(l => l.Text).ToArray() });
         lastStep = "dialogue";
         if (dialogue.ShortCueValidationFailures.Count > 0)
@@ -2081,7 +2095,7 @@ app.MapPost("/api/me/audio/generate/v2", async (
             shortCues,
             durationMs,
             httpContext,
-            genToken);
+            genToken, level: req.Level);
         await pipelineEvents.RecordAsync("info", "save", "save_succeeded", "Generated audio was saved.", new { videoId = videoResponse.Id });
         if (videoResponse.TranscriptShortCues is null)
         {
@@ -2285,6 +2299,13 @@ app.MapPost("/api/me/audio/generate/v3",
             return;
         }
 
+        if (req.Level is not null && !AudioLevels.IsValid(req.Level))
+        {
+            httpContext.Response.StatusCode = 400;
+            await httpContext.Response.WriteAsJsonAsync(new ApiError("invalid_level", "Select Beginner, Intermediate, or Advanced."), cancellationToken);
+            return;
+        }
+
         using var genCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var genToken = genCts.Token;
 
@@ -2326,7 +2347,7 @@ app.MapPost("/api/me/audio/generate/v3",
 
             var v3Dialogue = await geminiService.GenerateDialogueAsync(
                 req.Language, req.LanguageCode, req.Scenario, req.DurationSeconds,
-                req.ScenarioId, req.NativeLanguage, req.NativeLanguageCode, req.UseWebSearch, genToken);
+                req.ScenarioId, req.NativeLanguage, req.NativeLanguageCode, req.UseWebSearch, genToken, level: req.Level);
             await SendSafeV3(new { step = "dialogue", lines = v3Dialogue.Lines.Select(l => l.Text).ToArray() });
 
             var v3FlatCues = BuildFlattenedShortCueTexts(v3Dialogue.Lines);
@@ -2386,7 +2407,7 @@ app.MapPost("/api/me/audio/generate/v3",
                 v3Audio.ContentType, v3Audio.FileExtension,
                 req.Language, req.LanguageCode,
                 v3Timing?.DisplayLines ?? v3Dialogue.Lines, v3WordTiming, v3FinalCues, v3ShortCues,
-                v3DurMs, httpContext, genToken);
+                v3DurMs, httpContext, genToken, level: req.Level);
             await pipelineEvents.RecordAsync("info", "save", "save_succeeded", "Generated audio was saved.", new { videoId = v3Video.Id });
 
             if (v3Job is not null)
@@ -2601,10 +2622,14 @@ app.MapGet("/api/videos/public", async (
     [FromQuery] string? search,
     [FromQuery] string? mediaType,
     [FromQuery] bool? includeV2,
+    [FromQuery] string? level,
     HttpContext httpContext,
     VideoService videoService,
     CancellationToken cancellationToken) =>
 {
+    if (level is not null && !AudioLevels.IsValid(level))
+        return Results.BadRequest(new ApiError("invalid_level", "Select Beginner, Intermediate, or Advanced, or omit the level for all levels."));
+
     var safeLimit = Math.Clamp(limit <= 0 ? 20 : limit, 1, 50);
     var safeOffset = Math.Max(offset, 0);
     var videos = await videoService.ListPublicVideosAsync(
@@ -2615,7 +2640,7 @@ app.MapGet("/api/videos/public", async (
         mediaType,
         httpContext,
         includeV2 != false,
-        cancellationToken);
+        cancellationToken, level);
 
     return Results.Ok(videos);
 })

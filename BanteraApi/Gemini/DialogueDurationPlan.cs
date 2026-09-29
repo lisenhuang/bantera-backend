@@ -15,7 +15,7 @@ public sealed record DialogueDurationPlan(int RequestedSeconds, int UnitsPerMinu
     public int MinimumUnits => Math.Max(1, (int)Math.Ceiling(TargetUnits * .9));
     public int MaximumUnits => Math.Max(MinimumUnits, (int)Math.Floor(TargetUnits * 1.1));
 
-    public static DialogueDurationPlan Create(string languageCode, int durationSeconds)
+    public static DialogueDurationPlan Create(string languageCode, int durationSeconds, string? level = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(durationSeconds);
         var language = languageCode.Replace('_', '-').Split('-')[0].ToLowerInvariant();
@@ -31,6 +31,10 @@ public sealed record DialogueDurationPlan(int RequestedSeconds, int UnitsPerMinu
             "fr" or "it" => (160, false, "words"),
             _ => (150, false, "words"),
         };
+        // Leave existing Intermediate/Advanced conversational targets unchanged.
+        // Beginner speech needs fewer units to allow clearer, gentler delivery.
+        if (AudioLevels.ForGeneration(level) == AudioLevels.Beginner)
+            rate = (int)Math.Round(rate * 0.7);
         return new(durationSeconds, rate, characters, unit);
     }
 

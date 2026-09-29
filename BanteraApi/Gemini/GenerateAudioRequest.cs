@@ -9,4 +9,5 @@ public record GenerateAudioRequest(
     string? NativeLanguage = null,
     string? NativeLanguageCode = null,
     bool UseWebSearch = false,
-    Guid? ClientJobId = null);
+    Guid? ClientJobId = null,
+    string? Level = null);

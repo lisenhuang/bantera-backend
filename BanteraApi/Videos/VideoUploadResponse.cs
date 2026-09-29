@@ -39,4 +39,5 @@ public sealed record VideoUploadResponse(
     string? CreatorDisplayName,
     int? TranscriptionVersion,
     IReadOnlyList<string>? DialogueLines,
-    IReadOnlyList<WordTimingDto>? WordTiming);
+    IReadOnlyList<WordTimingDto>? WordTiming,
+    string? Level = null);

@@ -17,6 +17,7 @@ public class UserVideo
     public string? DialogueLinesJson { get; set; }
     public string? WordTimingJson { get; set; }
     public bool IsPublic { get; set; }
+    public string? Level { get; set; }
     public bool IsAiGenerated { get; set; } = false;
     public bool IsTranscriptionEstimated { get; set; } = false;
     public string? CoverImageObjectKey { get; set; }

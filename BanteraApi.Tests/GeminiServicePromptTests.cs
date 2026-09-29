@@ -13,6 +13,47 @@ namespace BanteraApi.Tests;
 
 public class GeminiServicePromptTests
 {
+    [Theory]
+    [InlineData("beginner", "Difficulty: Beginner", "simple grammar")]
+    [InlineData("intermediate", "Difficulty: Intermediate", "accessible sentences")]
+    [InlineData("advanced", "Difficulty: Advanced", "nuanced opinions")]
+    public async Task DialogueLevelChangesPromptAndSurvivesIntoSpeech(string level, string heading, string instruction)
+    {
+        var handler = new CapturingHandler();
+        var dialogue = await CreateService(handler).GenerateDialogueAsync("English", "en-NZ", "coffee", 60, level: level);
+        Assert.Equal(level, dialogue.Level);
+        Assert.Contains(heading, handler.GetPrompt());
+        Assert.Contains(instruction, handler.GetPrompt());
+        if (level == "advanced")
+        {
+            Assert.DoesNotContain("Keep sentences short", handler.GetPrompt());
+            Assert.DoesNotContain("Keep the language plain", handler.GetPrompt());
+        }
+    }
+
+    [Theory]
+    [InlineData("beginner", "gemini-3.8-flash-tts", "deliberately slower")]
+    [InlineData("beginner", "gemini-2.5-flash-preview-tts", "deliberately slower")]
+    [InlineData("advanced", "gemini-3.8-flash-lite-tts", "full, natural conversational pace")]
+    [InlineData("advanced", "gemini-3.1-flash-tts-preview", "full, natural conversational pace")]
+    public async Task SpeechLevelReachesBothTtsFormats(string level, string model, string instruction)
+    {
+        var handler = new PreviewAudioHandler();
+        var dialogue = new GeneratedDialogue("Chat", "Kore", "Puck",
+            [new("Speaker1", "Hello."), new("Speaker2", "Hi.")], []) { Level = level };
+        await CreateService(handler, new("text", model, null, null)).GenerateAudioAsync(dialogue, "en-US");
+        using var document = JsonDocument.Parse(Assert.Single(handler.Requests));
+        var parts = document.RootElement.GetProperty("contents")[0].GetProperty("parts");
+        if (model.Contains("3.8"))
+        {
+            foreach (var part in parts.EnumerateArray())
+                Assert.Contains(instruction, part.GetProperty("speech_metadata").GetProperty("style").GetString());
+            Assert.Equal("Hello.", parts[0].GetProperty("text").GetString());
+        }
+        else
+            Assert.Contains(instruction, parts[0].GetProperty("text").GetString());
+    }
+
     [Fact]
     public async Task GenerateDialogueAsync_LatestNewsPrompt_AllowsFewerStoriesThanRequested()
     {

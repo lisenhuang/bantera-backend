@@ -136,6 +136,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("user_videos");
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+            e.Property(x => x.Level).HasMaxLength(16);
             e.Property(x => x.MediaObjectKey).HasMaxLength(255).IsRequired();
             e.Property(x => x.MediaContentType).HasMaxLength(100).IsRequired();
             e.Property(x => x.OriginalFileName).HasMaxLength(255).IsRequired();

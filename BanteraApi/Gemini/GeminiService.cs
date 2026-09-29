@@ -269,9 +269,11 @@ public class GeminiService(
         string? nativeLanguageCode = null,
         bool useWebSearchForCustom = false,
         CancellationToken cancellationToken = default,
-        GeminiTestSession? testSession = null)
+        GeminiTestSession? testSession = null,
+        string? level = null)
     {
-        var durationPlan = DialogueDurationPlan.Create(languageCode, durationSeconds);
+        var effectiveLevel = AudioLevels.ForGeneration(level);
+        var durationPlan = DialogueDurationPlan.Create(languageCode, durationSeconds, effectiveLevel);
         GeneratedDialogue? previous = null;
         // Admin tests deliberately expose a single model attempt, including its length mistakes.
         var maxDrafts = testSession is null ? 3 : 1;
@@ -280,7 +282,7 @@ public class GeminiService(
             cancellationToken.ThrowIfCancellationRequested();
             var dialogue = await GenerateDialogueDraftAsync(language, languageCode, scenario, durationSeconds,
                 durationPlan, previous, scenarioId, nativeLanguage, nativeLanguageCode,
-                useWebSearchForCustom, cancellationToken, testSession);
+                useWebSearchForCustom, cancellationToken, testSession, effectiveLevel);
             var units = durationPlan.Count(dialogue.Lines);
             var accepted = durationPlan.IsAcceptable(units);
             await events.RecordAsync(accepted ? AiPipelineSeverity.Info : AiPipelineSeverity.Warning,
@@ -290,7 +292,7 @@ public class GeminiService(
                     units, estimatedSeconds = durationPlan.EstimateSeconds(units), accepted,
                     diagnosticOnly = testSession is not null });
             if (accepted || testSession is not null)
-                return dialogue with { DurationPlan = durationPlan };
+                return dialogue with { DurationPlan = durationPlan, Level = effectiveLevel };
             previous = dialogue;
         }
 
@@ -310,10 +312,19 @@ public class GeminiService(
         string? nativeLanguageCode = null,
         bool useWebSearchForCustom = false,
         CancellationToken cancellationToken = default,
-        GeminiTestSession? testSession = null)
+        GeminiTestSession? testSession = null,
+        string? level = null)
     {
+        var effectiveLevel = AudioLevels.ForGeneration(level);
         var accentInstruction = AccentInstructions.GetValueOrDefault(languageCode,
             $"Write the dialogue naturally in the appropriate language for locale '{languageCode}'.");
+
+        if (effectiveLevel == AudioLevels.Advanced)
+        {
+            var localeName = LearningLanguageCatalog.Items.FirstOrDefault(
+                item => item.Identifier.Equals(languageCode, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? language;
+            accentInstruction = $"Write the dialogue STRICTLY in {localeName} for locale '{languageCode}'. Use regional spelling, grammar, and natural word choice. Do not switch to another regional variety or stereotype the accent.";
+        }
 
         var durationLabel = durationSeconds < 60
             ? $"{durationSeconds} seconds"
@@ -422,13 +433,14 @@ CONTENT POLICY (follow strictly):
 - If you accept the scenario, the title and every line must stay fully clear of those topics.
 
 {{accentInstruction}}
-Use plain, everyday wording that any speaker of this language would understand. The regional flavour must come from spelling, grammar, and ordinary word choice — NOT from slang, idioms, or catchphrases. Do not showcase, stack, or stereotype regional expressions; use one only if the line would sound unnatural without it.
+{{AudioLevels.DialogueInstruction(effectiveLevel)}}
+Keep regional spelling, grammar, and word choice appropriate to the selected locale. Do not stereotype regional expressions.
 {{scenarioLine}}
 
 For everyday scenarios, use {{variationAngle}} as a possible source of variety when it fits the user's scenario. Choose concrete, plausible details rather than the most obvious stock example. Vary the setting, objects, goals, and outcome across independent generations; never force an unrelated twist. Choose names natural to the target language and locale without relying on a fixed list or the same familiar pair of example names. Do not mention these writing instructions in the output.
 
 Target audio duration: approximately {{durationLabel}}.
-Write a natural dialogue sized for roughly that duration when spoken at a normal conversational pace.
+Write a natural dialogue sized for roughly that duration when spoken at {{(effectiveLevel == AudioLevels.Beginner ? "a gentle beginner-friendly pace" : "a normal conversational pace")}}.
 Use enough turns to fit the requested duration without padding or rushing the conversation.
 {{durationPlan.PromptInstruction}}
 
@@ -439,7 +451,7 @@ Generate a natural, realistic spoken dialogue between exactly TWO people.
 - Inside the actual dialogue text (the "text" fields), give the characters realistic names natural to the target language and locale.
 - Characters should address each other by these real names, NEVER as "Speaker 1" or "Speaker 2".
 - Alternate turns naturally; each turn should be 1–3 sentences.
-- Keep sentences short and conversational — the way people actually talk.
+- {{(effectiveLevel == AudioLevels.Advanced ? "Vary sentence length naturally, including longer explanations when useful." : "Keep sentences short and conversational — the way people actually talk.")}}
 - Do NOT include stage directions or any text outside the dialogue.
 {{titleInstruction}}
 - For every line, also return "shortCues": an array of shorter speakable chunks for solo practice.
@@ -670,6 +682,8 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
               "Make its characteristic vowel and consonant sounds, rhythm, stress and intonation distinctly audible. " +
               "Keep the delivery natural and every word clear."
             : $"Natural conversational delivery. {ttsAccent}".Trim();
+        var speechInstruction = AudioLevels.SpeechInstruction(dialogue.Level);
+        structuredSpeechStyle += " " + speechInstruction;
         var dialogueText = string.Join("\n", dialogue.Lines.Select(l => $"{l.Speaker}: {l.Text}"));
         var models = await modelSettings.GetAsync(cancellationToken);
 
@@ -702,6 +716,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             var transcript = ttsAccent != null
                 ? $"[Accent instruction: {ttsAccent}]\n{speakerInstruction}\n\n{dialogueText}"
                 : $"{speakerInstruction}\n\n{dialogueText}";
+            transcript = $"[Delivery instruction: {speechInstruction}]\n{transcript}";
             // 3.8 reads text verbatim and requires metadata on every turn. Older
             // preview models reject speech_metadata, so keep their prompt format.
             object[] parts = structuredSpeech
@@ -1740,6 +1755,8 @@ public record GeneratedDialogue(
 {
     [JsonIgnore]
     public DialogueDurationPlan? DurationPlan { get; init; }
+    [JsonIgnore]
+    public string Level { get; init; } = AudioLevels.Intermediate;
 }
 
 public record DialogueLine(string Speaker, string Text)
