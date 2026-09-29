@@ -200,6 +200,90 @@ public class TranscriptionTimingBuilderTests
             [new("你好", 100, 300, "A"), new("，", 1200, 1200, "B"), new("世界。", 1300, 1600, "A")], 1800);
 
         Assert.NotNull(result);
-        Assert.Equal(["你好，", "世界。"], result.Cues.Select(c => c.Text));
+        Assert.Equal(["你好，世界。"], result.Cues.Select(c => c.Text));
+        Assert.Equal("A", result.DisplayLines[0].Speaker);
+    }
+
+    [Fact]
+    public void CombinesTinyCantoneseReactionWithNextPhraseFromSameSpeaker()
+    {
+        TranscribedWord[] words =
+        [new("聽講仲會用嚟監測環境變化添。", 35300, 38300, "A"),
+         new("哇，", 38700, 38950, "B"), new("真係好新政呀，", 39100, 40600, "B"),
+         new("科技幫到文化保育真係好好。", 40800, 43700, "B")];
+
+        var result = TranscriptionTimingBuilder.Build(words, 44000);
+
+        Assert.NotNull(result);
+        Assert.Equal(["聽講仲會用嚟監測環境變化添。", "哇，真係好新政呀，", "科技幫到文化保育真係好好。"],
+            result.Cues.Select(c => c.Text));
+        Assert.Equal(["A", "B", "B"], result.DisplayLines.Select(line => line.Speaker));
+        Assert.Equal(38700, result.Cues[1].StartMs);
+        Assert.Equal(string.Concat(words.Select(w => w.Text)), string.Concat(result.Cues.Select(c => c.Text)));
+        Assert.Equal(WordTimingAligner.Tokenize(words.Select(w => w.Text).ToArray()).Select(t => t.Text),
+            result.Alignment.Tokens.Select(t => t.Text));
+        Assert.Equal(result.Cues, result.ShortCues);
+    }
+
+    [Theory]
+    [InlineData("A", "B")]
+    [InlineData(null, null)]
+    [InlineData("A", null)]
+    [InlineData(null, "A")]
+    public void DoesNotCombineDifferentOrUnknownSpeakers(string? firstSpeaker, string? nextSpeaker)
+    {
+        var result = TranscriptionTimingBuilder.Build(
+            [new("哇，", 100, 300, firstSpeaker), new("真係好特別呀。", 350, 1800, nextSpeaker)], 2000);
+
+        Assert.NotNull(result);
+        Assert.Equal(["哇，", "真係好特別呀。"], result.Cues.Select(c => c.Text));
+    }
+
+    [Fact]
+    public void MissingSpeakerCannotHideAChangeOfSpeaker()
+    {
+        var result = TranscriptionTimingBuilder.Build(
+            [new("你好", 100, 300, "A"), new("朋友", 350, 500, null),
+             new("大家好。", 550, 1400, "B")], 1600);
+
+        Assert.NotNull(result);
+        Assert.Equal(["你好", "朋友", "大家好。"], result.Cues.Select(c => c.Text));
+    }
+
+    [Fact]
+    public void CombinesShortEnglishSentenceWithoutMovingOrDroppingPunctuation()
+    {
+        var result = TranscriptionTimingBuilder.Build(
+            [new("Wow!", 100, 300, "A"), new("That", 350, 550, "A"),
+             new("sounds", 600, 900, "A"), new("really", 950, 1200, "A"),
+             new("interesting.", 1250, 1800, "A"), new("Yes.", 1900, 2150, "B")], 2300);
+
+        Assert.NotNull(result);
+        Assert.Equal(["Wow! That sounds really interesting.", "Yes."], result.Cues.Select(c => c.Text));
+        Assert.Equal(["A", "B"], result.DisplayLines.Select(line => line.Speaker));
+        Assert.Equal([100, 350, 600, 950, 1250, 1900], result.WordTiming.Select(w => w.StartMs));
+    }
+
+    [Fact]
+    public void ShortTailCanJoinPreviousPhraseWithoutCrossingSpeakerChange()
+    {
+        var result = TranscriptionTimingBuilder.Build(
+            [new("文化保育真係好好。", 100, 1900, "A"), new("係呀。", 2000, 2400, "A"),
+             new("我都咁諗呀。", 2500, 3900, "B")], 4100);
+
+        Assert.NotNull(result);
+        Assert.Equal(["文化保育真係好好。係呀。", "我都咁諗呀。"], result.Cues.Select(c => c.Text));
+    }
+
+    [Theory]
+    [InlineData("真係好特別呀。", 9000)]
+    [InlineData("我們今天下午準備先去市中心的圖書館看書然後去買東西再找朋友一起吃晚飯喝茶聊天。", 500)]
+    public void DoesNotCreateAnOverlongCueToRemoveAShortCue(string following, int nextStartMs)
+    {
+        var result = TranscriptionTimingBuilder.Build(
+            [new("哇，", 100, 300, "A"), new(following, nextStartMs, nextStartMs + 2000, "A")], nextStartMs + 2200);
+
+        Assert.NotNull(result);
+        Assert.Equal(["哇，", following], result.Cues.Select(c => c.Text));
     }
 }

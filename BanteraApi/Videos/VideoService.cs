@@ -160,7 +160,8 @@ public class VideoService(
         HttpContext httpContext,
         bool includeV2 = false,
         CancellationToken cancellationToken = default,
-        string? level = null)
+        string? level = null,
+        string? languageGroup = null)
     {
         var normalizedCode = languageCode?.Trim().ToLowerInvariant();
 
@@ -180,7 +181,11 @@ public class VideoService(
         if (!string.IsNullOrWhiteSpace(mt))
             query = query.Where(v => v.MediaContentType.ToLower().StartsWith(mt + "/"));
 
-        if (!string.IsNullOrWhiteSpace(normalizedCode))
+        if (!string.IsNullOrWhiteSpace(languageGroup))
+        {
+            query = AudioLanguageGroupFilter.Apply(query, languageGroup);
+        }
+        else if (!string.IsNullOrWhiteSpace(normalizedCode))
         {
             if (primaryCode is not null)
             {

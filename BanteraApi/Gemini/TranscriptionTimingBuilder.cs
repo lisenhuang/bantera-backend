@@ -92,6 +92,7 @@ public static class TranscriptionTimingBuilder
             current.Add(word);
         }
         if (current.Count > 0) groups.Add(current);
+        CombineShortGroups(groups);
 
         var lines = new List<DialogueLine>();
         var tokens = new List<TimedToken>();
@@ -144,9 +145,8 @@ public static class TranscriptionTimingBuilder
         if (WordTimingAligner.Tokenize([next.Text]).Count == 0
             || !current.Any(w => WordTimingAligner.Tokenize([w.Text]).Count > 0))
             return false;
-        var last = current[^1];
-        if (!string.IsNullOrWhiteSpace(last.Speaker) && !string.IsNullOrWhiteSpace(next.Speaker)
-            && last.Speaker != next.Speaker)
+        var lastSpoken = current.Last(w => WordTimingAligner.Tokenize([w.Text]).Count > 0);
+        if (lastSpoken.Speaker != next.Speaker)
             return true;
         // A pause or a word count cannot justify cutting a sentence in half.
         // Gemini sometimes returns long turns with no punctuation; keep those intact.
@@ -167,6 +167,44 @@ public static class TranscriptionTimingBuilder
         WordTimingAligner.IsCjk(r) || r.Value is >= 0x1100 and <= 0x11FF
             or >= 0x3130 and <= 0x318F or >= 0xA960 and <= 0xA97F
             or >= 0xAC00 and <= 0xD7AF or >= 0xD7B0 and <= 0xD7FF);
+
+    private static void CombineShortGroups(List<List<TranscribedWord>> groups)
+    {
+        for (var i = 0; i < groups.Count; i++)
+        {
+            var group = groups[i];
+            var spoken = group.Where(w => WordTimingAligner.Tokenize([w.Text]).Count > 0).ToArray();
+            if (spoken.Length == 0
+                || !PracticeCueLength.IsShort(JoinWords(group), spoken[^1].EndMs - spoken[0].StartMs))
+                continue;
+            if (i + 1 < groups.Count && CanCombineGroups(group, groups[i + 1]))
+            {
+                group.AddRange(groups[i + 1]);
+                groups.RemoveAt(i + 1);
+                i--;
+            }
+            else if (i > 0 && CanCombineGroups(groups[i - 1], group))
+            {
+                groups[i - 1].AddRange(group);
+                groups.RemoveAt(i);
+                i--;
+            }
+        }
+    }
+
+    private static bool CanCombineGroups(IReadOnlyList<TranscribedWord> first, IReadOnlyList<TranscribedWord> second)
+    {
+        // Punctuation annotations may have spurious speaker tags. Compare every spoken
+        // word instead, and never infer sameness from missing speaker information.
+        var spoken = first.Concat(second).Where(w => WordTimingAligner.Tokenize([w.Text]).Count > 0).ToArray();
+        var speaker = spoken[0].Speaker;
+        if (string.IsNullOrWhiteSpace(speaker)
+            || spoken.Any(w => string.IsNullOrWhiteSpace(w.Speaker) || w.Speaker != speaker))
+            return false;
+        var firstText = JoinWords(first);
+        return EndsAtCuePunctuation(firstText)
+            && PracticeCueLength.CanCombine(firstText, JoinWords(second), spoken[^1].EndMs - spoken[0].StartMs);
+    }
 
     private static bool EndsAtCuePunctuation(string text)
     {

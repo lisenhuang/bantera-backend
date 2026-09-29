@@ -2623,6 +2623,7 @@ app.MapGet("/api/videos/public", async (
     [FromQuery] string? mediaType,
     [FromQuery] bool? includeV2,
     [FromQuery] string? level,
+    [FromQuery] string? languageGroup,
     HttpContext httpContext,
     VideoService videoService,
     CancellationToken cancellationToken) =>
@@ -2640,7 +2641,7 @@ app.MapGet("/api/videos/public", async (
         mediaType,
         httpContext,
         includeV2 != false,
-        cancellationToken, level);
+        cancellationToken, level, languageGroup);
 
     return Results.Ok(videos);
 })

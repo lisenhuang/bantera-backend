@@ -228,6 +228,29 @@ public class GeminiServicePromptTests
     }
 
     [Fact]
+    public async Task ScriptShortCuesCombineTinyPiecesOnlyWithinTheirSpeakerLine()
+    {
+        var response = JsonSerializer.Serialize(new
+        {
+            title = "食飯", speaker1_gender = "female", speaker2_gender = "male",
+            lines = new[]
+            {
+                new { speaker = "Speaker1", text = "哇，真係好特別呀，科技幫到文化保育真係好好。",
+                    shortCues = new[] { "哇，", "真係好特別呀，", "科技幫到文化保育真係好好。" } },
+                new { speaker = "Speaker2", text = "係呀。", shortCues = new[] { "係呀。" } },
+            },
+        });
+        var handler = new CapturingHandler(responseDialogue: response);
+        var dialogue = await CreateService(handler).GenerateDialogueAsync("Cantonese", "zh-HK", "chat", 60);
+
+        Assert.Equal(["哇，真係好特別呀，", "科技幫到文化保育真係好好。"], dialogue.Lines[0].ShortCues);
+        Assert.Equal(["係呀。"], dialogue.Lines[1].ShortCues);
+        Assert.Equal("Speaker2", dialogue.Lines[1].Speaker);
+        Assert.Equal(dialogue.Lines[0].Text, string.Concat(dialogue.Lines[0].ShortCues));
+        Assert.Contains("Never combine different speakers in one cue", handler.GetPrompt());
+    }
+
+    [Fact]
     public async Task GenerateDialogueAsync_LatestNewsPrompt_AllowsFewerStoriesThanRequested()
     {
         var handler = new CapturingHandler();
@@ -894,7 +917,7 @@ public class GeminiServicePromptTests
         }
     }
 
-    private sealed class CapturingHandler((string First, string Second)[]? genders = null) : HttpMessageHandler
+    private sealed class CapturingHandler((string First, string Second)[]? genders = null, string? responseDialogue = null) : HttpMessageHandler
     {
         private string? requestJson;
         public int RequestCount { get; private set; }
@@ -911,7 +934,7 @@ public class GeminiServicePromptTests
 
             var target = int.Parse(System.Text.RegularExpressions.Regex.Match(GetPrompt(),
                 @"Script length target: (\d+)").Groups[1].Value);
-            var dialogueJson = DialogueJson(target, pair.Item1, pair.Item2);
+            var dialogueJson = responseDialogue ?? DialogueJson(target, pair.Item1, pair.Item2);
 
             var responseJson = JsonSerializer.Serialize(new
             {

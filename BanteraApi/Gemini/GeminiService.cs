@@ -25,7 +25,7 @@ public class GeminiService(
     private static readonly HashSet<char> ApprovedShortCueBoundaryPunctuation =
     [
         ',', ';', ':', '.', '?', '!', '\u2026', // ... and ellipsis
-        '\u3001', '\u3002', '\uff1f', '\uff01', '\uff1b', '\uff1a'
+        '\u3001', '\u3002', '\uff0c', '\uff1f', '\uff01', '\uff1b', '\uff1a'
     ];
     private static readonly HashSet<string> NonBoundaryAbbreviations = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -463,6 +463,7 @@ Generate a natural, realistic spoken dialogue between exactly TWO people.
 - In French, punctuation may appear with spaces before ? ! ; : ; split after the punctuation mark, not before it.
 - In Spanish, do not split at opening ¿ or ¡ ; only closing punctuation can end a chunk.
 - Prefer chunks that are easier to repeat aloud, usually 4-12 words, only when every chunk still sounds natural on its own.
+- Avoid tiny standalone cues such as a one-word reaction or greeting when another phrase from the same speaker follows. Keep it with the next phrase, preserving the original punctuation. Never combine different speakers in one cue. Use roughly 8-24 Chinese/Japanese characters or 4-12 spaced words as a practical target, while keeping every split at existing punctuation.
 - Do not split a grammatically tight sentence just to hit a shorter length.
 - If splitting would create an incomplete, dependent, or awkward chunk, keep the neighboring words together or keep the full line as one cue.
 - Keep names, abbreviations, decimals, technical terms, and tightly connected technical phrases together.
@@ -1136,7 +1137,8 @@ Example:
                     invalidBoundaryCueIndex));
         }
 
-        return new ShortCueValidationResult(cleanedShortCues, null);
+        return new ShortCueValidationResult(
+            PracticeCueLength.CombineShortPieces(normalizedLineText, cleanedShortCues), null);
     }
 
     private static bool HasValidPunctuationBoundaries(string lineText, IReadOnlyList<string> shortCues, out int? invalidBoundaryCueIndex)
