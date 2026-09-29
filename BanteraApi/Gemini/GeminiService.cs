@@ -53,6 +53,8 @@ public class GeminiService(
         "etc",
     };
 
+    private const string SpokenCantoneseInstruction = "Use natural spoken Cantonese vocabulary and grammar throughout. Simplify within Cantonese; do not replace Cantonese wording or grammar with Mandarin or standard written Chinese to make the dialogue easier. Everyday Cantonese forms such as 食、咩、咩嘢、唔、冇、喺、係、佢、我哋 and 咗 are normal vocabulary and grammar, not difficult slang to avoid. Use them where natural without forcing them into every line. A simple natural question is 你想食咩？ rather than 你想吃什麼？. Preserve natural grammatical particles and spoken phrasing at every difficulty level.";
+
     private static readonly Dictionary<string, string> AccentInstructions = new(StringComparer.OrdinalIgnoreCase)
     {
         ["en-AU"] = "Write the dialogue STRICTLY in Australian English, using Australian spelling and everyday Australian wording. Keep the language plain and widely understood — do NOT lean on Australian slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use New Zealand, British, or American English.",
@@ -64,9 +66,9 @@ public class GeminiService(
         ["en-ZA"] = "Write the dialogue STRICTLY in South African English, using everyday wording that reads naturally in South Africa. Keep the language plain and widely understood — do NOT lean on South African slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use British, Australian, or American wording as the dominant voice.",
         ["en-GB"] = "Write the dialogue STRICTLY in British English, using British spelling and everyday British wording. Keep the language plain and widely understood — do NOT lean on British slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use American or Australian English.",
         ["en-US"] = "Write the dialogue STRICTLY in US American English, using American spelling and everyday American wording. Keep the language plain and widely understood — do NOT lean on American slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use British, Australian, or any other English variant.",
-        ["yue-CN"] = "Write the dialogue entirely in natural Cantonese as used in China mainland. Use Chinese characters, keep it conversational, and do not switch into Mandarin phrasing.",
+        ["yue-CN"] = "Write the dialogue entirely in natural spoken Cantonese as used in Guangdong, China mainland. Use Chinese characters and wording appropriate to this regional variety. " + SpokenCantoneseInstruction,
         ["zh-CN"] = "Write the dialogue entirely in Mandarin Chinese for China mainland (简体中文). Keep it natural and conversational.",
-        ["zh-HK"] = "Write the dialogue entirely in natural Chinese for Hong Kong (繁體中文), using wording that fits Hong Kong usage.",
+        ["zh-HK"] = "Write the dialogue entirely in natural spoken Hong Kong Cantonese using Traditional Chinese characters (繁體中文). " + SpokenCantoneseInstruction,
         ["zh-TW"] = "Write the dialogue entirely in natural Chinese for Taiwan (繁體中文), using wording that fits Taiwanese Mandarin usage.",
         ["fr-BE"] = "Write the dialogue entirely in French for Belgium. Keep it natural and conversational, with wording that fits Belgian French when relevant.",
         ["fr-CA"] = "Write the dialogue entirely in French for Canada. Keep it natural and conversational, with wording that fits Canadian French when relevant.",
@@ -310,7 +312,10 @@ public class GeminiService(
         var accentInstruction = AccentInstructions.GetValueOrDefault(languageCode,
             $"Write the dialogue naturally in the appropriate language for locale '{languageCode}'.");
 
-        if (effectiveLevel == AudioLevels.Advanced)
+        // Cantonese's spoken-language identity must survive the Advanced override.
+        var isCantonese = languageCode.Equals("zh-HK", StringComparison.OrdinalIgnoreCase)
+            || languageCode.Equals("yue-CN", StringComparison.OrdinalIgnoreCase);
+        if (effectiveLevel == AudioLevels.Advanced && !isCantonese)
         {
             var localeName = LearningLanguageCatalog.Items.FirstOrDefault(
                 item => item.Identifier.Equals(languageCode, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? language;
@@ -426,6 +431,7 @@ CONTENT POLICY (follow strictly):
 {{accentInstruction}}
 {{AudioLevels.DialogueInstruction(effectiveLevel)}}
 Keep regional spelling, grammar, and word choice appropriate to the selected locale. Do not stereotype regional expressions.
+At every difficulty level, simplify within the selected spoken language and regional variety. Preserve its natural everyday vocabulary and grammar; do not substitute another language, regional variety, or formal written register to make the dialogue easier.
 {{scenarioLine}}
 
 For everyday scenarios, use {{variationAngle}} as a possible source of variety when it fits the user's scenario. Choose concrete, plausible details rather than the most obvious stock example. Vary the setting, objects, goals, and outcome across independent generations; never force an unrelated twist. Choose names natural to the target language and locale without relying on a fixed list or the same familiar pair of example names. Do not mention these writing instructions in the output.

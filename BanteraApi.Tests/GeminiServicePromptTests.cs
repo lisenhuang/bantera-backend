@@ -164,11 +164,44 @@ public class GeminiServicePromptTests
         Assert.Equal(level, dialogue.Level);
         Assert.Contains(heading, handler.GetPrompt());
         Assert.Contains(instruction, handler.GetPrompt());
+        Assert.Contains("simplify within the selected spoken language and regional variety", handler.GetPrompt());
+        if (level == "beginner")
+        {
+            Assert.Contains("Retain basic everyday colloquial words and grammatical particles", handler.GetPrompt());
+            Assert.DoesNotContain("Avoid idioms, slang", handler.GetPrompt());
+        }
         if (level == "advanced")
         {
             Assert.DoesNotContain("Keep sentences short", handler.GetPrompt());
             Assert.DoesNotContain("Keep the language plain", handler.GetPrompt());
         }
+    }
+
+    [Theory]
+    [InlineData("zh-HK", "beginner", "spoken Hong Kong Cantonese", "Traditional Chinese")]
+    [InlineData("zh-HK", "intermediate", "spoken Hong Kong Cantonese", "Traditional Chinese")]
+    [InlineData("zh-HK", "advanced", "spoken Hong Kong Cantonese", "Traditional Chinese")]
+    [InlineData("zh-hk", "advanced", "spoken Hong Kong Cantonese", "Traditional Chinese")]
+    [InlineData("yue-CN", "beginner", "spoken Cantonese as used in Guangdong", "Chinese characters")]
+    [InlineData("yue-CN", "intermediate", "spoken Cantonese as used in Guangdong", "Chinese characters")]
+    [InlineData("yue-CN", "advanced", "spoken Cantonese as used in Guangdong", "Chinese characters")]
+    [InlineData("yue-cn", "advanced", "spoken Cantonese as used in Guangdong", "Chinese characters")]
+    public async Task CantoneseDialogueKeepsSpokenLanguageAtEveryLevel(
+        string locale, string level, string regionalInstruction, string scriptInstruction)
+    {
+        var handler = new CapturingHandler();
+        // Even an older caller's generic language label must use the locale's Cantonese rules.
+        var dialogue = await CreateService(handler).GenerateDialogueAsync("Chinese", locale, "ordering food", 60, level: level);
+        var prompt = handler.GetPrompt();
+
+        Assert.Equal(level, dialogue.Level);
+        Assert.Contains(regionalInstruction, prompt);
+        Assert.Contains(scriptInstruction, prompt);
+        Assert.Contains("Simplify within Cantonese", prompt);
+        Assert.Contains("do not replace Cantonese wording or grammar with Mandarin or standard written Chinese", prompt);
+        Assert.Contains("食、咩、咩嘢、唔、冇、喺、係、佢、我哋 and 咗", prompt);
+        Assert.Contains("你想食咩？", prompt);
+        Assert.DoesNotContain("natural Chinese for Hong Kong", prompt);
     }
 
     [Theory]
