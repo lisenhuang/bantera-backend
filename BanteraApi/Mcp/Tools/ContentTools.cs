@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using BanteraApi.Database;
+using BanteraApi.Gemini;
 using Microsoft.EntityFrameworkCore;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
@@ -369,6 +370,7 @@ public sealed class ContentTools(AppDbContext db)
                 language = v.TranscriptLanguage,
                 isPublic = v.IsPublic,
                 isAiGenerated = v.IsAiGenerated,
+                level = v.Level ?? (v.IsAiGenerated ? AudioLevels.Intermediate : null),
                 isAudio = v.MediaContentType.StartsWith("audio/"),
                 durationSec = v.DurationMs / 1000,
                 sizeBytes = v.FileSizeBytes,

@@ -5,6 +5,7 @@ using System.Net;
 using Amazon.S3;
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
+using BanteraApi.Gemini;
 using BanteraApi.Storage;
 using BanteraApi.Videos;
 using Microsoft.AspNetCore.Authorization;
@@ -78,6 +79,7 @@ public sealed class PracticeAudioTools(
         each. Use sentence-sized lines, combining very short sentences when helpful.
         Creates a private item unless isPublic is explicitly true. All content is supplied by
         the caller; this tool does not call Gemini or generate audio or a cover image.
+        Set level to beginner, intermediate, or advanced; omitted levels default to intermediate.
         """)]
     public async Task<string> SubmitAsync(
         [Description("Upload ID returned by begin_practice_audio_upload.")] Guid uploadId,
@@ -92,6 +94,7 @@ public sealed class PracticeAudioTools(
         [Description("Ordered word timing records with word, startMs, endMs, optional confidence and CJK parts.")] WordTimingRecord[] wordTiming,
         [Description("Optional indexed short subtitle cues.")] VideoTranscriptCue[]? transcriptShortCues = null,
         [Description("Publish to the shared library immediately. Default false for review.")] bool isPublic = false,
+        [Description("Lesson difficulty: 'beginner', 'intermediate', or 'advanced'. Defaults to 'intermediate' when omitted. Classifies the supplied audio; does not rewrite it.")] string? level = null,
         CancellationToken ct = default)
     {
         ctx.RequireWrite();
@@ -99,6 +102,7 @@ public sealed class PracticeAudioTools(
         if (uploadId == Guid.Empty)
             throw new McpException("uploadId is required.");
         var extension = PracticeAudioImportValidator.AudioExtension(audioFormat);
+        var normalizedLevel = PracticeAudioImportValidator.NormalizeLevel(level);
         var transcript = PracticeAudioImportValidator.Validate(title, transcriptLanguage,
             transcriptLanguageCode, transcriptText, durationMs, dialogueLines, transcriptCues,
             transcriptShortCues, wordTiming);
@@ -110,7 +114,7 @@ public sealed class PracticeAudioTools(
             .FirstOrDefaultAsync(v => v.MediaObjectKey == finalAudioKey, ct);
         if (existing is not null)
             return McpJson.Serialize(new { ok = true, alreadySubmitted = true, videoId = existing.Id,
-                isPublic = existing.IsPublic });
+                isPublic = existing.IsPublic, level = AudioLevels.ForContent(existing) });
 
         var stagedAudioKey = StagingAudioKey(ownerId, uploadId, extension);
         var stagedCoverKey = StagingCoverKey(ownerId, uploadId);
@@ -206,6 +210,7 @@ public sealed class PracticeAudioTools(
                 WordTimingJson = JsonSerializer.Serialize(wordTiming, JsonOptions),
                 IsPublic = isPublic,
                 IsAiGenerated = true,
+                Level = normalizedLevel,
                 IsTranscriptionEstimated = false,
                 CoverImageObjectKey = finalCoverKey,
                 FileSizeBytes = audio.ContentLength,
@@ -222,6 +227,7 @@ public sealed class PracticeAudioTools(
                 uploadId, audioFormat, title = title.Trim(), transcriptLanguageCode,
                 durationMs, cueCount = transcriptCues.Length, wordCount = wordTiming.Length,
                 isPublic,
+                level = normalizedLevel,
             }, McpAuditOutcomes.Ok, $"created {video.Id}", ownerId, video.Id,
                 (int)sw.ElapsedMilliseconds, ct);
 
@@ -241,6 +247,7 @@ public sealed class PracticeAudioTools(
             {
                 ok = true,
                 videoId = video.Id,
+                level = video.Level,
                 response?.VideoUrl,
                 response?.CoverImageUrl,
                 response?.IsPublic,

@@ -2,7 +2,8 @@ namespace BanteraApi;
 
 /// <summary>
 /// Learning language catalog. Matches the native-language list: every speech-recognition locale
-/// (AI audio uses Gemini TTS + Gemini Transcribe, which cover all of them), region-specific.
+/// (AI audio uses Gemini TTS + Gemini Transcribe), region-specific. Transcription hints are
+/// mapped separately; provider-unlisted regional variants use automatic language detection.
 /// </summary>
 public sealed record LearningLanguageItem(
     string Identifier,

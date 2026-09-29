@@ -7,6 +7,24 @@ namespace BanteraApi.Tests;
 
 public class PracticeAudioImportValidatorTests
 {
+    [Theory]
+    [InlineData(null, "intermediate")]
+    [InlineData("beginner", "beginner")]
+    [InlineData("intermediate", "intermediate")]
+    [InlineData("advanced", "advanced")]
+    [InlineData(" Advanced ", "advanced")]
+    public void AcceptsExplicitLevelsAndDefaultsLegacySubmissions(string? input, string expected)
+        => Assert.Equal(expected, PracticeAudioImportValidator.NormalizeLevel(input));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("all")]
+    [InlineData("native")]
+    [InlineData("unclassified")]
+    public void RejectsInvalidPublishingLevelsWithAnMcpValidationError(string input)
+        => Assert.Throws<McpException>(() => PracticeAudioImportValidator.NormalizeLevel(input));
+
     private static readonly string[] Lines = ["Hello there.", "How are you?"];
     private static readonly VideoTranscriptCue[] Cues =
     [

@@ -13,6 +13,146 @@ namespace BanteraApi.Tests;
 
 public class GeminiServicePromptTests
 {
+    // Expected provider hints audited against Google's language table on 2026-09-29.
+    public static TheoryData<string, string?> TranscriptionLocales => new()
+    {
+        { "en-US", "en-US" },
+        { "en-GB", "en-GB" },
+        { "en-AU", null },
+        { "en-CA", null },
+        { "en-IN", "en-IN" },
+        { "en-NZ", null },
+        { "en-IE", null },
+        { "en-SG", null },
+        { "en-ZA", null },
+        { "en-PH", null },
+        { "en-AE", null },
+        { "en-ID", null },
+        { "en-SA", null },
+        { "es-MX", null },
+        { "es-ES", null },
+        { "es-419", "es-419" },
+        { "es-US", "es-US" },
+        { "es-CO", null },
+        { "es-CL", null },
+        { "fr-FR", "fr-FR" },
+        { "fr-CA", null },
+        { "fr-BE", null },
+        { "fr-CH", null },
+        { "de-DE", "de-DE" },
+        { "de-AT", null },
+        { "de-CH", null },
+        { "it-IT", "it-IT" },
+        { "it-CH", null },
+        { "zh-CN", "cmn-Hans-CN" },
+        { "zh-TW", null },
+        { "zh-HK", "yue-Hant-HK" },
+        { "yue-CN", "yue-Hant-HK" },
+        { "ja-JP", "ja-JP" },
+        { "ko-KR", "ko-KR" },
+        { "pt-BR", "pt-BR" },
+        { "pt-PT", "pt-PT" },
+        { "ar-SA", null },
+        { "ar-AE", null },
+        { "ru-RU", "ru-RU" },
+        { "hi-IN", "hi-IN" },
+        { "id-ID", "id-ID" },
+        { "vi-VN", "vi-VN" },
+        { "th-TH", "th-TH" },
+        { "tr-TR", "tr-TR" },
+        { "nl-NL", "nl-NL" },
+        { "nl-BE", null },
+        { "pl-PL", "pl-PL" },
+        { "sv-SE", "sv-SE" },
+        { "da-DK", "da-DK" },
+        { "nb-NO", "nb-NO" },
+        { "fi-FI", "fi-FI" },
+        { "uk-UA", "uk-UA" },
+        { "el-GR", "el-GR" },
+        { "cs-CZ", "cs-CZ" },
+        { "sk-SK", "sk-SK" },
+        { "hu-HU", "hu-HU" },
+        { "ro-RO", "ro-RO" },
+        { "hr-HR", "hr-HR" },
+        { "he-IL", "he-IL" },
+        { "ms-MY", "ms-MY" },
+        { "ca-ES", "ca-ES" },
+    };
+
+    [Theory]
+    [MemberData(nameof(TranscriptionLocales))]
+    public async Task EveryLearningLocaleSendsADocumentedHintOrAutomaticDetection(string locale, string? expectedHint)
+    {
+        var handler = new TranscriptionHandler();
+        var words = await CreateService(handler).TranscribeWordsAsync([1, 2, 3], "audio/mpeg", locale);
+        using var document = JsonDocument.Parse(Assert.Single(handler.Requests));
+        var root = document.RootElement;
+        Assert.Equal("gemini-3.5-transcribe", root.GetProperty("model").GetString());
+        var config = root.GetProperty("generation_config").GetProperty("transcription_config");
+        var hints = config.GetProperty("language_codes").EnumerateArray().Select(h => h.GetString()).ToArray();
+        Assert.Equal(expectedHint is null ? [] : new[] { expectedHint }, hints);
+        var mode = config.GetProperty("mode");
+        Assert.Equal("verbatim", mode.GetProperty("type").GetString());
+        Assert.Equal("speaker", mode.GetProperty("diarization_mode").GetString());
+        Assert.Equal("word", mode.GetProperty("timestamp_granularities")[0].GetString());
+        var input = Assert.Single(root.GetProperty("input").EnumerateArray());
+        Assert.Equal("audio", input.GetProperty("type").GetString());
+        Assert.Equal("AQID", input.GetProperty("data").GetString());
+        Assert.Equal("咗", Assert.Single(words).Text);
+    }
+
+    [Fact]
+    public void TranscriptionAuditCoversTheEntireLearningCatalog()
+        => Assert.Equal(LearningLanguageCatalog.Items.Select(x => x.Identifier).Order(),
+            TranscriptionLocales.Select(row => (string)row[0]).Order());
+
+    [Theory]
+    [InlineData(" zh-hk ", "yue-Hant-HK")]
+    [InlineData("YUE-CN", "yue-Hant-HK")]
+    [InlineData("yue-hant-hk", "yue-Hant-HK")]
+    [InlineData("CMN-HANS-CN", "cmn-Hans-CN")]
+    [InlineData("EN-us", "en-US")]
+    [InlineData("unknown", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void TranscriptionHintHandlesStoredCasingAndUnknownLocales(string? input, string? expected)
+        => Assert.Equal(expected, GeminiTranscriptionLanguages.Resolve(input));
+
+    [Fact]
+    public async Task ProviderLanguageRejectionRetainsAutomaticDetectionFallback()
+    {
+        var handler = new TranscriptionHandler(rejectHint: true);
+        var words = await CreateService(handler).TranscribeWordsAsync([1], "audio/mpeg", "zh-HK");
+        Assert.Equal(2, handler.Requests.Count);
+        using var first = JsonDocument.Parse(handler.Requests[0]);
+        using var second = JsonDocument.Parse(handler.Requests[1]);
+        Assert.Equal("yue-Hant-HK", first.RootElement.GetProperty("generation_config")
+            .GetProperty("transcription_config").GetProperty("language_codes")[0].GetString());
+        Assert.Empty(second.RootElement.GetProperty("generation_config")
+            .GetProperty("transcription_config").GetProperty("language_codes").EnumerateArray());
+        Assert.Single(words);
+    }
+
+    private sealed class TranscriptionHandler(bool rejectHint = false) : HttpMessageHandler
+    {
+        public List<string> Requests { get; } = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal("/v1beta/interactions", request.RequestUri!.AbsolutePath);
+            Requests.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            if (rejectHint && Requests.Count == 1)
+                return new(HttpStatusCode.BadRequest) { Content = new StringContent("unsupported language") };
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                    {"status":"completed","steps":[{"type":"model_output","content":[{"annotations":[
+                        {"type":"word_info","text":"咗","start_offset":"19.900s","end_offset":"20.100s","speaker":"spk:1"}
+                    ]}]}]}
+                    """, Encoding.UTF8, "application/json"),
+            };
+        }
+    }
+
     [Theory]
     [InlineData("beginner", "Difficulty: Beginner", "Use basic, simple words that a beginner can easily understand")]
     [InlineData("intermediate", "Difficulty: Intermediate", "accessible sentences")]

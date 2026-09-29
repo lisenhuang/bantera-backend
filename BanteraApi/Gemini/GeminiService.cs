@@ -1332,7 +1332,9 @@ Example:
     {
         var model = Settings.TranscribeModel;
         var data = Convert.ToBase64String(audio);
-        var hint = string.IsNullOrWhiteSpace(languageCode) ? null : languageCode.Trim();
+        var hint = GeminiTranscriptionLanguages.Resolve(languageCode);
+        if (hint is null && !string.IsNullOrWhiteSpace(languageCode))
+            logger.LogInformation("Transcription uses automatic language detection for unlisted locale {Locale}", languageCode);
 
         return await WithGeminiKeyAsync("transcription", async key =>
         {
@@ -1341,6 +1343,7 @@ Example:
             if (status == System.Net.HttpStatusCode.BadRequest && hint is not null && json.Contains("language", StringComparison.OrdinalIgnoreCase))
             {
                 // An unsupported language hint: auto-detect instead of failing.
+                logger.LogWarning("Transcription rejected language hint {LanguageHint}; retrying with automatic detection", hint);
                 (status, json) = await PostTranscriptionAsync(client, key, model, data, mimeType, null, cancellationToken);
             }
             if ((int)status is < 200 or >= 300)

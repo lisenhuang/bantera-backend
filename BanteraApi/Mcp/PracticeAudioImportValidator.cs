@@ -1,3 +1,4 @@
+using BanteraApi.Gemini;
 using BanteraApi.Videos;
 using ModelContextProtocol;
 
@@ -11,6 +12,13 @@ public static class PracticeAudioImportValidator
     public const int MaxDurationMs = 30 * 60 * 1000;
     public const int MaxMainCueDurationMs = 25_000;
     public const int MaxMainCueCharacters = 320;
+
+    public static string NormalizeLevel(string? level)
+    {
+        if (level is not null && !AudioLevels.IsValid(level))
+            throw new McpException("level must be 'beginner', 'intermediate', or 'advanced'. Omit it to use 'intermediate'.");
+        return AudioLevels.ForGeneration(level);
+    }
 
     public static bool HasSameSpokenText(string? before, string? after)
     {
