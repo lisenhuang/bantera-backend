@@ -89,6 +89,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        b.Entity<UserLanguageWordActivity>(e =>
+        {
+            e.ToTable("user_language_word_activity");
+            e.HasKey(x => new { x.UserId, x.DeviceId, x.Date, x.Language });
+            e.Property(x => x.Language).HasMaxLength(3);
+            e.Property(x => x.Date).HasColumnType("date");
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         b.Entity<User>(e =>
         {
             e.ToTable("users");

@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -25,7 +27,7 @@ public sealed class WordActivityTests
         var good = new WordActivitySnapshot(Guid.NewGuid(), [new(Today, 20, 10)]);
         Assert.True(WordActivityEndpoints.IsValid(good, Today));
         Assert.True(WordActivityEndpoints.IsValid(good with { Days = [new(Today.AddDays(1), 0, 0)] }, Today));
-        Assert.False(WordActivityEndpoints.IsValid(null, Today));
+        Assert.False(WordActivityEndpoints.IsValid((WordActivitySnapshot?)null, Today));
         Assert.False(WordActivityEndpoints.IsValid(good with { DeviceId = Guid.Empty }, Today));
         Assert.False(WordActivityEndpoints.IsValid(good with { Days = [] }, Today));
         Assert.False(WordActivityEndpoints.IsValid(good with { Days = [new(Today, -1, 0)] }, Today));
@@ -33,6 +35,29 @@ public sealed class WordActivityTests
         Assert.False(WordActivityEndpoints.IsValid(good with { Days = [new(Today.AddDays(2), 1, 0)] }, Today));
         Assert.False(WordActivityEndpoints.IsValid(good with { Days = [new(Today, 1, 0), new(Today, 2, 0)] }, Today));
         Assert.False(WordActivityEndpoints.IsValid(good with { Days = Enumerable.Range(0, 32).Select(i => new WordActivityDay(Today.AddDays(-i), 1, 1)).ToArray() }, Today));
+    }
+
+    [Theory]
+    [InlineData("en-NZ", "en")]
+    [InlineData("en_US", "en")]
+    [InlineData("fr-CA", "fr")]
+    [InlineData("zh-TW", "zh")]
+    [InlineData("zh-Hant-HK", "yue")]
+    [InlineData("yue-CN", "yue")]
+    [InlineData("iw-IL", "he")]
+    public void LanguageKeysIgnoreAccent(string locale, string expected) =>
+        Assert.Equal(expected, WordActivityEndpoints.NormalizeLanguage(locale));
+
+    [Fact]
+    public void LanguageSnapshotsValidateEachLanguageAndMergeAccentIdentity()
+    {
+        var good = new LanguageWordActivitySnapshot(Guid.NewGuid(), [new(Today, "en-NZ", 10, 5), new(Today, "ja-JP", 20, 7)]);
+        Assert.True(WordActivityEndpoints.IsValid(good, Today));
+        Assert.True(WordActivityEndpoints.IsValid(good with { Days = [new(Today, "", 10, 5)] }, Today));
+        Assert.False(WordActivityEndpoints.IsValid(good with { Days = [new(Today, "en-NZ", 10, 5), new(Today, "en-US", 20, 7)] }, Today));
+        Assert.False(WordActivityEndpoints.IsValid(good with { Days = [new(Today, "../en", 10, 5)] }, Today));
+        Assert.False(WordActivityEndpoints.IsValid(good with { Days = [new(Today, null!, 10, 5)] }, Today));
+        Assert.False(WordActivityEndpoints.IsValid(good with { Days = [new(Today, "en", -1, 5)] }, Today));
     }
 
     [WordActivityDatabaseFact]
@@ -51,20 +76,29 @@ public sealed class WordActivityTests
         WordActivityEndpoints.Map(app);
         var userId = Guid.NewGuid();
         var otherUser = Guid.NewGuid();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var snapshot = new WordActivitySnapshot(Guid.NewGuid(), [new(today, 40, 12)]);
         using (var scope = app.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.Database.MigrateAsync();
+            // Verify the additive migration against an actual legacy row.
+            await db.GetService<IMigrator>().MigrateAsync("20260929235949_AddUserWordActivity");
             db.Users.AddRange(new User { Id = userId, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
                 new User { Id = otherUser, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
             await db.SaveChangesAsync();
+            db.UserWordActivities.Add(new UserWordActivity { UserId = userId, DeviceId = snapshot.DeviceId,
+                Date = today, ListenedWords = 40, SpokenWords = 12 });
+            await db.SaveChangesAsync();
+            await db.Database.MigrateAsync();
+            Assert.Equal(40, (await db.UserWordActivities.SingleAsync(x => x.UserId == userId)).ListenedWords);
         }
         await app.StartAsync();
         using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var snapshot = new WordActivitySnapshot(Guid.NewGuid(), [new(today, 40, 12)]);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/me/word-stats")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/me/word-stats", snapshot)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v2/me/word-stats")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/v2/me/word-stats",
+            new LanguageWordActivitySnapshot(snapshot.DeviceId, [new(today, "en", 1, 1)]))).StatusCode);
         client.DefaultRequestHeaders.Add("X-Test-User", userId.ToString());
         // Same payload including concurrent retries must contribute once.
         var retries = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => client.PostAsJsonAsync("/api/me/word-stats", snapshot)));
@@ -76,18 +110,34 @@ public sealed class WordActivityTests
         var day = Assert.Single(report!.Days);
         Assert.Equal(50, day.ListenedWords);
         Assert.Equal(15, day.SpokenWords);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/v2/me/word-stats",
+            new LanguageWordActivitySnapshot(snapshot.DeviceId, [new(today, "", 40, 12), new(today, "en-NZ", 80, 30), new(today, "ja-JP", 25, 18)]))).StatusCode);
+        var languageRetry = new LanguageWordActivitySnapshot(snapshot.DeviceId, [new(today, "en-US", 70, 25)]);
+        var languageRetries = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => client.PostAsJsonAsync("/api/v2/me/word-stats", languageRetry)));
+        Assert.All(languageRetries, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+        var languageReport = await client.GetFromJsonAsync<LanguageReport>("/api/v2/me/word-stats");
+        Assert.Equal(3, languageReport!.Days.Length);
+        Assert.Equal(50, Assert.Single(languageReport.Days, x => x.Language == "").ListenedWords);
+        Assert.Equal(80, Assert.Single(languageReport.Days, x => x.Language == "en").ListenedWords);
+        Assert.Equal(18, Assert.Single(languageReport.Days, x => x.Language == "ja").SpokenWords);
+        var compatibleReport = await client.GetFromJsonAsync<Report>("/api/me/word-stats");
+        Assert.Equal(155, Assert.Single(compatibleReport!.Days).ListenedWords);
+        Assert.Equal(63, Assert.Single(compatibleReport.Days).SpokenWords);
         client.DefaultRequestHeaders.Remove("X-Test-User");
         client.DefaultRequestHeaders.Add("X-Test-User", otherUser.ToString());
         Assert.Empty((await client.GetFromJsonAsync<Report>("/api/me/word-stats"))!.Days);
+        Assert.Empty((await client.GetFromJsonAsync<LanguageReport>("/api/v2/me/word-stats"))!.Days);
         using (var scope = app.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await db.Users.Where(x => x.Id == userId || x.Id == otherUser).ExecuteDeleteAsync();
             Assert.False(await db.UserWordActivities.AnyAsync(x => x.UserId == userId));
+            Assert.False(await db.Set<UserLanguageWordActivity>().AnyAsync(x => x.UserId == userId));
         }
         await app.StopAsync();
     }
 
+    private sealed record LanguageReport(LanguageWordActivityDay[] Days);
     private sealed record Report(WordActivityDay[] Days);
     public sealed class TestAuth(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
         : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
