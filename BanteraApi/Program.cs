@@ -1009,6 +1009,17 @@ app.MapPost("/api/v2/chat/threads/group/native/messages/image", async (
 }).DisableAntiforgery().RequireAuthorization()
 .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(6 * 1024 * 1024));
 
+app.MapPost("/api/v2/chat/threads/group/learning/messages/image", async (
+    [FromForm] SendLearningGroupImageRequest request, HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user, ChatService chatService, CancellationToken ct) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return UnauthorizedResult();
+    var (message, error) = await chatService.SendLearningGroupImageAsync(userId.Value, request, httpContext, ct);
+    return message is null ? ChatErrorResult(error) : Results.Ok(message);
+}).DisableAntiforgery().RequireAuthorization()
+.WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(6 * 1024 * 1024));
+
 app.MapGet("/api/v2/chat/messages/{messageId:guid}/image", async (
     Guid messageId, System.Security.Claims.ClaimsPrincipal user, ChatService chatService, CancellationToken ct) =>
 {

@@ -75,6 +75,12 @@ public class ChatImageCompatibilityTests
             var nativeGroup = await service.SendNativeGroupImageAsync(userId,
                 new SendNativeGroupImageRequest {ExpectedNativeLanguage="zh"}, new DefaultHttpContext());
             Assert.Equal(ChatErrorCodes.ChatInvalidImage, nativeGroup.ErrorCode);
+            var wrongLearning = await service.SendLearningGroupImageAsync(userId,
+                new SendLearningGroupImageRequest {ExpectedLearningLanguage="zh"}, new DefaultHttpContext());
+            Assert.Equal(ChatErrorCodes.ChatInvalidLanguage, wrongLearning.ErrorCode);
+            var learning = await service.SendLearningGroupImageAsync(userId,
+                new SendLearningGroupImageRequest {ExpectedLearningLanguage="en-US"}, new DefaultHttpContext());
+            Assert.Equal(ChatErrorCodes.ChatInvalidImage, learning.ErrorCode);
         }
         await app.StartAsync();
         using var client = new HttpClient {BaseAddress=new Uri(app.Urls.Single())};

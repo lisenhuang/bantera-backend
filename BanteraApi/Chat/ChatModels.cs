@@ -83,6 +83,12 @@ public sealed class SendChatAudioRequest
     public int DurationMs { get; set; }
 }
 
+public sealed class SendLearningGroupImageRequest
+{
+    public IFormFile? File { get; set; }
+    public string? ExpectedLearningLanguage { get; set; }
+}
+
 public sealed class SendNativeGroupImageRequest
 {
     public IFormFile? File { get; set; }

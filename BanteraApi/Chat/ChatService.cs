@@ -276,7 +276,14 @@ public class ChatService(
         CancellationToken cancellationToken = default) =>
         SendGroupMediaAsync(userId, ChatGroupKinds.Native,
             new SendChatAudioRequest { File = request.File }, httpContext, cancellationToken,
-            image: true, expectedNativeLanguage: request.ExpectedNativeLanguage);
+            image: true, expectedLanguage: request.ExpectedNativeLanguage);
+
+    public Task<(ChatMessageResponse? Message, string? ErrorCode)> SendLearningGroupImageAsync(
+        Guid userId, SendLearningGroupImageRequest request, HttpContext httpContext,
+        CancellationToken cancellationToken = default) =>
+        SendGroupMediaAsync(userId, ChatGroupKinds.Learning,
+            new SendChatAudioRequest { File = request.File }, httpContext, cancellationToken,
+            image: true, expectedLanguage: request.ExpectedLearningLanguage);
 
     private async Task<(ChatMessageResponse? Message, string? ErrorCode)> SendGroupMediaAsync(
         Guid userId,
@@ -284,7 +291,7 @@ public class ChatService(
         SendChatAudioRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken,
-        bool image = false, string? expectedNativeLanguage = null)
+        bool image = false, string? expectedLanguage = null)
     {
         var sender = await db.Users.FirstOrDefaultAsync(u => u.Id == userId && u.DeletedAt == null, cancellationToken);
         if (sender is null)
@@ -294,8 +301,8 @@ public class ChatService(
         if (descriptor is null)
             return (null, ChatErrorCodes.ChatInvalidLanguage);
 
-        if (image && (string.IsNullOrWhiteSpace(expectedNativeLanguage) ||
-            ChatLanguageResolver.Resolve(expectedNativeLanguage)?.MatchKey != descriptor.MatchKey))
+        if (image && (string.IsNullOrWhiteSpace(expectedLanguage) ||
+            ChatLanguageResolver.Resolve(expectedLanguage)?.MatchKey != descriptor.MatchKey))
             return (null, ChatErrorCodes.ChatInvalidLanguage);
         var validationError = image
             ? await IsValidGroupImageAsync(request.File, cancellationToken) ? null : ChatErrorCodes.ChatInvalidImage
