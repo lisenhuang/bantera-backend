@@ -7,6 +7,7 @@ namespace BanteraApi.Database;
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
+    public DbSet<UserWordActivity> UserWordActivities => Set<UserWordActivity>();
     public DbSet<User> Users => Set<User>();
     public DbSet<UserIdentity> UserIdentities => Set<UserIdentity>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
@@ -78,6 +79,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => new { x.Status, x.CreatedAt });
             e.HasIndex(x => x.CreatedAt);
             e.HasOne<User>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<UserWordActivity>(e =>
+        {
+            e.ToTable("user_word_activity");
+            e.HasKey(x => new { x.UserId, x.DeviceId, x.Date });
+            e.Property(x => x.Date).HasColumnType("date");
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<User>(e =>

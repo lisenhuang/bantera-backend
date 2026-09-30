@@ -3012,6 +3012,7 @@ startupLogger.LogInformation("[Startup] All checks passed — starting server.")
 
 AdminEndpoints.Map(app);
 BanteraApi.WebsiteAnalytics.WebsiteAnalyticsEndpoints.Map(app);
+BanteraApi.Profile.WordActivityEndpoints.Map(app);
 AiSettingsEndpoints.Map(app);
 ChatCallSettingsEndpoints.Map(app);
 AdminAudioTestEndpoints.Map(app);
