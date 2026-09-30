@@ -20,6 +20,7 @@ public static class ChatErrorCodes
     public const string ChatNotFound = "chat_not_found";
     public const string ChatForbidden = "chat_forbidden";
     public const string ChatBlocked = "chat_blocked";
+    public const string ChatInvalidImage = "chat_invalid_image";
     public const string ChatInvalidAudio = "chat_invalid_audio";
     public const string ChatInvalidLanguage = "chat_invalid_language";
 }
@@ -80,6 +81,12 @@ public sealed class SendChatAudioRequest
 
     [SwaggerSchema("Duration in milliseconds, capped at 60 seconds.")]
     public int DurationMs { get; set; }
+}
+
+public sealed class SendNativeGroupImageRequest
+{
+    public IFormFile? File { get; set; }
+    public string? ExpectedNativeLanguage { get; set; }
 }
 
 public sealed class UpdateChatNotificationsRequest

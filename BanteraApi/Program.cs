@@ -886,6 +886,35 @@ app.MapGet("/api/chat/threads/{threadId:guid}/messages", async (
 .Produces(404)
 .RequireAuthorization();
 
+app.MapGet("/api/v2/chat/threads/{threadId:guid}/messages", async (
+    Guid threadId,
+    [FromQuery] int limit,
+    [FromQuery] int offset,
+    HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user,
+    ChatService chatService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null)
+        return UnauthorizedResult();
+
+    var messages = await chatService.ListMessagesAsync(
+        userId.Value,
+        threadId,
+        httpContext,
+        limit,
+        offset,
+        cancellationToken, includeImages: true);
+
+    return messages is null ? Results.NotFound() : Results.Ok(messages);
+})
+.WithName("ListChatMessagesV2")
+.Produces<IReadOnlyList<ChatMessageResponse>>(200)
+.Produces<ApiError>(401)
+.Produces(404)
+.RequireAuthorization();
+
 app.MapPost("/api/chat/threads/dm/{otherUserId:guid}/messages/audio", async (
     Guid otherUserId,
     [FromForm] SendChatAudioRequest request,
@@ -968,6 +997,28 @@ app.MapGet("/api/chat/messages/{messageId:guid}/audio", async (
 .Produces<ApiError>(401)
 .Produces(404)
 .RequireAuthorization();
+
+app.MapPost("/api/v2/chat/threads/group/native/messages/image", async (
+    [FromForm] SendNativeGroupImageRequest request, HttpContext httpContext,
+    System.Security.Claims.ClaimsPrincipal user, ChatService chatService, CancellationToken ct) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return UnauthorizedResult();
+    var (message, error) = await chatService.SendNativeGroupImageAsync(userId.Value, request, httpContext, ct);
+    return message is null ? ChatErrorResult(error) : Results.Ok(message);
+}).DisableAntiforgery().RequireAuthorization()
+.WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(6 * 1024 * 1024));
+
+app.MapGet("/api/v2/chat/messages/{messageId:guid}/image", async (
+    Guid messageId, System.Security.Claims.ClaimsPrincipal user, ChatService chatService, CancellationToken ct) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return UnauthorizedResult();
+    var media = await chatService.GetMessageAudioAsync(userId.Value, messageId, ct);
+    if (media is null) return Results.NotFound();
+    if (media.ContentType is not ("image/png" or "image/jpeg")) { await media.Stream.DisposeAsync(); return Results.NotFound(); }
+    return Results.Stream(media.Stream, media.ContentType);
+}).WithName("GetChatMessageImage").RequireAuthorization();
 
 app.MapPost("/api/chat/messages/{messageId:guid}/received", async (
     Guid messageId,
@@ -3033,6 +3084,7 @@ static IResult UnauthorizedResult()
 static IResult ChatErrorResult(string? errorCode)
 {
     var code = errorCode ?? ChatErrorCodes.ChatInvalidAudio;
+    if (code == ChatErrorCodes.ChatInvalidImage) return Results.Json(new ApiError(code, "Choose a valid JPG or PNG image under 5 MB."), statusCode: 400);
     var statusCode = code switch
     {
         ChatErrorCodes.ChatBlocked or ChatErrorCodes.ChatForbidden => StatusCodes.Status403Forbidden,

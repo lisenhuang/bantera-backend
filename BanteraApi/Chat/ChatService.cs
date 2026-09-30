@@ -125,7 +125,8 @@ public class ChatService(
         HttpContext httpContext,
         int limit,
         int offset,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool includeImages = false)
     {
         var thread = await db.ChatThreads
             .AsNoTracking()
@@ -147,6 +148,7 @@ public class ChatService(
             .AsNoTracking()
             .Include(m => m.SenderUser)
             .Where(m => m.ThreadId == threadId)
+            .Where(m => includeImages || !m.AudioContentType.StartsWith("image/"))
             .Where(m => m.ExpiresAt == null || m.ExpiresAt > now)
             .OrderByDescending(m => m.CreatedAt)
             .Skip(safeOffset)
@@ -264,12 +266,25 @@ public class ChatService(
         return (response, null);
     }
 
-    public async Task<(ChatMessageResponse? Message, string? ErrorCode)> SendGroupAudioAsync(
+    public Task<(ChatMessageResponse? Message, string? ErrorCode)> SendGroupAudioAsync(
+        Guid userId, string groupKind, SendChatAudioRequest request, HttpContext httpContext,
+        CancellationToken cancellationToken = default) =>
+        SendGroupMediaAsync(userId, groupKind, request, httpContext, cancellationToken);
+
+    public Task<(ChatMessageResponse? Message, string? ErrorCode)> SendNativeGroupImageAsync(
+        Guid userId, SendNativeGroupImageRequest request, HttpContext httpContext,
+        CancellationToken cancellationToken = default) =>
+        SendGroupMediaAsync(userId, ChatGroupKinds.Native,
+            new SendChatAudioRequest { File = request.File }, httpContext, cancellationToken,
+            image: true, expectedNativeLanguage: request.ExpectedNativeLanguage);
+
+    private async Task<(ChatMessageResponse? Message, string? ErrorCode)> SendGroupMediaAsync(
         Guid userId,
         string groupKind,
         SendChatAudioRequest request,
         HttpContext httpContext,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken,
+        bool image = false, string? expectedNativeLanguage = null)
     {
         var sender = await db.Users.FirstOrDefaultAsync(u => u.Id == userId && u.DeletedAt == null, cancellationToken);
         if (sender is null)
@@ -279,9 +294,13 @@ public class ChatService(
         if (descriptor is null)
             return (null, ChatErrorCodes.ChatInvalidLanguage);
 
-        var validationError = ValidateAudioRequest(request);
-        if (validationError is not null)
-            return (null, validationError);
+        if (image && (string.IsNullOrWhiteSpace(expectedNativeLanguage) ||
+            ChatLanguageResolver.Resolve(expectedNativeLanguage)?.MatchKey != descriptor.MatchKey))
+            return (null, ChatErrorCodes.ChatInvalidLanguage);
+        var validationError = image
+            ? await IsValidGroupImageAsync(request.File, cancellationToken) ? null : ChatErrorCodes.ChatInvalidImage
+            : ValidateAudioRequest(request);
+        if (validationError is not null) return (null, validationError);
 
         var thread = await GetOrCreateGroupThreadAsync(descriptor, cancellationToken);
         var now = DateTime.UtcNow;
@@ -320,7 +339,7 @@ public class ChatService(
             membership.UnreadCount = targetUser.Id == userId ? 0 : membership.UnreadCount + 1;
         }
 
-        var (contentType, fileName) = NormalizeAudioFile(request.File!);
+        var (contentType, fileName) = image ? (request.File!.ContentType, request.File.ContentType == "image/jpeg" ? "achievement.jpg" : "achievement.png") : NormalizeAudioFile(request.File!);
         var messageId = Guid.NewGuid();
         var message = new ChatMessage
         {
@@ -372,7 +391,7 @@ public class ChatService(
             await pushNotificationService.SendAsync(
                 tokens,
                 descriptor.DisplayName,
-                "New audio message in group",
+                image ? "New image in group" : "New audio message in group",
                 new Dictionary<string, string>
                 {
                     ["threadId"] = thread.Id.ToString(),
@@ -1081,7 +1100,7 @@ public class ChatService(
             message.SenderUserId == requesterUserId,
             linkGenerator.GetUriByName(
                 httpContext,
-                "GetChatMessageAudio",
+                message.AudioContentType.StartsWith("image/") ? "GetChatMessageImage" : "GetChatMessageAudio",
                 values: new { messageId = message.Id }) ?? string.Empty);
     }
 
@@ -1117,6 +1136,28 @@ public class ChatService(
             httpContext,
             "GetUserAvatar",
             values: new { userId = user.Id, v = user.AvatarUpdatedAt?.Ticks });
+    }
+
+    public static async Task<bool> IsValidGroupImageAsync(IFormFile? file, CancellationToken ct = default)
+    {
+        if (file is null || file.Length <= 0 || file.Length > 5 * 1024 * 1024 || file.ContentType is not ("image/png" or "image/jpeg")) return false;
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var signature = new byte[8];
+            if (await stream.ReadAsync(signature, ct) != 8) return false;
+            if (file.ContentType == "image/png" && !signature.SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })) return false;
+            if (file.ContentType == "image/jpeg" && (signature[0] != 255 || signature[1] != 216 || signature[2] != 255)) return false;
+            stream.Position = 0;
+            var options = new SixLabors.ImageSharp.Formats.DecoderOptions { MaxFrames = 1, SkipMetadata = true };
+            var info = await SixLabors.ImageSharp.Image.IdentifyAsync(options, stream, ct);
+            if (info.Width <= 0 || info.Height <= 0 || info.Width > 4096 || info.Height > 4096 || (long)info.Width * info.Height > 8_500_000) return false;
+            stream.Position = 0;
+            using var image = await SixLabors.ImageSharp.Image.LoadAsync(options, stream, ct);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return false; }
     }
 
     private static string? ValidateAudioRequest(SendChatAudioRequest request)
@@ -1167,6 +1208,8 @@ public class ChatService(
     {
         var extension = contentType switch
         {
+            "image/png" => "png",
+            "image/jpeg" => "jpg",
             "audio/aac" => "aac",
             "audio/wav" or "audio/x-wav" => "wav",
             "audio/mpeg" => "mp3",
