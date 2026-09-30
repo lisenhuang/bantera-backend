@@ -9,9 +9,9 @@ public static class TranslationLanguageCatalog
     public static IReadOnlyList<LearningLanguageItem> Items { get; } =
     [
         new("ar-AE", "Arabic (United Arab Emirates)", "🇦🇪"),
-        new("zh",    "Chinese",                       "🇨🇳"),
-        new("zh-HK", "Chinese (Hong Kong)",           "🇭🇰"),
-        new("zh-TW", "Chinese (Taiwan)",              "🇹🇼"),
+        new("zh",    "Mandarin",                       "🇨🇳"),
+        new("zh-HK", "Cantonese (Hong Kong)",           "🇭🇰"),
+        new("zh-TW", "Mandarin (Taiwan)",              "🇹🇼"),
         new("da",    "Danish",                        "🇩🇰"),
         new("nl",    "Dutch",                         "🇳🇱"),
         new("en",    "English",                       "🇬🇧"),

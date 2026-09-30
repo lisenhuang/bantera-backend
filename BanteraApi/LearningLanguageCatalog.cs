@@ -49,8 +49,8 @@ public static class LearningLanguageCatalog
         new("it-IT", "Italian (Italy)", "🇮🇹"),
         new("it-CH", "Italian (Switzerland)", "🇨🇭"),
         // Chinese (4)
-        new("zh-CN", "Chinese, Mandarin (China mainland)", "🇨🇳"),
-        new("zh-TW", "Chinese, Mandarin (Taiwan)", "🇹🇼"),
+        new("zh-CN", "Mandarin (Mainland China)", "🇨🇳"),
+        new("zh-TW", "Mandarin (Taiwan)", "🇹🇼"),
         new("zh-HK", "Cantonese (Hong Kong)", "🇭🇰"),
         new("yue-CN", "Cantonese (China mainland)", "🇨🇳"),
         // Japanese, Korean
