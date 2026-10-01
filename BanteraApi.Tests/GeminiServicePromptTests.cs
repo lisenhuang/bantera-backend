@@ -710,6 +710,32 @@ public class GeminiServicePromptTests
         Assert.Single(handler.TextRequests);
     }
 
+    [Theory]
+    [InlineData(30, 200)]
+    [InlineData(500, 150000)]
+    public async Task HistoricalTargetNeverRetriesShortOrLongScriptOrAudio(int words, int audioDurationMs)
+    {
+        var handler = new DurationHandler([words], audioDurationMs);
+        var service = CreateService(handler, durationPlanner: new SampleDurationPlanner());
+        var dialogue = await service.GenerateDialogueAsync("English", "en-NZ", "coffee", 60);
+        var audio = await service.GenerateAudioAsync(dialogue, "en-NZ");
+        var request = Assert.Single(handler.TextRequests);
+        Assert.Contains("Script length target: 160 words", request);
+        Assert.Equal(3, dialogue.DurationPlan!.HistorySampleCount);
+        Assert.Equal(words, dialogue.DurationPlan.Count(dialogue.Lines));
+        Assert.Equal(1, handler.AudioRequests);
+        Assert.Equal(audioDurationMs, audio.DurationMs);
+    }
+
+    private sealed class SampleDurationPlanner : IDialogueDurationPlanner
+    {
+        public Task<DialogueDurationPlan> CreateAsync(string languageCode, int seconds, string level,
+            string audioModel, CancellationToken ct) => Task.FromResult(
+                HistoricalDialogueDurationPlanner.SelectPlan(languageCode, seconds, level, audioModel,
+                    Enumerable.Repeat(new DialogueRateSample(languageCode, level,
+                        string.Join(" ", Enumerable.Repeat("hello", 160)), 60000, audioModel), 3)));
+    }
+
     private static string DialogueJson(int words, string first = "female", string second = "male") =>
         JsonSerializer.Serialize(new
         {
@@ -722,7 +748,7 @@ public class GeminiServicePromptTests
             }).ToArray(),
         });
 
-    private sealed class DurationHandler(int[] wordCounts) : HttpMessageHandler
+    private sealed class DurationHandler(int[] wordCounts, int audioDurationMs = 200) : HttpMessageHandler
     {
         public List<string> TextRequests { get; } = [];
         public List<string> Urls { get; } = [];
@@ -735,7 +761,7 @@ public class GeminiServicePromptTests
             if (json.Contains("responseModalities"))
             {
                 AudioRequests++;
-                part = new { inlineData = new { data = Convert.ToBase64String(new byte[9600]), mimeType = "audio/L16;codec=pcm;rate=24000" } };
+                part = new { inlineData = new { data = Convert.ToBase64String(new byte[audioDurationMs * 48]), mimeType = "audio/L16;codec=pcm;rate=24000" } };
             }
             else
             {
@@ -750,7 +776,8 @@ public class GeminiServicePromptTests
     }
 
     private static GeminiService CreateService(
-        HttpMessageHandler handler, AiModelSelection? selection = null, string[]? apiKeys = null)
+        HttpMessageHandler handler, AiModelSelection? selection = null, string[]? apiKeys = null,
+        IDialogueDurationPlanner? durationPlanner = null)
     {
         var client = new HttpClient(handler)
         {
@@ -788,6 +815,9 @@ public class GeminiServicePromptTests
             new BanteraApi.Diagnostics.AiPipelineEventRecorder(
                 services.GetRequiredService<IServiceScopeFactory>(),
                 NullLogger<BanteraApi.Diagnostics.AiPipelineEventRecorder>.Instance),
+            durationPlanner ?? new HistoricalDialogueDurationPlanner(
+                services.GetRequiredService<IServiceScopeFactory>(), cache,
+                NullLogger<HistoricalDialogueDurationPlanner>.Instance),
             NullLogger<GeminiService>.Instance);
     }
 

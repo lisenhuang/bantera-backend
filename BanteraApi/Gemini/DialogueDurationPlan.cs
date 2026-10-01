@@ -11,6 +11,8 @@ namespace BanteraApi.Gemini;
 /// </summary>
 public sealed record DialogueDurationPlan(int RequestedSeconds, int UnitsPerMinute, bool CountCharacters, string UnitName)
 {
+    public string RateSource { get; init; } = "language_baseline";
+    public int HistorySampleCount { get; init; }
     public int TargetUnits => Math.Max(1, (int)Math.Round(RequestedSeconds * UnitsPerMinute / 60d));
     public int MinimumUnits => Math.Max(1, (int)Math.Ceiling(TargetUnits * .9));
     public int MaximumUnits => Math.Max(MinimumUnits, (int)Math.Floor(TargetUnits * 1.1));
@@ -59,6 +61,9 @@ public sealed record DialogueDurationPlan(int RequestedSeconds, int UnitsPerMinu
     public double EstimateSeconds(int units) => units * 60d / UnitsPerMinute;
 
     public string PromptInstruction =>
+        (HistorySampleCount > 0
+            ? $"Completed audio history suggests approximately {UnitsPerMinute} {UnitName} per minute. "
+            : "With no sufficient matching audio history, use this initial language-based estimate for the requested duration. ") +
         $"Script length target: {TargetUnits} {UnitName} total across all speakers; " +
         $"suggested range: {MinimumUnits}-{MaximumUnits}. Count only spoken text in the lines, " +
         "excluding title, speaker labels, punctuation, and duplicate shortCues. " +

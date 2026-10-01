@@ -17,6 +17,7 @@ public class GeminiService(
     GeminiVoiceCatalog voiceCatalog,
     Mp3Encoder mp3Encoder,
     AiPipelineEventRecorder events,
+    IDialogueDurationPlanner durationPlanner,
     ILogger<GeminiService> logger)
 {
     private const string LatestNewsScenarioId = "latest_news";
@@ -275,7 +276,9 @@ public class GeminiService(
         string? level = null)
     {
         var effectiveLevel = AudioLevels.ForGeneration(level);
-        var durationPlan = DialogueDurationPlan.Create(languageCode, durationSeconds, effectiveLevel);
+        var models = await modelSettings.GetAsync(cancellationToken);
+        var durationPlan = await durationPlanner.CreateAsync(languageCode, durationSeconds, effectiveLevel,
+            testSession?.AudioModel ?? models.AudioModel, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var dialogue = await GenerateDialogueDraftAsync(language, languageCode, scenario, durationSeconds,
             durationPlan, scenarioId, nativeLanguage, nativeLanguageCode,
@@ -289,6 +292,7 @@ public class GeminiService(
             "dialogue", "script_duration_checked", "Recorded estimated script duration; proceeding without length corrections.",
             new { draft = 1, maxDrafts = 1, durationPlan.RequestedSeconds, durationPlan.TargetUnits,
                 durationPlan.MinimumUnits, durationPlan.MaximumUnits, durationPlan.UnitName,
+                durationPlan.UnitsPerMinute, durationPlan.RateSource, durationPlan.HistorySampleCount,
                 units, estimatedSeconds = durationPlan.EstimateSeconds(units), accepted = true,
                 withinTargetRange = durationPlan.IsAcceptable(units), diagnosticOnly = true });
         return dialogue with { DurationPlan = durationPlan, Level = effectiveLevel };
@@ -775,7 +779,8 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                 new { durationPlan.RequestedSeconds, actualSeconds = durationMs / 1000d,
                     estimatedSeconds = durationPlan.EstimateSeconds(units), units, durationPlan.UnitName,
                     observedUnitsPerMinute = durationMs > 0 ? units * 60000d / durationMs : 0,
-                    languageCode, voice1 = actualVoice1, voice2 = actualVoice2 }, actualModel, durationMs: durationMs);
+                    languageCode, level = dialogue.Level, durationPlan.RateSource, durationPlan.HistorySampleCount,
+                    voice1 = actualVoice1, voice2 = actualVoice2 }, actualModel, durationMs: durationMs);
         }
         if (!isRawPcm)
         {

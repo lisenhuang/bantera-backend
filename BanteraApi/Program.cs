@@ -89,6 +89,7 @@ builder.Services.AddHttpClient("gemini", c =>
     c.Timeout = TimeSpan.FromSeconds(180);
 });
 builder.Services.AddScoped<GeminiService>();
+builder.Services.AddSingleton<IDialogueDurationPlanner, HistoricalDialogueDurationPlanner>();
 builder.Services.AddSingleton<GeminiVoiceCatalog>();
 builder.Services.AddHostedService<AdminAudioTestWorker>();
 builder.Services.AddSingleton<GeminiKeyHealthService>();

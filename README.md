@@ -39,6 +39,16 @@ BanteraApi/
 
 ---
 
+## Audio duration estimates
+
+Dialog generation learns speaking rates from saved AI audio with actual durations and non-estimated transcripts. It counts spoken text with the same language-specific counter used for new scripts (words for English, written characters for Chinese/Japanese, etc.), excluding uploaded human videos and invalid/very short samples.
+
+For each difficulty, the planner uses the median of at least three samples, preferring the exact locale and TTS model, then the exact locale, then the broader spoken language with/without a model match. Cantonese (`zh-HK`, `yue-CN`) stays separate from Mandarin. Legacy lessons without a difficulty are intermediate; missing model attribution does not exclude a lesson from general history. Queries consider at most 300 lessons, ordered by exact locale then recency, and cache the samples for five minutes. No transcript content is sent as history to the model; only the aggregate rate and requested script length enter the prompt.
+
+When history is insufficient, unavailable, or takes more than three seconds to load, generation uses the existing language/difficulty baseline. History lookup failures are cached for 30 seconds. Neither an out-of-range script word count nor an out-of-range audio duration causes regeneration. Other existing validation/provider error handling is unchanged.
+
+This requires no migration or new environment variables. After deployment, generate a lesson from an existing client and check the `script_duration_checked` pipeline event for `rateSource`, `historySampleCount`, `unitsPerMinute`, and `diagnosticOnly: true`. Check `audio_duration_measured` for the actual duration and confirm the generation finishes even when a duration target is missed. Fresh samples become available after the five-minute cache expires.
+
 ## 🌐 API Surface
 
 ### Public
