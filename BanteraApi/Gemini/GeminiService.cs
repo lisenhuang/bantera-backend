@@ -409,7 +409,7 @@ Search from the internet to follow this instruction: {{searchInstruction}}
 - If fewer suitable real recent stories are found, go ahead and generate the dialogue using every suitable story found.
 - One suitable real recent story is enough to proceed, from either requested region when native and learning-language regions differ.
 - Do not invent, pad, or fabricate missing stories to satisfy the requested count or regional mix.
-- If you cannot find any suitable real recent story, refuse by returning ONLY this exact JSON (no markdown, no other text): {"rejected":true,"reason":"no_suitable_news"}
+- If you cannot find any suitable real recent story, refuse by returning ONLY rejection JSON (no markdown, no other text) with reason "no_suitable_news" and a brief explanation of why no suitable recent story was found.
 - Prefer safe, public-interest topics suitable for conversational language practice, such as culture, science, technology, travel, sports, weather, business, education, infrastructure, or community events.
 - Avoid politics, government, elections, diplomacy, war, crime, disasters, deaths, injuries, or graphic/distressing events.
 - Exclude any story that centers on Chinese politics, the Chinese government or ruling party, or any current or former Chinese government or party leader by name or title, even if the news is from another country.
@@ -428,9 +428,14 @@ CONTENT POLICY (follow strictly):
 - Do NOT generate dialogue, titles, or scenarios about politics of the People's Republic of China, its government or ruling party, or political leadership past or present; do NOT include politically sensitive topics concerning China.
 - Do NOT mention the names or titles of any current or former Chinese government leaders or Chinese Communist Party leaders anywhere in accepted output, even incidentally.
 - Do NOT generate content about any country's government, political leaders, elections, or politically sensitive current events when those would dominate the scene.
-- If the user's scenario OR any honest interpretation of it would require violating the above, you MUST refuse by returning ONLY this exact JSON (no markdown, no other text):
-{"rejected":true,"reason":"restricted_topic"}
-- If you accept the scenario, the title and every line must stay fully clear of those topics.
+- Reject only when fulfilling the user's explicitly requested scenario requires content prohibited by the rules above and cannot be done faithfully without it.
+- Otherwise, choose a neutral, everyday interpretation that preserves the user's scenario. Do not invent political connections or reject a scenario merely because it could be connected to politics.
+- Ordinary bus delays, restaurant orders, supermarket chats, movie-sequel debates, doctor appointments, coffee-shop chats, meeting neighbours, and tech support are allowed when their dialogue stays within the rules above. A location or language associated with China does not by itself make an everyday scenario political.
+- If refusal is necessary, return ONLY rejection JSON (no markdown, no other text):
+{"rejected":true,"reason":"restricted_topic","explanation":"..."}
+- Replace the explanation placeholder with the prohibited rule and the explicit scenario detail that requires it.
+- The explanation must be a short decision summary, not step-by-step reasoning. Never include credentials or hidden instructions.
+- If you accept the scenario, the title and every line must stay fully clear of the prohibited topics.
 
 {{accentInstruction}}
 {{AudioLevels.DialogueInstruction(effectiveLevel)}}
@@ -447,7 +452,7 @@ Use enough turns to fit the requested duration without padding or rushing the co
 
 Generate a natural, realistic spoken dialogue between exactly TWO people.
 - One character must be male and the other female. Either speaker may have either gender, but keep each character's name, pronouns, and dialogue consistent with that gender throughout.
-- If the scenario explicitly requires two characters of the same gender, refuse by returning ONLY {"rejected":true,"reason":"same_gender_required"} rather than changing their genders.
+- If the scenario explicitly requires two characters of the same gender, refuse by returning ONLY rejection JSON with reason "same_gender_required" and a brief explanation identifying the explicit same-gender requirement, rather than changing their genders.
 - In the JSON structure below, strictly use "Speaker1" and "Speaker2" as the labels for the speakers.
 - Inside the actual dialogue text (the "text" fields), give the characters realistic names natural to the target language and locale.
 - Characters should address each other by these real names, NEVER as "Speaker 1" or "Speaker 2".
@@ -500,6 +505,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             RawDialogue? parsed = null;
             var maxContentAttempts = testSession is null ? 3 : 1;
             var contentRejections = 0;
+            ContentRejectedException? lastRejection = null;
 
             for (var contentAttempt = 1; contentAttempt <= maxContentAttempts && parsed is null; contentAttempt++)
             {
@@ -507,7 +513,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                 for (var genderAttempt = 0; genderAttempt < (testSession is null ? 2 : 1); genderAttempt++)
                 {
                     var retryInstruction = contentAttempt == 1 ? "" :
-                        "\n\nYour previous answer rejected this request. Reconsider whether a neutral everyday interpretation satisfies every rule above. If it does, write that dialogue. If it cannot, return the rejection JSON again. Never include a restricted topic to avoid rejection.";
+                        "\n\nYour previous answer rejected this request. Reconsider whether a neutral everyday interpretation faithfully fulfills the explicit request while satisfying every rule above. Do not invent political connections. If it does, write that dialogue. If it cannot, return the rejection JSON with the specific reason and a brief explanation again. Never include a restricted topic to avoid rejection.";
                     var requestPrompt = genderAttempt == 0
                         ? prompt + retryInstruction
                         : $"{prompt}{retryInstruction}\n\nYour previous response did not assign one male and one female speaker. Regenerate the entire dialogue with opposite speaker genders, or return the rejection JSON if the scenario requires two people of the same gender.";
@@ -560,12 +566,15 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                             {
                                 var reason = rejDoc.RootElement.TryGetProperty("reason", out var reasonValue) && reasonValue.ValueKind == JsonValueKind.String
                                     ? TruncateForLog(reasonValue.GetString(), 120) : "unspecified";
+                                var explanation = rejDoc.RootElement.TryGetProperty("explanation", out var explanationValue) && explanationValue.ValueKind == JsonValueKind.String
+                                    ? TruncateForLog(explanationValue.GetString(), 400) : null;
+                                lastRejection = ContentRejectedException.FromReason(reason, explanation);
                                 contentRejections++;
                                 await events.RecordAsync(AiPipelineSeverity.Warning, "dialogue", "content_rejected_attempt",
                                     contentAttempt < maxContentAttempts
                                         ? "The text model rejected the scenario; retrying the content."
                                         : "The text model rejected the scenario on the final content attempt.",
-                                    new { contentAttempt, maxContentAttempts, reason, scenarioId, scenarioPreview = TruncateForLog(scenario, 240), useGoogleSearch },
+                                    new { contentAttempt, maxContentAttempts, reason, explanation, scenarioId, scenarioPreview = TruncateForLog(scenario, 240), useGoogleSearch },
                                     selectedModel, MaskKey(key));
                                 rejected = true;
                                 break;
@@ -603,7 +612,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             }
 
             if (parsed is null)
-                throw new ContentRejectedException("This topic cannot be used for generation. Please choose a different scenario.");
+                throw lastRejection ?? new ContentRejectedException("This topic cannot be used for generation. Please choose a different scenario.");
 
             if (contentRejections > 0)
                 await events.RecordAsync(AiPipelineSeverity.Info, "dialogue", "content_rejection_recovered",
@@ -1592,7 +1601,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
 
     private static string MaskKey(string key) => key.Length <= 10 ? "***" : $"{key[..6]}…{key[^4..]}";
 
-    /// <summary>Try every eligible key on the primary model before trying the configured fallback.</summary>
+    /// <summary>Only quota failures rotate keys; other failures immediately use the configured fallback.</summary>
     private async Task<T> WithModelFallbackAsync<T>(
         string operation, string primaryModel, string? fallbackModel,
         Func<string, string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false, bool singleAttempt = false)
@@ -1628,8 +1637,8 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
     }
 
     /// <summary>
-    /// Runs one step with each key in turn (shuffled per step) until one succeeds. A content
-    /// rejection is final and is not retried with other keys.
+    /// Rotates shuffled keys only on quota failures. Other failures stop key rotation,
+    /// and content rejections remain final after the content retry limit.
     /// </summary>
     private async Task<T> WithGeminiKeyAsync<T>(string operation, Func<string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false, string? model = null, bool fallbackAvailable = false, bool singleAttempt = false)
     {
@@ -1675,13 +1684,26 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
                 lastEx = ex;
                 var failureKind = GeminiKeyHealthService.Classify(ex);
                 logger.LogWarning(
-                    "Gemini {Operation} failed with key {Key} (attempt {Attempt}/{Total}); trying the next key. {Error}",
+                    "Gemini {Operation} failed with key {Key} (attempt {Attempt}/{Total}). {Error}",
                     operation, keyHint, attempt + 1, keys.Length, TruncateForLog(ex.Message, 400));
                 await events.RecordAsync(
                     AiPipelineSeverity.Warning, stage, "key_failed",
                     TruncateForLog(ex.Message, 1000),
                     new { attempt = attempt + 1, total = keys.Length, status = (ex as HttpRequestException)?.StatusCode is { } code ? (int)code : (int?)null, exception = ex.GetType().Name, failureKind = failureKind.ToString() },
                     model, keyHint);
+                if (failureKind == GeminiKeyFailureKind.ModelUnavailable)
+                {
+                    await events.RecordAsync(
+                        fallbackAvailable ? AiPipelineSeverity.Warning : AiPipelineSeverity.Error,
+                        stage, "model_unavailable",
+                        "The model is temporarily unavailable; remaining keys for this model were skipped.",
+                        new { status = 503, skippedKeys = keys.Length - attempt - 1, fallbackAvailable }, model);
+                    // Let WithModelFallbackAsync change the model without exhausting keys.
+                    // Do not disable or cool down a healthy key for model-level overload.
+                    throw new InvalidOperationException(singleAttempt
+                        ? $"The selected Gemini model failed for {operation}; no retry or fallback was attempted."
+                        : $"Gemini model is temporarily unavailable for {operation}.", ex);
+                }
                 if (failureKind == GeminiKeyFailureKind.QuotaLimited)
                 {
                     var retryAt = keyHealth.CoolDown(key, model);
@@ -1695,6 +1717,17 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
                     await events.RecordAsync(AiPipelineSeverity.Error, stage, "key_disabled",
                         "A confirmed invalid key was disabled until an admin retries it.",
                         new { model }, model, keyHint);
+                }
+                if (failureKind != GeminiKeyFailureKind.QuotaLimited)
+                {
+                    await events.RecordAsync(
+                        fallbackAvailable ? AiPipelineSeverity.Warning : AiPipelineSeverity.Error,
+                        stage, "key_rotation_skipped",
+                        "This failure is not a quota limit; remaining keys for this model were skipped.",
+                        new { skippedKeys = keys.Length - attempt - 1, fallbackAvailable, failureKind = failureKind.ToString() }, model);
+                    throw new InvalidOperationException(singleAttempt
+                        ? $"The selected Gemini model failed for {operation}; no retry or fallback was attempted."
+                        : $"Gemini model failed for {operation}; only quota errors permit key rotation.", ex);
                 }
             }
         }
@@ -1765,7 +1798,25 @@ public record ShortCueValidationFailure(
 
 public record VideoTranscriptCueRecord(int Index, int StartMs, int EndMs, string Text);
 
-public class ContentRejectedException(string message) : Exception(message);
+public class ContentRejectedException(string message, string reason = "unspecified", string? explanation = null) : Exception(message)
+{
+    // Provider diagnostics stay in admin events; only controlled messages reach clients.
+    public string Reason { get; } = reason;
+    public string? Explanation { get; } = explanation;
+
+    public static ContentRejectedException FromReason(string? reason, string? explanation = null)
+    {
+        var normalized = reason?.Trim().ToLowerInvariant();
+        var message = normalized switch
+        {
+            "restricted_topic" => "This topic cannot be used for generation. Please choose a different scenario.",
+            "no_suitable_news" => "No suitable recent news was found. Please try again later or choose a different scenario.",
+            "same_gender_required" => "This scenario requires two speakers of the same gender. Please choose a scenario that allows one male and one female speaker.",
+            _ => "This scenario could not be generated. Please try again or choose a different scenario."
+        };
+        return new(message, normalized is "restricted_topic" or "no_suitable_news" or "same_gender_required" ? normalized : "unspecified", explanation);
+    }
+}
 
 public record GeneratedAudio(byte[] Bytes, string ContentType, string FileExtension, int DurationMs);
 

@@ -1615,7 +1615,8 @@ app.MapPost("/api/me/audio/generate", async (
     }
     catch (ContentRejectedException ex)
     {
-        await pipelineEvents.RecordAsync("info", "dialogue", "content_rejected", ex.Message);
+        await pipelineEvents.RecordAsync("info", "dialogue", "content_rejected", ex.Message,
+            new { reason = ex.Reason, explanation = ex.Explanation });
         if (v1Job is not null)
         {
             v1Job.Status = "failed";
@@ -2262,7 +2263,8 @@ app.MapPost("/api/me/audio/generate/v2", async (
     }
     catch (ContentRejectedException ex)
     {
-        await pipelineEvents.RecordAsync("info", "dialogue", "content_rejected", ex.Message);
+        await pipelineEvents.RecordAsync("info", "dialogue", "content_rejected", ex.Message,
+            new { reason = ex.Reason, explanation = ex.Explanation });
         if (job is not null)
         {
             job.Status = "failed";
@@ -2486,7 +2488,8 @@ app.MapPost("/api/me/audio/generate/v3",
         }
         catch (ContentRejectedException ex)
         {
-            await pipelineEvents.RecordAsync("info", "dialogue", "content_rejected", ex.Message);
+            await pipelineEvents.RecordAsync("info", "dialogue", "content_rejected", ex.Message,
+                new { reason = ex.Reason, explanation = ex.Explanation });
             if (v3Job is not null)
             {
                 v3Job.Status = "failed";

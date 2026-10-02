@@ -18,7 +18,7 @@ public class GeminiKeyHealthServiceTests
     [InlineData(HttpStatusCode.Unauthorized, "Authentication failed", GeminiKeyFailureKind.InvalidKey)]
     [InlineData(HttpStatusCode.BadRequest, "Invalid request body", GeminiKeyFailureKind.Other)]
     [InlineData(HttpStatusCode.Forbidden, "Model permission denied", GeminiKeyFailureKind.Other)]
-    [InlineData(HttpStatusCode.ServiceUnavailable, "Overloaded", GeminiKeyFailureKind.Other)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "Overloaded", GeminiKeyFailureKind.ModelUnavailable)]
     public void Classify_OnlyDisablesConfirmedBadKeys(
         HttpStatusCode status, string message, GeminiKeyFailureKind expected)
     {

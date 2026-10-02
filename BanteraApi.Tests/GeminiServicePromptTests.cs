@@ -526,6 +526,113 @@ public class GeminiServicePromptTests
     }
 
     [Fact]
+    public async Task GenerateDialogueAsync_ModelOverloadSkipsRemainingPrimaryKeys()
+    {
+        var handler = new FallbackHandler(audio: false);
+        var service = CreateService(handler, new("primary-text", "tts", "backup-text", null),
+            ["first-key", "second-key", "third-key"]);
+
+        await service.GenerateDialogueAsync("English", "en-GB", "a delayed bus", 60);
+
+        Assert.Equal(["primary-text", "backup-text"], handler.Models);
+    }
+
+    [Fact]
+    public async Task GenerateAudioAsync_ModelOverloadSkipsRemainingPrimaryKeys()
+    {
+        var handler = new FallbackHandler(audio: true);
+        var service = CreateService(handler, new("text", "primary-tts", null, "backup-tts"),
+            ["first-key", "second-key", "third-key"]);
+        var dialogue = new GeneratedDialogue("Chat", "Kore", "Puck", [new("Speaker1", "Hello")], []);
+
+        await service.GenerateAudioAsync(dialogue, "en-GB");
+
+        Assert.Equal(["primary-tts", "backup-tts"], handler.Models);
+    }
+
+    [Fact]
+    public async Task GenerateDialogueAsync_OverloadWithoutFallbackDoesNotRotateOrDisableKeys()
+    {
+        var handler = new FallbackHandler(audio: false);
+        var service = CreateService(handler, new("primary-text", "tts", null, null),
+            ["first-key", "second-key", "third-key"]);
+
+        for (var i = 0; i < 2; i++)
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.GenerateDialogueAsync("English", "en-GB", "a delayed bus", 60));
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, Assert.IsType<HttpRequestException>(error.InnerException).StatusCode);
+        }
+        Assert.Equal(["primary-text", "primary-text"], handler.Models);
+    }
+
+    [Theory]
+    [InlineData("restricted_topic", "This topic cannot be used for generation.")]
+    [InlineData("no_suitable_news", "No suitable recent news was found.")]
+    [InlineData("same_gender_required", "This scenario requires two speakers of the same gender.")]
+    [InlineData("unexpected_provider_detail", "This scenario could not be generated.")]
+    [InlineData(null, "This scenario could not be generated.")]
+    public async Task GenerateDialogueAsync_PreservesRejectionDiagnosticsWithoutExposingThem(
+        string? reason, string expectedMessage)
+    {
+        const string explanation = "Provider-only diagnostic detail";
+        var response = JsonSerializer.Serialize(new { rejected = true, reason, explanation });
+        var handler = new CapturingHandler(responseDialogue: response);
+        var service = CreateService(handler, new("primary-text", "tts", "backup-text", null));
+
+        var error = await Assert.ThrowsAsync<ContentRejectedException>(() =>
+            service.GenerateDialogueAsync("English", "en-GB", "a rejected scenario", 60));
+
+        Assert.Equal(3, handler.RequestCount);
+        Assert.StartsWith(expectedMessage, error.Message);
+        Assert.DoesNotContain(explanation, error.Message);
+        Assert.DoesNotContain("unexpected_provider_detail", error.Message);
+        Assert.Equal(reason is "restricted_topic" or "no_suitable_news" or "same_gender_required" ? reason : "unspecified", error.Reason);
+        Assert.Equal(explanation, error.Explanation);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task GenerateDialogueAsync_NonQuotaFailureSkipsRemainingKeys(HttpStatusCode status)
+    {
+        var handler = new FallbackHandler(audio: false, primaryStatus: status);
+        var service = CreateService(handler, new("primary-text", "tts", "backup-text", null),
+            ["first-key", "second-key", "third-key"]);
+
+        await service.GenerateDialogueAsync("English", "en-GB", "a delayed bus", 60);
+
+        Assert.Equal(["primary-text", "backup-text"], handler.Models);
+    }
+
+    [Fact]
+    public async Task GenerateDialogueAsync_QuotaTriesAllEligibleKeysBeforeFallback()
+    {
+        var handler = new FallbackHandler(audio: false, primaryStatus: HttpStatusCode.TooManyRequests);
+        var service = CreateService(handler, new("primary-text", "tts", "backup-text", null),
+            ["first-key", "second-key", "third-key"]);
+
+        await service.GenerateDialogueAsync("English", "en-GB", "a delayed bus", 60);
+
+        Assert.Equal(["primary-text", "primary-text", "primary-text", "backup-text"], handler.Models);
+    }
+
+    [Fact]
+    public async Task GenerateDialogueAsync_OverloadedFallbackAlsoStopsKeyRotation()
+    {
+        var handler = new FallbackHandler(audio: false);
+        var service = CreateService(handler, new("primary-text", "tts", "primary-backup", null),
+            ["first-key", "second-key", "third-key"]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.GenerateDialogueAsync("English", "en-GB", "a delayed bus", 60));
+
+        Assert.Equal(["primary-text", "primary-backup"], handler.Models);
+    }
+
+    [Fact]
     public async Task GenerateDialogueAsync_RetriesTopicRejectionWithoutChangingModel()
     {
         var handler = new FallbackHandler(audio: false, rejectPrimary: true);
@@ -548,6 +655,8 @@ public class GeminiServicePromptTests
         Assert.NotEmpty(dialogue.Lines);
         Assert.Equal(2, handler.RequestCount);
         Assert.Contains("Reconsider whether a neutral everyday interpretation", handler.LastPrompt);
+        Assert.Contains("Do not invent political connections", handler.LastPrompt);
+        Assert.DoesNotContain("any honest interpretation", handler.LastPrompt);
     }
 
     [Fact]
@@ -597,7 +706,7 @@ public class GeminiServicePromptTests
         using var diagnostics = JsonDocument.Parse(session.ToJson());
         var call = Assert.Single(diagnostics.RootElement.EnumerateArray());
         Assert.Equal(503, call.GetProperty("httpStatus").GetInt32());
-        Assert.Contains("unavailable", call.GetProperty("responseBody").GetString());
+        Assert.Contains("Provider failure", call.GetProperty("responseBody").GetString());
     }
 
     [Fact]
@@ -857,7 +966,7 @@ public class GeminiServicePromptTests
         }
     }
 
-    private sealed class FallbackHandler(bool audio, bool rejectPrimary = false) : HttpMessageHandler
+    private sealed class FallbackHandler(bool audio, bool rejectPrimary = false, HttpStatusCode primaryStatus = HttpStatusCode.ServiceUnavailable) : HttpMessageHandler
     {
         public List<string> Models { get; } = [];
 
@@ -868,9 +977,9 @@ public class GeminiServicePromptTests
             if (model.StartsWith("primary", StringComparison.Ordinal))
             {
                 if (!rejectPrimary)
-                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                    return Task.FromResult(new HttpResponseMessage(primaryStatus)
                     {
-                        Content = new StringContent("unavailable"),
+                        Content = new StringContent("Provider failure"),
                     });
                 return Task.FromResult(JsonResponse("{\"rejected\":true}"));
             }

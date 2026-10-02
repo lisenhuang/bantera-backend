@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 
 namespace BanteraApi.Gemini;
 
-public enum GeminiKeyFailureKind { Other, QuotaLimited, InvalidKey }
+public enum GeminiKeyFailureKind { Other, QuotaLimited, InvalidKey, ModelUnavailable }
 
 public sealed record GeminiKeyHealthItem(
     string Id, string Hint, string Status, string? Model, DateTimeOffset? RetryAt,
@@ -47,6 +47,8 @@ public sealed class GeminiKeyHealthService(
     {
         if (error is not HttpRequestException httpError) return GeminiKeyFailureKind.Other;
         if (httpError.StatusCode == HttpStatusCode.TooManyRequests) return GeminiKeyFailureKind.QuotaLimited;
+        // HTTP 503 describes service/model availability, not the credential's health.
+        if (httpError.StatusCode == HttpStatusCode.ServiceUnavailable) return GeminiKeyFailureKind.ModelUnavailable;
 
         // GenerateContent can report an invalid key as HTTP 400 with API_KEY_INVALID.
         // A generic 403 may instead be specific to one model, so do not disable it.

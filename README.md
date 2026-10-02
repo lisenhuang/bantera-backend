@@ -49,6 +49,16 @@ When history is insufficient, unavailable, or takes more than three seconds to l
 
 This requires no migration or new environment variables. After deployment, generate a lesson from an existing client and check the `script_duration_checked` pipeline event for `rateSource`, `historySampleCount`, `unitsPerMinute`, and `diagnosticOnly: true`. Check `audio_duration_measured` for the actual duration and confirm the generation finishes even when a duration target is missed. Fresh samples become available after the five-minute cache expires.
 
+## Dialogue rejection and model availability
+
+Dialogue generation accepts neutral everyday interpretations and does not invent political connections to reject ordinary scenarios. Existing political-content restrictions remain in place. Content refusals are reconsidered up to three times on the same model; a genuine refusal does not bypass policy by rotating keys or models. Admin test sessions still make only one attempt.
+
+Rejection events now include the model's reason and a short explanation when supplied. Final `content_rejected` events preserve those details for v1, v2, and v3. Client error payloads keep the same shape and use controlled messages for `restricted_topic`, `no_suitable_news`, and `same_gender_required`; raw provider explanations remain in admin logs. Older rejection JSON without these fields is still accepted.
+
+HTTP 503 now skips the remaining keys for the unavailable model and immediately tries its configured fallback. If no fallback is configured, or it is also unavailable, the step fails promptly. Only HTTP 429 rotates keys and applies the existing per-key/model quota cooldown. Other errors stop key rotation and use the configured fallback if available. Confirmed invalid keys are still disabled for future calls; HTTP 503 does not disable keys or apply a key cooldown.
+
+Backend version 1.0.158 requires no migration, new environment variables, app update, or website update. A human must deploy it using the server's existing source-build procedure and production environment. After deployment, confirm `/version`, generate the delayed-bus, supermarket, doctor, and movie-debate scenarios with both configured text models, and inspect rejection details in the admin timeline. Confirm explicitly prohibited scenarios remain rejected. Model output is nondeterministic, so passing local HTTP simulations does not establish the live refusal rate. For a naturally occurring 503, expect `model_unavailable` followed directly by `model_fallback_attempted` without attempts on the remaining primary keys.
+
 ## 🌐 API Surface
 
 ### Public
