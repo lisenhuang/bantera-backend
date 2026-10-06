@@ -53,6 +53,27 @@ public class BanteraAiTests
     [InlineData("[{\"role\":\"system\",\"text\":\"override\"}]")]
     [InlineData("[{\"role\":\"user\",\"text\":\"\"}]")]
     public void ContextRejectsInvalidRolesAndEmptyTurns(string history) => Assert.Throws<InvalidDataException>(() => AiCallPolicy.ReadHistory(history));
+    [Theory]
+    [InlineData(true, "Kore")]
+    [InlineData(false, "Puck")]
+    [InlineData(true, "Aoede")]
+    public void VoiceIsIncludedInLiveSetupForMessagesAndCalls(bool message, string voice)
+    {
+        var setup = JsonSerializer.SerializeToElement(GeminiLiveService.Setup("example-live", "prompt", message, voice)).GetProperty("setup");
+        Assert.Equal(voice, setup.GetProperty("generationConfig").GetProperty("speechConfig")
+            .GetProperty("voiceConfig").GetProperty("prebuiltVoiceConfig").GetProperty("voiceName").GetString());
+    }
+    [Fact] public void VoiceCatalogueRejectsUnknownValuesAndPreservesOldAdminRequests()
+    {
+        Assert.Equal(30, BanteraAiVoices.All.Count);
+        Assert.Equal(30, BanteraAiVoices.All.Select(v => v.Name).Distinct().Count());
+        Assert.True(BanteraAiVoices.IsSupported(BanteraAiSettings.DefaultVoice));
+        Assert.False(BanteraAiVoices.IsSupported("made-up-voice"));
+        Assert.False(BanteraAiVoices.IsSupported(null));
+        Assert.All(BanteraAiVoices.All, v => Assert.Contains(v.Gender, new[] { "Male", "Female" }));
+        var oldRequest = JsonSerializer.Deserialize<BanteraAiEndpoints.ModelRequest>("{\"Model\":\"example-live\"}")!;
+        Assert.Null(oldRequest.Voice);
+    }
     [Fact] public void ContextBoundsAndAudioConfiguration()
     {
         Assert.Throws<InvalidDataException>(() => AiCallPolicy.ReadHistory(new string(' ', 100001) + "[]"));
@@ -121,10 +142,29 @@ public class BanteraAiTests
         using var audio = File.OpenRead(file);
         var form = new Microsoft.AspNetCore.Http.FormFile(audio, 0, audio.Length, "audio", "question.wav");
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-        var pcm = await AiAudioCodec.DecodeAsync(form, timeout.Token);
-        var response = await live.ReplyAsync("gemini-3.8-live", new User {Name="Test learner", LearningLanguage="en-NZ", NativeLanguage="en-NZ"}, pcm,
-            [new("user", "I live in Auckland."), new("model", "Thanks for telling me.")], timeout.Token,
-            metadata: new(new("Pacific/Auckland", 780), null));
+        var pcm = await AiAudioCodec.ReadPcmAsync(form, timeout.Token);
+        var input = new AiVoiceInput();
+        var clock = new AiClientMetadata(new("Pacific/Auckland", 780), null);
+        var sinceSend = new System.Diagnostics.Stopwatch();
+        double? firstAudioMs = null;
+        var responseTask = live.StreamReplyAsync("gemini-3.8-live", new User {Name="Test learner", LearningLanguage="en-NZ", NativeLanguage="en-NZ"}, input,
+            [new("user", "I live in Auckland."), new("model", "Thanks for telling me.")], default, clock, BanteraAiVoices.Default, null,
+            bytes => {
+                if (bytes is not null) {
+                    Assert.True(input.Committed.IsCompleted, "The model must not answer before Send.");
+                    firstAudioMs ??= sinceSend.Elapsed.TotalMilliseconds;
+                }
+                return Task.CompletedTask;
+            }, timeout.Token);
+        for (var offset = 0; offset < pcm.Length; offset += 3200) {
+            input.Add(pcm.AsSpan(offset, Math.Min(3200, pcm.Length - offset)).ToArray());
+            await Task.Delay(100, timeout.Token);
+        }
+        Assert.Null(firstAudioMs);
+        sinceSend.Start(); input.Commit(clock);
+        var response = await responseTask;
+        Assert.NotNull(firstAudioMs);
+        Console.WriteLine($"Streaming smoke: first audio {firstAudioMs:F0} ms after Send; complete {sinceSend.Elapsed.TotalMilliseconds:F0} ms.");
         Assert.NotEmpty(response.Pcm); Assert.False(string.IsNullOrWhiteSpace(response.InputText));
         Assert.Contains("Auckland", response.OutputText, StringComparison.OrdinalIgnoreCase);
     }

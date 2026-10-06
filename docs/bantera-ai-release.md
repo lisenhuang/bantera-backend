@@ -1,14 +1,14 @@
-# Bantera AI release: backend 1.0.159, website 0.1.57, app 2.0.118 (306)
+# Bantera AI release: backend 1.0.160, website 0.1.57, app 2.0.120 (308)
 
-## Human deployment
+## Deployment
 
-Deploy the backend first using the existing source/Docker deployment process, then the website. No deployment is performed by the agent. The backend main workflow builds a Docker image for CI only; it does not deploy.
+Deploy only on an explicit user request using the [Oracle AU deployment runbook](oracle-au-deployment.md). Stage and verify the backend before the website, retain rollback containers, and verify both public Cloudflare Tunnel domains. The backend main workflow builds a Docker image for CI only; it does not deploy.
 
 Compatibility verdict: **GO for compatibility with the published app**, provided the existing production database and configuration pass the checks below. Human DMs, existing call signalling, authentication and released endpoints are unchanged. New AI routes require authentication; model settings require admin authorization. The model-catalog response gains an optional `liveModels` array.
 
 The additive `20261006101252_AddAiCallbacks` migration creates only `ai_callbacks` and its indexes/foreign keys. Existing startup migration handling applies it; back up the database and confirm startup logs report success before serving the new app. No existing message/history rows are rewritten. Callback rows contain account/token references, due time, timezone, request deduplication key and status, never transcripts or audio. Completed/missed metadata is removed after seven days. Deleting the account or associated push-token row cascades to schedules.
 
-Use the rebuilt Docker runtime, which now includes `ffmpeg` alongside `lame`. A deployment outside Docker also needs `ffmpeg` on PATH to decode voice messages. Permit outbound HTTPS/WebSocket access to Google's Generative Language API. The existing proxy must allow authenticated WebSockets at `/ws/chat/ai` for at least nine minutes.
+AI voice messages are recorded on iOS/Android directly as mono, little-endian PCM16 at 16 kHz inside WAV files. The backend validates the container and reads the PCM bytes without transcoding, temporary files or `ffmpeg`. The Docker runtime retains the existing `lame` dependency. The new AI endpoint accepts WAV only; its earlier M4A implementation was never released in an app. Human DM uploads are unchanged. Recordings are limited to 60 seconds (about 1.9 MB); up to one second of recorder-stop latency is accepted and trimmed. Permit outbound HTTPS/WebSocket access to Google's Generative Language API. The existing proxy must allow authenticated WebSockets at `/ws/chat/ai` for at least nine minutes.
 
 Configuration:
 
@@ -41,9 +41,11 @@ Delivery is best effort. Internet access, APNs, notification settings, account s
 
 Local verification includes .NET builds/tests, the additive migration on an isolated PostgreSQL database, callback idempotence/ownership, a real Gemini 3.8 Live voice-input/context/transcription test, Flutter history tests, iOS and Android debug builds, website build/lint, and an admin-form browser test against a local fixture API.
 
+The 1.0.160 follow-up removes server transcoding. WAV validation tests cover sample preservation, native metadata/padding, invalid formats, malformed containers and duration limits. A WAV produced by Apple's native audio tooling passed the updated reader and a real Live request, including both input/output transcripts and response audio. This follow-up adds no migration or environment variable. It requires the updated, still-unreleased AI app recording path; released human-DM clients are unaffected.
+
 After deploying:
 
-1. Confirm `/version` reports 1.0.159, database migration succeeds and the existing published app can sign in, browse lessons, send a normal DM and make a human audio call.
+1. Confirm `/version` reports 1.0.160, database migration succeeds and the existing published app can sign in, browse lessons, send a normal DM and make a human audio call.
 2. Open `/dashboard/bantera-ai`, load the actual Live catalogue, save a model and refresh to confirm persistence. Keep a conversational Live audio model selected.
 3. After installing the updated app on the user's explicit request, send two voice messages with a remembered personal fact. Verify transcript/audio replies and local iOS translations; clear history, relaunch and confirm the history is empty.
 4. Make a foreground AI call: verify the AI greets first, learner accent, echo/interruption handling, transcript/audio bubbles, mute/speaker, 8:30 farewell during speech, playback-drained hangup and hard nine-minute cutoff. Check leaving chat/backgrounding and incoming human-call interruption release microphone resources.
@@ -51,3 +53,20 @@ After deploying:
 6. Enable call notifications, ask for a callback in one minute, background/lock the iPhone, answer and verify the AI chat opens. Repeat with decline, expired/offline notification, cancel request, logout and a different signed-in account. Confirm timezone and daylight-saving handling.
 
 Real-device APNs/CallKit delivery, audio routing/echo, actual nine-minute timing and downloaded Apple translation languages still require the deployed device smoke checks. Builds and synthetic Live tests do not establish those hardware behaviours.
+
+### Voice selection (1.0.161)
+
+The admin settings API adds `voice`, `defaultVoice` and `voices`. Each catalogue
+entry supplies its name, style and gender presentation from Google's documented
+Live voice catalogue. PUT accepts optional `voice`; older model-only requests
+preserve the saved voice. Model and voice updates commit atomically in the existing
+`app_settings` table. The default is Puck. No new migration or environment variable
+is required. All new replies, calls and accepted callbacks use the selected voice;
+an ongoing call retains it for the farewell even if an admin changes the setting.
+
+Deploy backend 1.0.161 before website 0.1.58. This is additive and compatible with
+published app versions. Verify the admin dropdown loads, save and reload a voice,
+then check a voice-message response and a fresh audio call. The website disables
+saving voice settings against an older backend rather than silently ignoring them.
+
+Voice messages now accept up to 180 seconds of mono PCM16 WAV at 16 kHz, with one second of recorder-stop tolerance trimmed to the 180-second limit. This expands the earlier 60-second limit. Deploy this backend before using three-minute recording in app 2.0.121 (309).

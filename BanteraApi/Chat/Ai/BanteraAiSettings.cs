@@ -12,17 +12,35 @@ public sealed class BanteraAiOptions
 
 public sealed class BanteraAiSettings(AppDbContext db, IOptions<BanteraAiOptions> options)
 {
+    public const string VoiceKey = "chat.ai.voice";
+    public const string DefaultVoice = BanteraAiVoices.Default;
     public const string ModelKey = "chat.ai.liveModel";
     public string DefaultModel => options.Value.LiveModel;
     public int MaxCallSeconds => AiCallPolicy.DurationSeconds;
     public async Task<string> GetModelAsync(CancellationToken ct) =>
         await db.AppSettings.Where(s => s.Key == ModelKey).Select(s => s.Value).FirstOrDefaultAsync(ct) ?? DefaultModel;
-    public async Task SetModelAsync(string model, Guid admin, CancellationToken ct)
+    public async Task<string> GetVoiceAsync(CancellationToken ct)
+    {
+        var voice = await db.AppSettings.Where(s => s.Key == VoiceKey).Select(s => s.Value).FirstOrDefaultAsync(ct);
+        return BanteraAiVoices.IsSupported(voice) ? voice! : DefaultVoice;
+    }
+    public async Task SetModelAsync(string model, Guid admin, CancellationToken ct) =>
+        await SetAsync(model, null, admin, ct);
+    public async Task SetAsync(string model, string? voice, Guid admin, CancellationToken ct)
+    {
+        if (voice is not null && !BanteraAiVoices.IsSupported(voice)) throw new ArgumentException("Unsupported voice.");
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await WriteAsync(ModelKey, model, admin, ct);
+        // Older admin clients only send model; preserve their current voice.
+        if (voice is not null) await WriteAsync(VoiceKey, voice, admin, ct);
+        await transaction.CommitAsync(ct);
+    }
+    private async Task WriteAsync(string key, string value, Guid admin, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO app_settings ("Key", "Value", "UpdatedAt", "UpdatedByUserId")
-            VALUES ({ModelKey}, {model}, {now}, {admin})
+            VALUES ({key}, {value}, {now}, {admin})
             ON CONFLICT ("Key") DO UPDATE SET "Value" = EXCLUDED."Value",
                 "UpdatedAt" = EXCLUDED."UpdatedAt", "UpdatedByUserId" = EXCLUDED."UpdatedByUserId"
             """, ct);

@@ -1,35 +1,67 @@
-using System.Diagnostics;
+using System.Buffers.Binary;
 
 namespace BanteraApi.Chat.Ai;
 
 public static class AiAudioCodec
 {
-    public static async Task<byte[]> DecodeAsync(IFormFile file, CancellationToken ct)
+    private const int BytesPerSecond = 16000 * 2;
+    // Allow a little recorder-stop latency, but send at most 180 seconds to Live.
+    private const int MaxPcmBytes = BytesPerSecond * 181;
+    private const int MaxWaveBytes = MaxPcmBytes + 65536;
+
+    public static async Task<byte[]> ReadPcmAsync(IFormFile file, CancellationToken ct)
     {
-        var directory = Path.Combine(Path.GetTempPath(), "bantera-ai-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        try
+        if (file.Length < 44 || file.Length > MaxWaveBytes)
+            throw new InvalidDataException("Invalid audio length.");
+        var wave = new byte[(int)file.Length];
+        await using var input = file.OpenReadStream();
+        try { await input.ReadExactlyAsync(wave, ct); }
+        catch (EndOfStreamException) { throw new InvalidDataException("Incomplete audio."); }
+        return ReadWave(wave);
+    }
+
+    private static byte[] ReadWave(ReadOnlySpan<byte> wave)
+    {
+        if (!wave[..4].SequenceEqual("RIFF"u8) || !wave.Slice(8, 4).SequenceEqual("WAVE"u8)
+            || BinaryPrimitives.ReadUInt32LittleEndian(wave[4..]) != wave.Length - 8)
+            throw new InvalidDataException("Invalid WAV container.");
+
+        var hasFormat = false;
+        var dataOffset = -1;
+        var dataLength = 0;
+        for (var offset = 12; offset < wave.Length;)
         {
-            var input = Path.Combine(directory, "input");
-            var output = Path.Combine(directory, "output.pcm");
-            await using (var stream = File.Create(input)) await file.CopyToAsync(stream, ct);
-            var start = new ProcessStartInfo("ffmpeg") { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true };
-            foreach (var arg in new[] { "-nostdin", "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "file,pipe", "-i", input,
-                         "-vn", "-t", "61", "-ac", "1", "-ar", "16000", "-f", "s16le", output }) start.ArgumentList.Add(arg);
-            using var process = Process.Start(start) ?? throw new InvalidOperationException("Audio decoder unavailable.");
-            try
+            if (wave.Length - offset < 8) throw new InvalidDataException("Incomplete WAV chunk.");
+            var id = wave.Slice(offset, 4);
+            var length = BinaryPrimitives.ReadUInt32LittleEndian(wave[(offset + 4)..]);
+            offset += 8;
+            var paddedLength = (long)length + (length & 1);
+            if (paddedLength > wave.Length - offset) throw new InvalidDataException("Invalid WAV chunk length.");
+            var chunk = wave.Slice(offset, (int)length);
+            if (id.SequenceEqual("fmt "u8))
             {
-                var errors = process.StandardError.ReadToEndAsync(ct);
-                await process.WaitForExitAsync(ct);
-                await errors;
-                if (process.ExitCode != 0 || !File.Exists(output)) throw new InvalidDataException("Invalid audio.");
-                var pcm = await File.ReadAllBytesAsync(output, ct);
-                if (pcm.Length < 320 || pcm.Length > 16000 * 2 * 60) throw new InvalidDataException("Invalid audio length.");
-                return pcm;
+                if (hasFormat || length < 16
+                    || BinaryPrimitives.ReadUInt16LittleEndian(chunk) != 1
+                    || BinaryPrimitives.ReadUInt16LittleEndian(chunk[2..]) != 1
+                    || BinaryPrimitives.ReadUInt32LittleEndian(chunk[4..]) != 16000
+                    || BinaryPrimitives.ReadUInt32LittleEndian(chunk[8..]) != BytesPerSecond
+                    || BinaryPrimitives.ReadUInt16LittleEndian(chunk[12..]) != 2
+                    || BinaryPrimitives.ReadUInt16LittleEndian(chunk[14..]) != 16)
+                    throw new InvalidDataException("Expected mono PCM16 audio at 16 kHz.");
+                hasFormat = true;
             }
-            finally { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            else if (id.SequenceEqual("data"u8))
+            {
+                if (dataOffset >= 0 || length < 320 || length > MaxPcmBytes || (length & 1) != 0)
+                    throw new InvalidDataException("Invalid audio length.");
+                dataOffset = offset;
+                dataLength = (int)length;
+            }
+            // Native recorders may include JUNK, LIST, fact or other metadata chunks.
+            offset += (int)paddedLength;
         }
-        finally { Directory.Delete(directory, recursive: true); }
+        if (!hasFormat || dataOffset < 0) throw new InvalidDataException("Missing WAV audio.");
+        return wave.Slice(dataOffset, Math.Min(dataLength, BytesPerSecond * 180)).ToArray();
     }
 
     public static byte[] Wave(byte[] pcm, int rate = 24000)

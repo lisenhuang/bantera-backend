@@ -59,10 +59,14 @@ Every time any code is modified in this codebase, bump the version in `BanteraAp
 - Do not expose Gemini, AI provider, model, key/configuration, or other raw technical backend failure details in API responses shown to users.
 - Log detailed technical failures server-side / in the CLI logs, and return only generic user-facing messages unless the error is a deliberate product-level validation or policy message the user can act on.
 
-## Deployment must be performed by a human
+## Deployment authorization and safeguards
 
-- **Agents must not deploy.** When changes are ready, explicitly ask a human to perform the deployment and provide the required steps, environment variables, migration notes, and smoke checks.
-- Agents may prepare code, run local builds/tests, configure deployment environment files when authorized, and commit/push when explicitly requested. Preparing or pushing changes is not permission to deploy them.
-- Do not run deployment scripts, trigger deployment workflows, apply production migrations, restart or recreate live services/containers, or promote a release. Leave those actions to the human.
-- Before pushing, check whether the push would trigger an automatic deployment. If it would, stop before pushing and ask the human to arrange a non-deploying push or perform the release themselves.
-- Keep running services unchanged while preparing a release, and clearly state what is ready and what the human still needs to deploy. Local development and test servers are not deployments.
+- Deploy only when the user explicitly requests deployment. A code edit or push alone is not deployment authorization.
+- Bantera backend, website and PostgreSQL are on **Oracle AU (Melbourne)**, `ubuntu@168.138.25.22`. SSH identity on the user's Mac: `~/.ssh/oracle-melbourne.key`.
+- Preserve Cloudflare Tunnel routing for `api.bantera.app` and `bantera.app`. Minimise downtime using staged containers and a rolling connector handover; retain the previous release for rollback.
+- Follow the Oracle AU deployment runbook. Verify both public domains and the expected release, not just localhost, before reporting success. Automatically restore the previous connector if promotion checks fail.
+- Never print production environment values, private keys or database contents. Back up the database before migrations; application rollback must not automatically restore an old database and discard newer writes.
+- Do not run the legacy server redeploy scripts: they replace live containers directly and the website script restarts the shared tunnel.
+- Before pushing, check for deployment hooks or active auto-deploy schedules. Do not enable automatic deployment without an explicit request.
+
+Runbook: [docs/oracle-au-deployment.md](docs/oracle-au-deployment.md).

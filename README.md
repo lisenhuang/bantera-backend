@@ -227,17 +227,13 @@ docker compose up --build
 
 ## 🚀 Deployment
 
-Runs in Docker behind a **Cloudflare Tunnel** on an Ubuntu server. CI (GitHub Actions) builds the image on every push to `main` as a build check. Deployment is triggered manually on the server:
+Backend, website and PostgreSQL run on **Oracle AU (Melbourne)** at `ubuntu@168.138.25.22`, behind Cloudflare Tunnel. Follow the [Oracle AU deployment and rollback runbook](docs/oracle-au-deployment.md). Deploy only when explicitly requested: build and health-check candidate containers, switch connectors with an overlap, verify both public domains, and roll back automatically if promotion checks fail. The old `/srv/...` instructions and direct-replacement scripts are obsolete.
 
-```bash
-bash /srv/bantera-backend/deploy/deploy.sh
-```
-
-The script pulls latest from `main`, rebuilds the Docker image, and restarts the container. Cloudflare Zero Trust routes the public hostname to `http://localhost:8080`.
+CI (GitHub Actions) checks Docker builds on pushes to `main`; a successful push is not evidence of deployment. Find the active containers in `/home/ubuntu/releases/bantera-current.json` rather than assuming the historical names still serve public traffic.
 
 ```bash
 # Tail logs
-docker compose logs -f
+docker logs -f <active-backend-container>
 ```
 
 ---
