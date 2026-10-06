@@ -28,6 +28,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<OAuthAuthorizationCode> OAuthAuthorizationCodes => Set<OAuthAuthorizationCode>();
     public DbSet<OAuthRefreshToken> OAuthRefreshTokens => Set<OAuthRefreshToken>();
     public DbSet<McpAuditLog> McpAuditLogs => Set<McpAuditLog>();
+    public DbSet<AiCallback> AiCallbacks => Set<AiCallback>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<AiPipelineEvent> AiPipelineEvents => Set<AiPipelineEvent>();
     public DbSet<AdminAudioTest> AdminAudioTests => Set<AdminAudioTest>();
@@ -45,6 +46,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.Entity<AiCallback>(e => {
+            e.ToTable("ai_callbacks"); e.HasKey(x => x.Id);
+            e.Property(x => x.RequestKey).HasMaxLength(200);
+            e.Property(x => x.TimeZone).HasMaxLength(100);
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.HasIndex(x => new { x.UserId, x.RequestKey }).IsUnique();
+            e.HasIndex(x => new { x.Status, x.DueAt });
+            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.PushToken).WithMany().HasForeignKey(x => x.PushTokenId).OnDelete(DeleteBehavior.Cascade);
+        });
         b.Entity<BanteraApi.WebsiteAnalytics.WebsiteEvent>(e =>
         {
             e.ToTable("website_events");

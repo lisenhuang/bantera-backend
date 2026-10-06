@@ -1561,17 +1561,20 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
 
             var text = new List<string>();
             var audio = new List<string>();
+            var live = new List<string>();
             foreach (var model in JsonDocument.Parse(json).RootElement.GetProperty("models").EnumerateArray())
             {
                 var name = (model.GetProperty("name").GetString() ?? "").Replace("models/", "");
                 var methods = model.TryGetProperty("supportedGenerationMethods", out var m) && m.ValueKind == JsonValueKind.Array
                     ? m.EnumerateArray().Select(x => x.GetString()).ToHashSet()
                     : [];
+                if (name.Length > 0 && methods.Contains("bidiGenerateContent") &&
+                    !new[] { "transcribe", "translate", "robotics" }.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase))) live.Add(name);
                 if (name.Length == 0 || !methods.Contains("generateContent")) continue;
                 if (name.Contains("tts", StringComparison.OrdinalIgnoreCase)) audio.Add(name);
                 else if (!NonTextModelKeywords.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase))) text.Add(name);
             }
-            return new GeminiModelCatalog(text, audio);
+            return new GeminiModelCatalog(text, audio, live);
         }, cancellationToken);
     }
 
@@ -1820,4 +1823,4 @@ public class ContentRejectedException(string message, string reason = "unspecifi
 
 public record GeneratedAudio(byte[] Bytes, string ContentType, string FileExtension, int DurationMs);
 
-public record GeminiModelCatalog(IReadOnlyList<string> TextModels, IReadOnlyList<string> AudioModels);
+public record GeminiModelCatalog(IReadOnlyList<string> TextModels, IReadOnlyList<string> AudioModels, IReadOnlyList<string>? LiveModels = null);
