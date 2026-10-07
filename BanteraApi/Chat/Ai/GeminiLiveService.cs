@@ -46,12 +46,20 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         setup = new {
             model = "models/" + model,
             contextWindowCompression = new { slidingWindow = new { } },
-            generationConfig = new { responseModalities = new[] { "AUDIO" }, maxOutputTokens = 2048,
-                speechConfig = new { voiceConfig = new { prebuiltVoiceConfig = new { voiceName = voice } } } },
-            systemInstruction = new { parts = new[] { new { text = prompt } } },
-            tools = new[] { new { functionDeclarations = AiDeviceTools.Declarations.Concat(AiCallbackService.Declarations).ToArray() } },
+            generationConfig = AiLiveModelPolicy.GenerationConfig(model, voice),
+            systemInstruction = new { parts = new[] { new { text = prompt + (voiceMessage ? "" : AiCallPolicy.TurnTaking) } } },
+            tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model) } },
             inputAudioTranscription = new { }, outputAudioTranscription = new { },
-            realtimeInputConfig = new { automaticActivityDetection = new { disabled = voiceMessage } }
+            realtimeInputConfig = new { automaticActivityDetection = voiceMessage
+                ? (object)new { disabled = true }
+                : new {
+                    disabled = false,
+                    startOfSpeechSensitivity = "START_SENSITIVITY_LOW",
+                    endOfSpeechSensitivity = "END_SENSITIVITY_LOW",
+                    prefixPaddingMs = 300,
+                    silenceDurationMs = 700
+                }
+            }
         }
     };
 
@@ -110,7 +118,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         try
         {
             await socket.ConnectAsync(new Uri("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" + Uri.EscapeDataString(key)), timeout.Token);
-            await SendAsync(socket, Setup(model, BanteraAiIdentity.Prompt(user) + AiCallPolicy.IntroductionPolicy(metadata, history) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).TimePrompt, voiceMessage, voice), timeout.Token);
+            await SendAsync(socket, Setup(model, BanteraAiIdentity.Prompt(user) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).LevelPrompt + AiCallPolicy.IntroductionPolicy(metadata, history) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).TimePrompt, voiceMessage, voice), timeout.Token);
             using var ready = await ReceiveJsonAsync(socket, timeout.Token);
             if (!ready.RootElement.TryGetProperty("setupComplete", out _)) throw new InvalidDataException("Live setup was not accepted.");
             if (history.Count > 0)
@@ -144,7 +152,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         return await WithKeysAsync(model, async (key, token) => {
             using var socket = await ConnectKeyAsync(key, model, user, true, history, token, metadata, voice);
             await SendAsync(socket, new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text } } } }, turnComplete = true } }, token);
-            return await ReadReplyAsync(socket, snapshot, tools, token);
+            return await ReadReplyAsync(socket, snapshot, tools, token, requiresInteractionIdle: AiLiveModelPolicy.RequiresInteractionIdle(model));
         }, ct);
     }
 
@@ -176,7 +184,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             var reply = ReadReplyAsync(socket, snapshot, tools, attempt.Token, async bytes => {
                 if (bytes is { Length: > 2 }) watchdog.Progress();
                 await output(bytes);
-            }, upload, transcript);
+            }, upload, transcript, AiLiveModelPolicy.RequiresInteractionIdle(model));
             try {
                 var first = await Task.WhenAny(upload, reply);
                 try { await first; }
@@ -220,7 +228,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
     public static async Task<AiVoiceReply> ReadReplyAsync(WebSocket socket, JsonElement snapshot,
         Func<JsonElement, Task<object>>? executeTool, CancellationToken ct,
         Func<byte[]?, Task>? stream = null, Task? uploaded = null,
-        Func<string, string, Task>? transcript = null)
+        Func<string, string, Task>? transcript = null, bool requiresInteractionIdle = false)
     {
         using var audio = new MemoryStream();
         var input = new StringBuilder();
@@ -229,6 +237,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         var toolRounds = 0;
         var inputSent = 0;
         var outputSent = 0;
+        var completion = new AiLiveCompletion(requiresInteractionIdle);
         while (true)
         {
             using var json = await ReceiveJsonAsync(socket, ct);
@@ -247,7 +256,11 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 }
                 await SendAsync(socket, new { toolResponse = new { functionResponses = responses } }, ct);
             }
-            if (!json.RootElement.TryGetProperty("serverContent", out var content)) continue;
+            var complete = completion.Observe(json.RootElement);
+            if (!json.RootElement.TryGetProperty("serverContent", out var content)) {
+                if (complete && audio.Length > 0) break;
+                continue;
+            }
             AppendTranscript(content, "inputTranscription", input);
             AppendTranscript(content, "outputTranscription", output);
             // Continue receiving provider frames during recording (including
@@ -270,7 +283,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 audio.Write(chunk);
                 if (stream is not null) await stream(chunk);
             }
-            if (content.TryGetProperty("turnComplete", out var done) && done.GetBoolean()) {
+            if (complete) {
                 // Live can finish the tool-call turn before generating the spoken
                 // confirmation. Keep this socket open for the tool-result turn.
                 if (awaitingToolReply) { awaitingToolReply = false; continue; }

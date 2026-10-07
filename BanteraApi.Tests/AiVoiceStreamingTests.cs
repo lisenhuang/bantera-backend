@@ -10,6 +10,69 @@ namespace BanteraApi.Tests;
 
 public class AiVoiceStreamingTests
 {
+    [Fact]
+    public async Task InterruptionFollowsTheFinalAudioAndTranscriptInTheSameProviderFrame()
+    {
+        using var socket = new Socket();
+        using var frame = JsonDocument.Parse("""{"interrupted":true,"outputTranscription":{"text":"Here is my unfinished"},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AQIDBA=="}}]}}""");
+        Assert.True(await BanteraAiEndpoints.ForwardCallContentAsync(socket, frame.RootElement, CancellationToken.None));
+        var sent = new List<string>();
+        while (socket.Sent.Reader.TryRead(out var item)) sent.Add(item);
+        Assert.Equal(3, sent.Count);
+        Assert.Contains("Here is my unfinished", sent[0]);
+        Assert.Equal("interrupted", JsonDocument.Parse(sent[2]).RootElement.GetProperty("type").GetString());
+    }
+    [Theory]
+    [InlineData("gemini-2.0-flash-live-001", null)]
+    [InlineData("gemini-2.5-flash-native-audio-latest", null)]
+    [InlineData("gemini-2.5-flash-native-audio-preview-12-2025", null)]
+    [InlineData("gemini-3.1-flash-live-preview", null)]
+    [InlineData("gemini-3.8-live", "BLOCKING")]
+    [InlineData("gemini-3.8-live-extended-thinking", "NON_BLOCKING")]
+    [InlineData("future-live-model", null)]
+    public void ModelSetupUsesSharedNoiseSettingsAndOnlyCompatibleOptionalFields(string model, string? behavior)
+    {
+        foreach (var voiceMessage in new[] { false, true }) {
+            var setup = JsonSerializer.SerializeToElement(GeminiLiveService.Setup(model, "prompt", voiceMessage)).GetProperty("setup");
+            Assert.False(setup.TryGetProperty("proactivity", out _));
+            Assert.False(setup.TryGetProperty("enableAffectiveDialog", out _));
+            var extended = model == "gemini-3.8-live-extended-thinking";
+            Assert.Equal(extended, setup.GetProperty("generationConfig").TryGetProperty("thinkingConfig", out var thinking));
+            if (extended) Assert.Equal("low", thinking.GetProperty("thinkingLevel").GetString());
+            Assert.Equal(voiceMessage, setup.GetProperty("realtimeInputConfig").GetProperty("automaticActivityDetection").GetProperty("disabled").GetBoolean());
+            foreach (var tool in setup.GetProperty("tools")[0].GetProperty("functionDeclarations").EnumerateArray()) {
+                Assert.Equal(behavior is not null, tool.TryGetProperty("behavior", out var actual));
+                if (behavior is not null) Assert.Equal(behavior, actual.GetString());
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ExtendedThinkingKeepsReceivingAudioAfterTurnCompleteUntilStandaloneIdle()
+    {
+        using var socket = new Socket();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var task = GeminiLiveService.ReadReplyAsync(socket, default, null, timeout.Token, requiresInteractionIdle: true);
+        socket.Incoming.Writer.TryWrite("""{"interactionStatus":"IN_PROGRESS","serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AQI="}}]},"turnComplete":true}}""");
+        socket.Incoming.Writer.TryWrite("""{"serverContent":{"outputTranscription":{"text":"Still here"},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AwQ="}}]},"turnComplete":true}}""");
+        socket.Incoming.Writer.TryWrite("""{"interaction_status":"IDLE"}""");
+        var reply = await task;
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, reply.Pcm);
+        Assert.Equal("Still here", reply.OutputText);
+    }
+
+    [Fact]
+    public void CompletionAdaptsToStatusAndDoesNotRepeatIdleOnKeepalive()
+    {
+        var completion = new AiLiveCompletion(false);
+        bool Observe(string value) { using var json = JsonDocument.Parse(value); return completion.Observe(json.RootElement); }
+        Assert.True(Observe("""{"serverContent":{"turnComplete":true}}"""));
+        Assert.False(Observe("""{"serverContent":{"interactionStatus":"IN_PROGRESS"}}"""));
+        Assert.False(Observe("""{"serverContent":{"turnComplete":true}}"""));
+        Assert.True(Observe("""{"serverContent":{"interactionStatus":"IDLE"}}"""));
+        Assert.False(Observe("{}"));
+    }
+
     private static readonly AiClientMetadata Metadata = new(new("Pacific/Auckland", 780), null);
     [Fact]
     public async Task StreamsWhileRecordingButEndsActivityOnlyAfterSendAndCanReplay()

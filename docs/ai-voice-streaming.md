@@ -266,3 +266,69 @@ diagnostics endpoint is additive. This patch needs no migration or new environme
 variables. Before release, verify existing database availability, DI startup,
 unauthenticated diagnostics rejection, and a correlated metadata-only test event.
 These diagnostics cannot reconstruct a failure from before their deployment.
+## Live-call pauses and incidental noise (backend 1.1.2)
+
+Live-call clock updates use `clientContent` with `turnComplete: false`, never
+`realtimeInput.text`. A microphone amplitude spike may come from chewing or
+background noise; its clock update must not independently request a model reply.
+Timezone and trusted server time remain in that context, and scheduling tools
+still use current server time. Explicitly committed voice messages retain their
+manual activity start/end protocol.
+
+Calls use low start/end speech sensitivity with 300 ms prefix padding and a
+700 ms silence window. The live-call prompt asks the model to ignore chewing,
+crunching, breathing and other non-speech sounds, and to wait after each response.
+The opening greeting and timed farewell remain explicit exceptions. This reduces
+false turns; it is not a guarantee that every noise will be classified correctly.
+
+The app keeps the display awake for the call's lifetime and releases the wake
+lock on hang-up, startup failure or controller disposal. Manual phone locking and
+background call support remain available.
+
+Reference: [Google Live API capabilities](https://ai.google.dev/gemini-api/docs/live-api/capabilities).
+Regression checks cover the non-triggering clock wire format, call VAD setup,
+and preservation of the voice-message configuration. Device acceptance should
+include a greeting followed by silence/crunching, then quiet speech and spoken
+interruption, plus auto-lock restoration after ending the call.
+
+Model compatibility: VAD settings and incomplete client-content clock updates use
+the shared Live protocol. No affective-dialogue or proactivity flags are sent,
+because supported values differ by model. Extended Thinking requires an explicit
+thinking level and uses `low`; other models omit this setting. Legacy models retain
+their implicit blocking tools; Gemini 3.8 Live explicitly uses blocking tools,
+and 3.8 Live Extended Thinking uses non-blocking tools. Extended Thinking replies
+wait for `interactionStatus` / `interaction_status` to become `IDLE`, including
+standalone status frames, rather than ending on an intermediate `turnComplete`.
+Other models adopt status-based completion if the server emits these signals.
+Unknown future models use the baseline setup; availability and future protocol
+changes cannot be guaranteed by a model name alone. The admin catalogue still
+comes from the provider's live `bidiGenerateContent` model list.
+
+Deployment GO for existing clients: these changes affect only the provider
+adapter and preserve the app WebSocket contract. No migration, new environment
+variables or website update is required.
+
+### Current language, accent and Discover level
+
+Each new call/voice-message connection reads the current learning language from the
+server profile. The shared system prompt uses the complete regional locale and
+explicitly prioritises it over older conversation languages. Cantonese selections
+receive an explicit colloquial Cantonese instruction, distinct from Mandarin.
+Both session types use speaking/listening coaching guidance, with short turns and
+no extra prompts during silence. Accent quality still depends on the provider.
+
+New clients include optional `metadata.learningLevel` using the same device-local
+Discover preference: `beginner`, `intermediate`, `advanced`, or null for All levels.
+The server allowlists those values and supplies vocabulary, pacing and exercise
+guidance for the selected level. Missing/unknown values adapt to demonstrated
+ability, preserving older-client compatibility. No DB migration or new config is
+required; changing the level takes effect on the next call/voice-message session.
+The device learning-profile tool also exposes that preference with its local
+storage scope.
+
+Speaking counts remain on-device transcript estimates. The full utterance must
+confidently match the learning language; short low-confidence fragments do not
+veto it. Confident foreign fragments or mixed-language tags in the full context
+reject the whole utterance. This avoids zero credit caused by ambiguous greetings
+or three-word windows, without counting only the target-language parts of detected
+mixed speech. Retries retain the same speech event ID to prevent duplicate credit.

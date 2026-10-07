@@ -6,6 +6,18 @@ public static class AiCallPolicy
 {
     public const int DurationSeconds = 9 * 60;
     public const int FarewellSeconds = DurationSeconds - 30;
+    public const string TurnTaking = " During a live call, speak first only for the opening greeting or requested reminder. After each short response, stop and wait quietly for the learner to speak. Silence, background noise and time-context updates are not requests. Chewing, crunching food, breathing, coughing and utensil noises are not speech: stay silent, do not comment on them and do not infer a new message from the previous topic. Do not fill pauses with follow-up questions, repeated check-ins or encouragement. Never answer your own question. The explicit end-of-call farewell is the only exception to waiting.";
+
+    // Realtime text is conversational input and can trigger a reply, even when
+    // its text says not to respond. Clock updates must not complete a user turn.
+    public static object ClockContext(AiClientMetadata metadata) => new {
+        clientContent = new {
+            turns = new[] { new { role = "user", parts = new[] { new {
+                text = "[Background time context only; wait for spoken input.]" + metadata.TimePrompt
+            } } } },
+            turnComplete = false
+        }
+    };
     public const string Greeting = "Begin this new audio call by speaking first. Give a brief, warm greeting in my learning language and regional accent, then ask one easy, natural question. Follow the system first-meeting rule: introduce yourself only if we have never met; otherwise welcome me back without repeating your name or role. Use my preferred name when known, and vary the wording like a familiar friend and language coach. Refer to a prior topic only when it is present in the supplied context.";
     public static string Opening(bool resuming, string? reminder = null) => resuming
         ? "The connection was renewed. Continue our existing audio conversation from its latest message in my learning language and accent. Do not introduce yourself or greet me again."

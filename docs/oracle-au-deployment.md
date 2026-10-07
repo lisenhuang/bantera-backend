@@ -371,3 +371,78 @@ Signed iOS **2.0.134+322** was then installed on the user's iPhone 17 Pro.
 CoreDevice confirmed version 2.0.134 and build 322. Signature verification passed;
 the build uses `lib/main.dart`. No physical-device tests or diagnostic launch
 were performed.
+
+## 8 October 2026: quiet live calls and model compatibility
+
+Release **`bantera-20261008-3`** succeeded at **00:58:02 NZDT** (7 October
+11:58:02 UTC). Backend **1.1.2** runs in `bantera-api-20261008-3`, loopback
+**18089**, through `cloudflared-20261008-3`, readiness **12009**. Website
+**0.1.59** is unchanged in `bantera-website-20261007-6` and retains its original
+website release marker. Both public domains passed checks; **128/128** HTTP
+samples succeeded during handover. The previous connector and application remain
+available for rollback. The verified database backup is **3,263,898 bytes**.
+
+This release makes call clock updates non-triggering context, tunes speech
+activity detection, and adds model-specific tool/response-completion handling.
+There is no migration or new environment variable, and old app clients retain
+the same WebSocket contract. The provider's six selectable conversation Live
+models accepted call and voice-message setup; synthetic spoken replies succeeded
+for all six (2.5 latest, September/December previews, 3.1, 3.8, 3.8 Extended
+Thinking). Extended Thinking requires `thinkingLevel: low` and reports an explicit
+`interactionStatus: IDLE`; standard 3.8 omits thinking configuration.
+
+The earlier **`bantera-20261008-2`** candidate was not promoted: its Extended
+Thinking setup lacked the required thinking level. Its API is stopped and its
+connector was never started. The corrected source archive, SHA-256 and dirty Git
+state are recorded in release 3. Provider probe scripts/results are retained in
+release 2; no chat audio or user transcripts were used for these checks.
+
+Rollback:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261008-3/deploy.py rollback
+```
+
+This restores `cloudflared-20261008-1` and backend **1.0.169**, keeps the current
+website, and stops the new candidate API after public rollback checks pass. It
+does not restore the database or discard subsequent writes. No Git push or App
+Store submission was performed for this release.
+
+Signed iOS **2.1.1 (324)** was installed afterward on the user's iPhone 17 Pro.
+CoreDevice confirmed both version and build. The app disables automatic screen
+lock during a real-time call and releases it when the call ends. Installation
+only: no physical-device test or automated app launch was performed.
+
+## 8 October 2026: coaching, current language and chat fixes
+
+Release **`bantera-20261008-4`** succeeded at **01:34:11 NZDT** (7 October
+12:34:11 UTC). Backend **1.2.0** runs in `bantera-api-20261008-4`, loopback
+**18090**, through `cloudflared-20261008-4`, readiness **12010**. The unchanged
+website **0.1.59** remains in `bantera-website-20261007-6` and keeps its original
+release marker. All **128/128** sampled public HTTP responses succeeded during
+handover, and both public domains passed release checks. This does not prove that
+every existing WebSocket call remained uninterrupted.
+
+The release strengthens current-profile language/accent and coaching instructions,
+accepts optional Discover level metadata, and sends final response data before an
+interruption event. Existing apps retain their API contracts. No new migration or
+environment setting is needed. The verified database backup is **3,271,963 bytes**;
+startup checks found no error-level or unhandled-exception entries. Exact working
+tree source hashes, private runtime snapshots and deployment logs are preserved
+in the release directory. The source changes have not been committed or pushed.
+
+Rollback for this release:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261008-4/deploy.py rollback
+```
+
+This restores connector `cloudflared-20261008-3` and backend **1.1.2**, retains
+the same website and current database writes, and stops the new candidate after
+restored public-domain checks pass. The previous containers and images remain
+available. No App Store submission is part of this release.
+
+Signed iOS **2.2.0 (325)** was installed after deployment on the user's iPhone
+17 Pro. CoreDevice confirmed version and build; code-signature verification
+passed, and the build uses `lib/main.dart`. No physical-device test or automated
+app launch was performed.

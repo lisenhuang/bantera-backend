@@ -167,7 +167,7 @@ public static class BanteraAiEndpoints
             var upload = ForwardMicrophoneAsync(client, upstream, state, timeout.Token);
             try
             {
-            var download = ForwardSpeakerAsync(upstream, client, state, live, conversation.Token, timeout.Token);
+            var download = ForwardSpeakerAsync(upstream, client, state, live, conversation.Token, timeout.Token, AiLiveModelPolicy.RequiresInteractionIdle(model));
             var farewell = Task.Delay(TimeSpan.FromSeconds(Math.Max(0, duration - 30)), timeout.Token);
             var finished = await Task.WhenAny(upload, download, farewell);
             // Stop the old generation and microphone even when the learner is mid-sentence.
@@ -279,7 +279,7 @@ public static class BanteraAiEndpoints
                     if (elapsed.Elapsed.TotalSeconds - lastClock < 1) continue;
                     lastClock = elapsed.Elapsed.TotalSeconds;
                     state.Metadata = state.Metadata with { Clock = AiClientMetadata.ReadClock(response.RootElement.GetProperty("clock")) };
-                    await state.SendAsync(upstream, new { realtimeInput = new { text = "[Time context for this spoken message; do not respond separately.]" + state.Metadata.TimePrompt } }, ct);
+                    await state.SendAsync(upstream, AiCallPolicy.ClockContext(state.Metadata), ct);
                     continue;
                 }
                 if (!response.RootElement.TryGetProperty("type", out var messageType) || messageType.GetString() != "toolResponse" ||
@@ -295,10 +295,11 @@ public static class BanteraAiEndpoints
             catch (Exception) when (state.Ending && !ct.IsCancellationRequested) { }
         }
     }
-    private static async Task ForwardSpeakerAsync(WebSocket upstream, WebSocket client, CallState state, GeminiLiveService live, CancellationToken ct, CancellationToken clientToken)
+    private static async Task ForwardSpeakerAsync(WebSocket upstream, WebSocket client, CallState state, GeminiLiveService live, CancellationToken ct, CancellationToken clientToken, bool requiresInteractionIdle)
     {
         using var greetingDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         greetingDeadline.CancelAfter(TimeSpan.FromSeconds(20));
+        var completion = new AiLiveCompletion(requiresInteractionIdle);
         while (!ct.IsCancellationRequested)
         {
             System.Text.Json.JsonDocument received;
@@ -336,18 +337,32 @@ public static class BanteraAiEndpoints
                     await GeminiLiveService.SendAsync(client, new { type = "toolCall", calls = local }, clientToken);
                 }
             }
-            if (!message.RootElement.TryGetProperty("serverContent", out var content)) continue;
-            if (content.TryGetProperty("interrupted", out var interrupted) && interrupted.GetBoolean())
-                await GeminiLiveService.SendAsync(client, new { type = "interrupted" }, clientToken);
-            foreach (var name in new[] { "inputTranscription", "outputTranscription" })
-                if (content.TryGetProperty(name, out var transcript) && transcript.TryGetProperty("text", out var text))
-                    await GeminiLiveService.SendAsync(client, new { type = "transcript", role = name == "inputTranscription" ? "user" : "model", text = text.GetString() }, clientToken);
-            foreach (var audio in GeminiLiveService.AudioParts(content)) {
-                if (audio.Length > 2) greetingDeadline.CancelAfter(Timeout.InfiniteTimeSpan);
-                await client.SendAsync(new ArraySegment<byte>(audio), WebSocketMessageType.Binary, true, clientToken);
+            var complete = completion.Observe(message.RootElement);
+            if (!message.RootElement.TryGetProperty("serverContent", out var content)) {
+                if (complete) await GeminiLiveService.SendAsync(client, new { type = "turnComplete" }, clientToken);
+                continue;
             }
-            if (content.TryGetProperty("turnComplete", out var done) && done.GetBoolean())
+            if (await ForwardCallContentAsync(client, content, clientToken))
+                greetingDeadline.CancelAfter(Timeout.InfiniteTimeSpan);
+            if (complete)
                 await GeminiLiveService.SendAsync(client, new { type = "turnComplete" }, clientToken);
         }
     }
+    // A provider frame may contain both final response data and interruption.
+    // Preserve that data in the same bubble before telling the app to finish it.
+    public static async Task<bool> ForwardCallContentAsync(WebSocket client, System.Text.Json.JsonElement content, CancellationToken ct)
+    {
+        foreach (var name in new[] { "inputTranscription", "outputTranscription" })
+            if (content.TryGetProperty(name, out var transcript) && transcript.TryGetProperty("text", out var text))
+                await GeminiLiveService.SendAsync(client, new { type = "transcript", role = name == "inputTranscription" ? "user" : "model", text = text.GetString() }, ct);
+        var receivedAudio = false;
+        foreach (var audio in GeminiLiveService.AudioParts(content)) {
+            receivedAudio |= audio.Length > 2;
+            await client.SendAsync(new ArraySegment<byte>(audio), WebSocketMessageType.Binary, true, ct);
+        }
+        if (content.TryGetProperty("interrupted", out var interrupted) && interrupted.GetBoolean())
+            await GeminiLiveService.SendAsync(client, new { type = "interrupted" }, ct);
+        return receivedAudio;
+    }
+
 }
