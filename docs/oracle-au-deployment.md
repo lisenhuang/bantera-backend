@@ -164,3 +164,34 @@ It restores `cloudflared-20261007-1` and API 1.0.161; the website stays unchange
 Old containers are retained. Application rollback does not restore the database.
 The next deployment must derive its names, ports and previous connector from the
 active release record rather than reusing this release controller unchanged.
+
+## Callback confirmation release, 7 October 2026, 14:14 NZDT
+
+Release **bantera-20261007-3** completed at **2026-10-07 01:14:45 UTC**.
+Backend **1.0.163** is live in `bantera-api-20261007-3` (loopback 18083),
+through `cloudflared-20261007-3` (readiness 12003). Website **0.1.58** remains
+in `bantera-website-20261007-1`; there were no website code changes.
+
+The callback scheduling voice reply now waits through the model's tool-call turn
+completion for its spoken confirmation. The candidate passed staging and public
+checks; all **128/128** API and website availability samples returned HTTP 200.
+Public `/version`, `/download`, the website release marker and the voice route's
+401 authentication gate were independently verified after promotion. This is
+HTTP availability evidence, not proof of uninterrupted existing WebSocket calls.
+
+No schema migration or new environment variable is required. **GO for published
+clients**: existing API/auth contracts are unchanged. The verified PostgreSQL
+backup is 3,259,827 bytes. Private runtime snapshots, source archive checksum,
+tested working-tree manifest, controller and logs are retained in the release
+folder. This deployment does not commit or push the source changes.
+
+Rollback:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261007-3/deploy.py rollback
+```
+
+This restores `cloudflared-20261007-2` and backend 1.0.162, retaining the website
+and current database writes. The active release record remains
+`/home/ubuntu/releases/bantera-current.json`. Derive the next release from that
+record, rather than reusing names/ports from this controller.

@@ -67,3 +67,24 @@ remain healthy after deployment. Retain the prior API and connector for rollback
 Deployed to Oracle AU as `bantera-20261007-2` on 7 October 2026 NZDT. All 128
 monitored API/website HTTP checks passed. The previous API/connector are retained
 for rollback; see `oracle-au-deployment.md` for exact paths and commands.
+
+## Callback spoken-confirmation fix (1.0.163)
+
+Production logs showed a successful callback insert immediately before a voice
+stream `InvalidDataException`. A synthetic “call me back in one minute” recording
+reproduced `AI returned no audio` with the real Live model. The tool-call turn
+can end before the separate spoken confirmation arrives. The voice reply reader
+now keeps the same connection open across that boundary, without scheduling
+again, and bounds tool rounds to 16. This applies to streaming and legacy HTTP
+voice replies. Safe failure categories improve diagnostics without recording
+provider URLs, keys, or conversation content.
+
+All 50 focused backend checks passed with the isolated database and two real
+Gemini samples enabled. The callback sample produced its first audio 1.5 seconds
+after Send and completed in 3.5 seconds; this is one sample, not a latency SLA.
+Deterministic tests include tool completion both with and without spoken preamble.
+
+Production deployment verdict: **GO** for existing published apps. No API shape,
+authentication, schema, migration, or environment-variable changes. Runtime
+verification requires API version 1.0.163, unauthenticated voice routes rejected,
+and both public domains healthy. Retain the previous connector for rollback.

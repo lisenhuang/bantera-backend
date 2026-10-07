@@ -116,8 +116,33 @@ public class AiVoiceStreamingTests
         using var socket = new Socket(json);
         await Assert.ThrowsAsync<AiLiveSessionExpiredException>(() => GeminiLiveService.ReceiveJsonAsync(socket, default));
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ToolTurnCompletionWaitsForSpokenConfirmation(bool preamble)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var socket = new Socket();
+        const string audio = "{\"serverContent\":{\"modelTurn\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"audio/pcm;rate=24000\",\"data\":\"AQI=\"}}]}}}";
+        if (preamble) socket.Incoming.Writer.TryWrite(audio);
+        socket.Incoming.Writer.TryWrite("{\"toolCall\":{\"functionCalls\":[{\"id\":\"schedule\",\"name\":\"schedule_callback\",\"args\":{\"delaySeconds\":60}}]}}");
+        socket.Incoming.Writer.TryWrite("{\"serverContent\":{\"turnComplete\":true}}");
+        var invoked = 0;
+        var task = GeminiLiveService.ReadReplyAsync(socket, default, _ => {
+            invoked++; return Task.FromResult<object>(new {status = "scheduled"});
+        }, timeout.Token);
+        Assert.Contains("functionResponses", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        Assert.False(task.IsCompleted);
+        socket.Incoming.Writer.TryWrite(audio);
+        socket.Incoming.Writer.TryWrite("{\"serverContent\":{\"outputTranscription\":{\"text\":\"I will call you back.\"},\"turnComplete\":true}}");
+        var reply = await task;
+        Assert.Equal(1, invoked);
+        Assert.Equal(preamble ? 4 : 2, reply.Pcm.Length);
+        Assert.Equal("I will call you back.", reply.OutputText);
+    }
     private sealed class Socket(string? incoming = null) : WebSocket
     {
+        public Channel<string> Incoming { get; } = Channel.CreateUnbounded<string>();
         public Channel<string> Sent { get; } = Channel.CreateUnbounded<string>();
         public override WebSocketCloseStatus? CloseStatus => null;
         public override string? CloseStatusDescription => null;
@@ -130,9 +155,9 @@ public class AiVoiceStreamingTests
         public override Task SendAsync(ArraySegment<byte> bytes, WebSocketMessageType t, bool e, CancellationToken ct) {
             Sent.Writer.TryWrite(Encoding.UTF8.GetString(bytes)); return Task.CompletedTask;
         }
-        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken ct) {
-            var bytes = Encoding.UTF8.GetBytes(incoming!); bytes.AsSpan().CopyTo(buffer.AsSpan());
-            return Task.FromResult(new WebSocketReceiveResult(bytes.Length, WebSocketMessageType.Text, true));
+        public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken ct) {
+            var bytes = Encoding.UTF8.GetBytes(incoming ?? await Incoming.Reader.ReadAsync(ct)); bytes.AsSpan().CopyTo(buffer.AsSpan());
+            return new WebSocketReceiveResult(bytes.Length, WebSocketMessageType.Text, true);
         }
     }
 }

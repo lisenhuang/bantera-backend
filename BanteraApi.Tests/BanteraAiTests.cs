@@ -169,6 +169,59 @@ public class BanteraAiTests
         Assert.Contains("Auckland", response.OutputText, StringComparison.OrdinalIgnoreCase);
     }
 
+    [AiCallbackLiveFact] public async Task LiveCallbackToolReturnsSpokenConfirmation()
+    {
+        var path = Environment.GetEnvironmentVariable("BANTERA_AI_LIVE_CONFIG")!;
+        using var config = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+        var keys = config.RootElement.GetProperty("Gemini").GetProperty("ApiKeys").EnumerateArray().Select(k => k.GetString()!).ToArray();
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.EntityFrameworkServiceCollectionExtensions.AddDbContext<AppDbContext>(services,
+            o => o.UseNpgsql(Environment.GetEnvironmentVariable("BANTERA_AI_TEST_DB")));
+        using var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        using var cache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+        var options = Options.Create(new BanteraApi.Gemini.GeminiSettings { ApiKeys = keys.Take(1).ToArray() });
+        var health = new BanteraApi.Gemini.GeminiKeyHealthService(provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(), cache, options,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<BanteraApi.Gemini.GeminiKeyHealthService>.Instance);
+        var live = new GeminiLiveService(options, health, Microsoft.Extensions.Logging.Abstractions.NullLogger<GeminiLiveService>.Instance);
+        var file = Environment.GetEnvironmentVariable("BANTERA_AI_CALLBACK_AUDIO")!;
+        using var audio = File.OpenRead(file);
+        var form = new Microsoft.AspNetCore.Http.FormFile(audio, 0, audio.Length, "audio", "question.wav");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        var pcm = await AiAudioCodec.ReadPcmAsync(form, timeout.Token);
+        var input = new AiVoiceInput();
+        var clock = new AiClientMetadata(new("Pacific/Auckland", 780), null);
+        var sinceSend = new System.Diagnostics.Stopwatch();
+        double? firstAudioMs = null;
+        var scheduled = 0;
+        var responseTask = live.StreamReplyAsync("gemini-3.8-live", new User {Name="Test learner", LearningLanguage="en-NZ", NativeLanguage="en-NZ"}, input,
+            [new("user", "I live in Auckland."), new("model", "Thanks for telling me.")], default, clock, BanteraAiVoices.Default, call => {
+                var name = call.GetProperty("name").GetString();
+                if (name == "get_current_time") return Task.FromResult(AiClientMetadata.CurrentTime(clock.Clock));
+                Assert.Equal("schedule_callback", name);
+                scheduled++;
+                return Task.FromResult<object>(new { status = "scheduled", dueAt = DateTime.UtcNow.AddMinutes(1), id = Guid.NewGuid() });
+            },
+            bytes => {
+                if (bytes is not null) {
+                    Assert.True(input.Committed.IsCompleted, "The model must not answer before Send.");
+                    firstAudioMs ??= sinceSend.Elapsed.TotalMilliseconds;
+                }
+                return Task.CompletedTask;
+            }, timeout.Token);
+        for (var offset = 0; offset < pcm.Length; offset += 3200) {
+            input.Add(pcm.AsSpan(offset, Math.Min(3200, pcm.Length - offset)).ToArray());
+            await Task.Delay(100, timeout.Token);
+        }
+        Assert.Null(firstAudioMs);
+        sinceSend.Start(); input.Commit(clock);
+        var response = await responseTask;
+        Assert.Equal(1, scheduled);
+        Assert.NotNull(firstAudioMs);
+        Console.WriteLine($"Streaming smoke: first audio {firstAudioMs:F0} ms after Send; complete {sinceSend.Elapsed.TotalMilliseconds:F0} ms.");
+        Assert.NotEmpty(response.Pcm); Assert.False(string.IsNullOrWhiteSpace(response.InputText));
+        Assert.False(string.IsNullOrWhiteSpace(response.OutputText));
+    }
+
     [AiDatabaseFact] public async Task SchedulingIsDurableIdempotentAndAccountScoped()
     {
         var connection = Environment.GetEnvironmentVariable("BANTERA_AI_TEST_DB")!;
@@ -204,4 +257,13 @@ public sealed class AiDatabaseFactAttribute : FactAttribute
 public sealed class AiLiveFactAttribute : FactAttribute
 {
     public AiLiveFactAttribute() { if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("BANTERA_AI_LIVE_CONFIG"))) Skip = "Opt-in real Gemini smoke test."; }
+}
+
+public sealed class AiCallbackLiveFactAttribute : FactAttribute
+{
+    public AiCallbackLiveFactAttribute() {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("BANTERA_AI_LIVE_CONFIG")) ||
+            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("BANTERA_AI_CALLBACK_AUDIO")))
+            Skip = "Requires opt-in Live configuration and synthetic callback audio.";
+    }
 }

@@ -189,18 +189,22 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         await SendAsync(socket, new { realtimeInput = new { activityEnd = new { } } }, ct);
     }
 
-    private static async Task<AiVoiceReply> ReadReplyAsync(WebSocket socket, JsonElement snapshot,
+    public static async Task<AiVoiceReply> ReadReplyAsync(WebSocket socket, JsonElement snapshot,
         Func<JsonElement, Task<object>>? executeTool, CancellationToken ct,
         Func<byte[]?, Task>? stream = null, Task? uploaded = null)
     {
         using var audio = new MemoryStream();
         var input = new StringBuilder();
         var output = new StringBuilder();
+        var awaitingToolReply = false;
+        var toolRounds = 0;
         while (true)
         {
             using var json = await ReceiveJsonAsync(socket, ct);
             if (json.RootElement.TryGetProperty("toolCall", out var toolCall))
             {
+                if (++toolRounds > 16) throw new InvalidDataException("Too many Live tool rounds.");
+                awaitingToolReply = true;
                 if (uploaded is not null) await uploaded.WaitAsync(ct);
                 var responses = new List<object>();
                 foreach (var call in toolCall.GetProperty("functionCalls").EnumerateArray())
@@ -219,10 +223,16 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             {
                 if (audio.Length + chunk.Length > 24000 * 2 * 90) throw new InvalidDataException("AI reply too long.");
                 if (uploaded is not null) await uploaded.WaitAsync(ct);
+                awaitingToolReply = false;
                 audio.Write(chunk);
                 if (stream is not null) await stream(chunk);
             }
-            if (content.TryGetProperty("turnComplete", out var done) && done.GetBoolean()) break;
+            if (content.TryGetProperty("turnComplete", out var done) && done.GetBoolean()) {
+                // Live can finish the tool-call turn before generating the spoken
+                // confirmation. Keep this socket open for the tool-result turn.
+                if (awaitingToolReply) { awaitingToolReply = false; continue; }
+                break;
+            }
         }
         if (audio.Length == 0) throw new InvalidDataException("AI returned no audio.");
         return new(audio.ToArray(), input.ToString(), output.ToString());

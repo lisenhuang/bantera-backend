@@ -45,7 +45,16 @@ public static class AiVoiceMessageEndpoint
             await GeminiLiveService.SendAsync(client, new { type = "complete", inputText = reply.InputText, outputText = reply.OutputText }, lifetime.Token);
         }
         catch (Exception ex) when (!context.RequestAborted.IsCancellationRequested) {
-            logs.CreateLogger("BanteraAI").LogWarning("AI voice stream ended: {ErrorType}.", ex.GetType().Name);
+            // Only classify messages authored here. Provider exception text can
+            // contain URLs, keys, or conversation content and must stay private.
+            var reason = ex is InvalidDataException ? ex.Message switch {
+                "AI returned no audio." => "missing_reply_audio",
+                "AI reply too long." => "reply_audio_limit",
+                "Too many Live tool rounds." => "tool_round_limit",
+                "Live request failed." => "provider_request_failed",
+                _ => "invalid_data"
+            } : "stream_failed";
+            logs.CreateLogger("BanteraAI").LogWarning("AI voice stream ended: {ErrorType}; reason={Reason}.", ex.GetType().Name, reason);
             // Wait for the only output producer before sending a generic terminal error.
             await lifetime.CancelAsync();
             if (generate is not null) try { await generate; } catch { }
