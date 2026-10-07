@@ -487,3 +487,43 @@ Signed iOS **2.3.0 (326)** was installed after deployment on the user's iPhone
 17 Pro. CoreDevice confirmed version and build. Code-signature verification
 passed, and the build uses `lib/main.dart`. No physical-device test or automated
 app launch was performed.
+
+
+## Device search and voice recovery release, 8 October 2026, 02:49 NZDT
+
+Release **`bantera-20261008-7`** completed at **2026-10-07 13:49:06 UTC**.
+Backend **1.4.0**, source commit `b17d5a07a29e5298310caf535ee7a347baa5182d`,
+is live in `bantera-api-20261008-7` (loopback **18093**) through
+`cloudflared-20261008-7` (readiness **12013**). Website **0.1.59** remains in
+`bantera-website-20261007-6` (loopback **13005**); no website code changed.
+
+This release adds opt-in device web-search tool relaying for AI calls and voice
+messages, bounded recovery of stalled voice replies, diagnostic counters, and
+three-minute human DM audio validation. The search request itself runs in the
+app. Existing clients remain compatible; no new migration or environment
+variable is required. Production runtime settings and the selected Gemini model
+were preserved.
+
+- The verified PostgreSQL backup is **3,275,322 bytes**. Private runtime
+  snapshots, source hash, controller, build logs and backup stay in the release
+  directory. The archive includes canonical `BanteraApi/appsettings.json`.
+- Candidate startup, API lesson listing, authentication gates, website pages
+  and Cloudflare ingress validation passed before promotion.
+- **130/130** public API and website availability samples returned HTTP 200
+  during the rolling handover and stable verification window. Public API
+  `/version` returned **1.4.0** and the website retained its expected marker.
+  HTTP checks do not establish uninterrupted existing WebSocket calls.
+- Previous API and connector `20261008-6` are retained. Promotion was guarded
+  by automatic rollback. Manual rollback for this release is:
+
+  ```bash
+  python3 /home/ubuntu/releases/bantera-20261008-7/deploy.py rollback
+  ```
+
+  It restores backend **1.3.0** through the previous connector and restores
+  the prior active record; it does not restore or discard database writes.
+
+App **2.4.0 (327)**, commit `10a5e7069e266d08a70f6cee6d10c9b79cbe0ea5`,
+was pushed to main and passed the iOS build, but was **not installed** as part
+of this deployment. Device search and the background reply fix require that
+app update. Physical iPhone background playback remains a user smoke check.
