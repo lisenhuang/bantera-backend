@@ -446,3 +446,44 @@ Signed iOS **2.2.0 (325)** was installed after deployment on the user's iPhone
 17 Pro. CoreDevice confirmed version and build; code-signature verification
 passed, and the build uses `lib/main.dart`. No physical-device test or automated
 app launch was performed.
+
+## 8 October 2026: voice reply recovery and three-minute DMs
+
+Release **`bantera-20261008-6`** succeeded at **02:11:55 NZDT** (7 October
+13:11:55 UTC). Backend **1.3.0** runs in `bantera-api-20261008-6`, loopback
+**18092**, through `cloudflared-20261008-6`, readiness **12012**. Website
+**0.1.59** remains in `bantera-website-20261007-6`. All **128/128** monitored
+public HTTP samples returned 200. Public version, website/download, authentication
+and lesson checks passed. Existing WebSocket continuity is not guaranteed by
+these HTTP checks.
+
+This release adds an explicit completed-recording instruction when recovering a
+silent AI voice reply, avoids timeout replay after reply audio has begun, and
+recognises explicit quota messages for key rotation. Human DM validation accepts
+180 seconds; group validation remains 60 seconds. **GO for existing published
+clients:** request/response contracts remain compatible, with no new migration or
+environment setting. Staging found no startup error entries. The verified
+database backup is **3,273,638 bytes**.
+
+Candidate `bantera-20261008-5` failed staging before any traffic change because
+its source archive mistakenly excluded `BanteraApi/appsettings.json`. Its API
+is stopped and no connector was created. Archive filters must retain the tracked
+default settings file while excluding environment-specific secrets. Release 6
+includes and explicitly verifies that file. Both source manifests, archive hashes,
+private runtime snapshots and rollout logs remain in their release directories.
+
+Rollback for the active release:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261008-6/deploy.py rollback
+```
+
+This restores `cloudflared-20261008-4` and backend **1.2.0**, preserves the
+website and current database writes, and stops the candidate after restored
+public health checks. Source was deployed from the reviewed working tree;
+no Git commit/push or App Store submission was performed.
+
+Signed iOS **2.3.0 (326)** was installed after deployment on the user's iPhone
+17 Pro. CoreDevice confirmed version and build. Code-signature verification
+passed, and the build uses `lib/main.dart`. No physical-device test or automated
+app launch was performed.

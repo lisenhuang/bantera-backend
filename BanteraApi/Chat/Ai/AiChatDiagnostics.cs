@@ -64,6 +64,10 @@ public sealed class AiChatDiagnostics(AiPipelineEventRecorder events)
             .Select(m => $"{m!.DeclaringType!.FullName}.{m.Name}").Take(12).ToArray();
         await events.RecordAsync(aborted ? "warning" : "error", "ai_voice_server", Reason(ex, aborted),
             "AI voice operation ended before completion.", new {
+                audioFreeCompletions = ex.Data["audioFreeCompletions"] as int?,
+                providerInterruptions = ex.Data["providerInterruptions"] as int?,
+                pcmParts = ex.Data["pcmParts"] as int?,
+                otherInlineParts = ex.Data["otherInlineParts"] as int?,
                 requestId, errorType = ex.GetType().Name, progress, frames,
                 providerCode = ex.Data["providerCode"] is int code ? code : (int?)null,
                 closeCode = ex.Data["closeCode"] is int close ? close : (int?)null

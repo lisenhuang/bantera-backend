@@ -95,7 +95,7 @@ public static class BanteraAiEndpoints
             }, timeout.Token);
             var history = AiCallPolicy.ReadHistory(form["history"]);
             var snapshot = AiDeviceTools.ReadSnapshot(form["deviceData"]);
-            var metadata = AiClientMetadata.Read(form["metadata"]);
+            var metadata = AiClientMetadata.Read(form["metadata"]) with { DeviceWebSearch = false };
             if (!Guid.TryParse(form["requestId"], out var requestId)) return Results.BadRequest();
             correlationId = requestId;
             var text = form["text"].ToString().Trim();
@@ -283,8 +283,8 @@ public static class BanteraAiEndpoints
                     continue;
                 }
                 if (!response.RootElement.TryGetProperty("type", out var messageType) || messageType.GetString() != "toolResponse" ||
-                    !response.RootElement.TryGetProperty("responses", out var responses) || !state.Tools.Accept(responses)) throw new InvalidDataException();
-                try { await state.SendAsync(upstream, new { toolResponse = new { functionResponses = responses } }, ct); }
+                    !response.RootElement.TryGetProperty("responses", out var responses) || !state.Tools.TryAccept(responses, out var accepted)) throw new InvalidDataException();
+                try { if (accepted.GetArrayLength() > 0) await state.SendAsync(upstream, new { toolResponse = new { functionResponses = accepted } }, ct); }
                 catch (Exception) when (state.Ending && !ct.IsCancellationRequested) { }
                 continue;
             }
@@ -318,6 +318,7 @@ public static class BanteraAiEndpoints
                 return;
             }
             using var message = received;
+            if (message.RootElement.TryGetProperty("toolCallCancellation", out var cancellation) && cancellation.TryGetProperty("ids", out var ids)) state.Tools.Cancel(ids);
             if (message.RootElement.TryGetProperty("toolCall", out var toolCall))
             {
                 var calls = toolCall.GetProperty("functionCalls");

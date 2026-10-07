@@ -40,14 +40,18 @@ public static class AiVoiceMessageEndpoint
             input = new AiVoiceInput();
             lifetime.CancelAfter(TimeSpan.FromSeconds(190));
             await GeminiLiveService.SendAsync(client, new { type = "ready" }, lifetime.Token);
-            receive = ReceiveRecordingAsync(client, input, lifetime);
+            var deviceTools = metadata.DeviceWebSearch ? new AiVoiceDeviceTools() : null;
+            receive = ReceiveRecordingAsync(client, input, lifetime, deviceTools);
             model = await settings.GetModelAsync(lifetime.Token);
             voice = await settings.GetVoiceAsync(lifetime.Token);
             phase = "stream";
             var replyTask = live.StreamReplyAsync(model, user, input, history, snapshot,
                 metadata, voice,
-                async call => await callbacks.ExecuteAsync(userId, await input.Committed, requestId.ToString(),
-                    call.GetProperty("name").GetString()!, call.GetProperty("args"), lifetime.Token),
+                async call => call.GetProperty("name").GetString() == AiWebSearchTool.Name
+                    ? deviceTools is null ? new { unavailable = true } : await deviceTools.InvokeAsync(call,
+                        frame => GeminiLiveService.SendAsync(client, frame, lifetime.Token), lifetime.Token)
+                    : await callbacks.ExecuteAsync(userId, await input.Committed, requestId.ToString(),
+                        call.GetProperty("name").GetString()!, call.GetProperty("args"), lifetime.Token),
                 async bytes => {
                     if (bytes is null) { resets++; await GeminiLiveService.SendAsync(client, new { type = "reset" }, lifetime.Token); }
                     else { firstAudioMs ??= elapsed.ElapsedMilliseconds; outputBytes += bytes.Length; await client.SendAsync(bytes.AsMemory(), WebSocketMessageType.Binary, true, lifetime.Token); }
@@ -95,16 +99,19 @@ public static class AiVoiceMessageEndpoint
     public static bool WantsTranscripts(JsonElement start) =>
         start.TryGetProperty("streamTranscripts", out var value) && value.ValueKind == JsonValueKind.True;
 
-    public static async Task ReceiveRecordingAsync(WebSocket client, AiVoiceInput input, CancellationTokenSource lifetime)
+    public static async Task ReceiveRecordingAsync(WebSocket client, AiVoiceInput input, CancellationTokenSource lifetime, AiVoiceDeviceTools? deviceTools = null)
     {
         var committed = false;
         while (true) {
             var (bytes, type) = await GeminiLiveService.ReceiveAsync(client, 32000, lifetime.Token);
-            if (committed) throw new InvalidDataException("Recording already sent.");
-            if (type == WebSocketMessageType.Binary) { input.Add(bytes); continue; }
+            if (type == WebSocketMessageType.Binary) { if (committed) throw new InvalidDataException(); input.Add(bytes); continue; }
             if (type != WebSocketMessageType.Text) throw new InvalidDataException();
             using var json = JsonDocument.Parse(bytes);
-            if (json.RootElement.GetProperty("type").GetString() != "commit") throw new InvalidDataException();
+            if (json.RootElement.GetProperty("type").GetString() == "toolResponse" && committed && deviceTools is not null) {
+                if (!json.RootElement.TryGetProperty("responses", out var responses) || !deviceTools.Accept(responses)) throw new InvalidDataException();
+                continue;
+            }
+            if (committed || json.RootElement.GetProperty("type").GetString() != "commit") throw new InvalidDataException();
             input.Commit(AiClientMetadata.Read(json.RootElement.GetProperty("metadata").GetRawText()));
             committed = true;
             lifetime.CancelAfter(TimeSpan.FromSeconds(100));

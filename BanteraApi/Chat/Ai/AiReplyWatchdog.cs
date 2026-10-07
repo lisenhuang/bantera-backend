@@ -2,7 +2,8 @@ namespace BanteraApi.Chat.Ai;
 
 public sealed class AiLiveResponseTimeoutException : TimeoutException
 {
-    public AiLiveResponseTimeoutException() : base("Live response stalled.") { }
+    public AiLiveResponseTimeoutException(bool canReplay = true) : base("Live response stalled.") { CanReplay = canReplay; }
+    public bool CanReplay { get; }
 }
 
 // Recording time is not response time. Start the idle deadline only after Send,

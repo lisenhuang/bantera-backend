@@ -11,6 +11,102 @@ namespace BanteraApi.Tests;
 public class AiVoiceStreamingTests
 {
     [Fact]
+    public async Task SilentVoiceRecoveryCommitsItsTranscriptWithoutReplayingMicrophoneAudio()
+    {
+        using var socket = new Socket();
+        var input = new AiVoiceInput();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var upload = GeminiLiveService.UploadTranscriptAsync(socket, input, "Could you help me practise?", timeout.Token);
+        Assert.False(upload.IsCompleted);
+        input.Add(new byte[320]);
+        input.Commit(Metadata);
+        await upload;
+        var frame = await socket.Sent.Reader.ReadAsync(timeout.Token);
+        Assert.Contains("Could you help me practise?", frame);
+        Assert.Contains("Pacific/Auckland", frame);
+        Assert.Contains("clientContent", frame);
+        Assert.Contains("\"turnComplete\":true", frame);
+        Assert.DoesNotContain("realtimeInput", frame);
+        Assert.False(socket.Sent.Reader.TryRead(out _));
+    }
+    [Fact]
+    public async Task AudioFreeCompletionDoesNotDiscardTheFollowingSpokenReply()
+    {
+        using var socket = new Socket();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var replyTask = GeminiLiveService.ReadReplyAsync(socket, default, null, timeout.Token);
+        socket.Incoming.Writer.TryWrite("""{"serverContent":{"inputTranscription":{"text":"Hello"},"outputTranscription":{"text":"Hi there"},"turnComplete":true}}""");
+        socket.Incoming.Writer.TryWrite("""{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AQIDBA=="}}]},"turnComplete":true}}""");
+        var reply = await replyTask;
+        Assert.Equal("Hi there", reply.OutputText);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, reply.Pcm);
+    }
+    [Fact]
+    public async Task RecoveryCommitWaitsForReplacementTurnAfterProviderInterruption()
+    {
+        using var socket = new Socket();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var resets = 0;
+        var captions = new List<string>();
+        var task = GeminiLiveService.ReadReplyAsync(socket, default, null, timeout.Token,
+            stream: bytes => { if (bytes is null) { resets++; captions.Clear(); } return Task.CompletedTask; },
+            transcript: (role, text) => { captions.Add(role + ":" + text); return Task.CompletedTask; });
+        socket.Incoming.Writer.TryWrite("""{"serverContent":{"inputTranscription":{"text":"Hello"},"outputTranscription":{"text":"Discarded"}}}""");
+        socket.Incoming.Writer.TryWrite("""{"serverContent":{"interrupted":true,"turnComplete":true}}""");
+        socket.Incoming.Writer.TryWrite("""{"serverContent":{"outputTranscription":{"text":"Hi there"},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AQIDBA=="}}]},"turnComplete":true}}""");
+        var reply = await task;
+        Assert.Equal(1, resets);
+        Assert.Equal("Hello", reply.InputText);
+        Assert.Equal("Hi there", reply.OutputText);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, reply.Pcm);
+        Assert.Equal(new[] { "user:Hello", "model:Hi there" }, captions);
+    }
+    [Fact]
+    public async Task RecoveryCommitsOnlyAfterRecordingWasSent()
+    {
+        using var socket = new Socket();
+        var input = new AiVoiceInput();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var upload = GeminiLiveService.UploadVoiceAsync(socket, input, timeout.Token, requireReply: true);
+        Assert.Contains("activityStart", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        input.Add(new byte[320]);
+        Assert.Contains("audio/pcm", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        Assert.False(upload.IsCompleted);
+        input.Commit(Metadata);
+        await upload;
+        Assert.Contains("Time context", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        Assert.Contains("activityEnd", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        using var commit = JsonDocument.Parse(await socket.Sent.Reader.ReadAsync(timeout.Token));
+        Assert.True(commit.RootElement.GetProperty("clientContent").GetProperty("turnComplete").GetBoolean());
+        Assert.Contains("finished recording", commit.RootElement.ToString());
+    }
+    [Fact]
+    public async Task TimeoutAfterAudioStartedNeverReplaysTheHeardReply()
+    {
+        var attempts = 0;
+        await Assert.ThrowsAsync<AiLiveResponseTimeoutException>(() => GeminiLiveService.TryKeysAsync<int>(["a", "b"], (_, _) => {
+            attempts++; throw new AiLiveResponseTimeoutException(canReplay: false);
+        }, _ => Assert.Fail("Timeout is not quota"), default));
+        Assert.Equal(1, attempts);
+    }
+    [Fact]
+    public async Task ExplicitQuotaMessageCoolsKeyAndUsesNextServerKey()
+    {
+        var attempts = new List<string>();
+        var cooled = new List<string>();
+        var result = await GeminiLiveService.TryKeysAsync(["a", "b"], async (key, ct) => {
+            attempts.Add(key);
+            if (key == "a") {
+                using var socket = new Socket("""{"error":{"code":400,"message":"You exceeded your current quota."}}""");
+                using var response = await GeminiLiveService.ReceiveJsonAsync(socket, ct);
+            }
+            return "audio";
+        }, key => cooled.Add(key), default);
+        Assert.Equal("audio", result);
+        Assert.Equal(new[] { "a", "b" }, attempts);
+        Assert.Equal(new[] { "a" }, cooled);
+    }
+    [Fact]
     public async Task InterruptionFollowsTheFinalAudioAndTranscriptInTheSameProviderFrame()
     {
         using var socket = new Socket();

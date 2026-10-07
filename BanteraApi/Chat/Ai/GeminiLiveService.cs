@@ -42,13 +42,13 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         if (quotaHandlers.TryGetValue(socket, out var report)) report();
     }
 
-    public static object Setup(string model, string prompt, bool voiceMessage, string voice = BanteraAiVoices.Default) => new {
+    public static object Setup(string model, string prompt, bool voiceMessage, string voice = BanteraAiVoices.Default, bool deviceWebSearch = false) => new {
         setup = new {
             model = "models/" + model,
             contextWindowCompression = new { slidingWindow = new { } },
             generationConfig = AiLiveModelPolicy.GenerationConfig(model, voice),
-            systemInstruction = new { parts = new[] { new { text = prompt + (voiceMessage ? "" : AiCallPolicy.TurnTaking) } } },
-            tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model) } },
+            systemInstruction = new { parts = new[] { new { text = prompt + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
+            tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model, deviceWebSearch) } },
             inputAudioTranscription = new { }, outputAudioTranscription = new { },
             realtimeInputConfig = new { automaticActivityDetection = voiceMessage
                 ? (object)new { disabled = true }
@@ -86,7 +86,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             try {
                 for (var renewals = 0; ; renewals++) {
                     try { return await attempt(key, ct); }
-                    catch (AiLiveResponseTimeoutException) when (renewals < 1 && !ct.IsCancellationRequested) { }
+                    catch (AiLiveResponseTimeoutException ex) when (ex.CanReplay && renewals < 1 && !ct.IsCancellationRequested) { }
                     catch (AiLiveSessionExpiredException) when (renewals < 2 && !ct.IsCancellationRequested) {
                         // A fresh session replays the caller's context and bounded recording.
                         // Expiry is not evidence that this key has exhausted its quota.
@@ -118,7 +118,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         try
         {
             await socket.ConnectAsync(new Uri("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" + Uri.EscapeDataString(key)), timeout.Token);
-            await SendAsync(socket, Setup(model, BanteraAiIdentity.Prompt(user) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).LevelPrompt + AiCallPolicy.IntroductionPolicy(metadata, history) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).TimePrompt, voiceMessage, voice), timeout.Token);
+            await SendAsync(socket, Setup(model, BanteraAiIdentity.Prompt(user) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).LevelPrompt + AiCallPolicy.IntroductionPolicy(metadata, history) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).TimePrompt, voiceMessage, voice, metadata?.DeviceWebSearch == true), timeout.Token);
             using var ready = await ReceiveJsonAsync(socket, timeout.Token);
             if (!ready.RootElement.TryGetProperty("setupComplete", out _)) throw new InvalidDataException("Live setup was not accepted.");
             if (history.Count > 0)
@@ -175,16 +175,39 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
     {
         var tools = MemoizeTools(executeTool);
         var attempts = 0;
+        string? capturedInput = null;
         return await WithKeysAsync(model, async (key, token) => {
-            if (attempts++ > 0) await output(null); // Discard a partial response before replaying on another key.
+            var recovering = attempts++ > 0;
+            if (recovering) await output(null); // Start a distinct attempt with the same bounded recording/context.
             using var socket = await ConnectKeyAsync(key, model, user, true, history, token, metadata, voice);
             await using var watchdog = new AiReplyWatchdog(input.Committed, token);
             using var attempt = CancellationTokenSource.CreateLinkedTokenSource(watchdog.Token);
-            var upload = UploadVoiceAsync(socket, input, attempt.Token);
+            var receivedAudio = false;
+            var providerEvents = new Dictionary<string, int>();
+            void Observe(string name) {
+                providerEvents[name] = providerEvents.GetValueOrDefault(name) + 1;
+                if (name == "toolResponses") watchdog.Progress();
+            }
+            void Annotate(Exception ex) {
+                foreach (var (name, count) in providerEvents) ex.Data[name] = count;
+            }
+            var transcriptRecovery = recovering && !string.IsNullOrWhiteSpace(capturedInput) ? capturedInput : null;
+            var attemptInput = new StringBuilder();
+            // A transcription proves the audio reached Gemini. On a silent
+            // attempt, commit that utterance as a text turn to the SAME Live
+            // model, avoiding another proactive-audio decision on replayed PCM.
+            var upload = transcriptRecovery is not null
+                ? UploadTranscriptAsync(socket, input, transcriptRecovery, attempt.Token)
+                : UploadVoiceAsync(socket, input, attempt.Token, requireReply: recovering);
+            if (transcriptRecovery is not null && transcript is not null) await transcript("user", transcriptRecovery);
             var reply = ReadReplyAsync(socket, snapshot, tools, attempt.Token, async bytes => {
-                if (bytes is { Length: > 2 }) watchdog.Progress();
+                if (bytes is null) attemptInput.Clear();
+                if (bytes is { Length: > 2 }) { receivedAudio = true; watchdog.Progress(); }
                 await output(bytes);
-            }, upload, transcript, AiLiveModelPolicy.RequiresInteractionIdle(model));
+            }, upload, async (role, text) => {
+                if (role == "user") { attemptInput.Append(text); capturedInput = attemptInput.ToString(); }
+                if (transcript is not null) await transcript(role, text);
+            }, AiLiveModelPolicy.RequiresInteractionIdle(model), Observe);
             try {
                 var first = await Task.WhenAny(upload, reply);
                 try { await first; }
@@ -198,12 +221,16 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                     throw;
                 }
                 await upload;
-                return await reply;
+                var result = await reply;
+                return transcriptRecovery is null ? result : result with { InputText = transcriptRecovery };
             }
             catch (OperationCanceledException) when (watchdog.TimedOut && !token.IsCancellationRequested) {
-                logger.LogWarning("Bantera AI voice reply stalled after Send; renewing session without marking quota.");
-                throw new AiLiveResponseTimeoutException();
+                logger.LogWarning("Bantera AI voice reply stalled after Send; canReplay={CanReplay}; not marking quota.", !receivedAudio);
+                var failure = new AiLiveResponseTimeoutException(canReplay: !receivedAudio);
+                Annotate(failure);
+                throw failure;
             }
+            catch (Exception ex) { Annotate(ex); throw; }
             finally {
                 await attempt.CancelAsync();
                 socket.Abort();
@@ -213,7 +240,18 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         }, ct);
     }
 
-    public static async Task UploadVoiceAsync(WebSocket socket, AiVoiceInput input, CancellationToken ct)
+    public static async Task UploadTranscriptAsync(WebSocket socket, AiVoiceInput input, string transcript, CancellationToken ct)
+    {
+        var metadata = await input.Committed.WaitAsync(ct);
+        await SendAsync(socket, new { clientContent = new {
+            turns = new[] { new { role = "user", parts = new[] {
+                new { text = "[A completed voice message is transcribed below. Answer it aloud once; do not discuss this delivery instruction.]" + metadata.TimePrompt },
+                new { text = transcript }
+            } } }, turnComplete = true
+        } }, ct);
+    }
+
+    public static async Task UploadVoiceAsync(WebSocket socket, AiVoiceInput input, CancellationToken ct, bool requireReply = false)
     {
         await SendAsync(socket, new { realtimeInput = new { activityStart = new { } } }, ct);
         await foreach (var chunk in input.ReadAsync(ct)) await SendAudioAsync(socket, chunk, ct);
@@ -223,12 +261,19 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             text = "[Time context for this voice message; do not respond separately.]" + metadata.TimePrompt
         } }, ct);
         await SendAsync(socket, new { realtimeInput = new { activityEnd = new { } } }, ct);
+        // A fresh recovery session can otherwise make the same silent decision.
+        // Only after Send, explicitly commit the recorded turn. Never use this
+        // in a real-time call, where silence is intentional.
+        if (requireReply) await SendAsync(socket, new { clientContent = new {
+            turns = new[] { new { role = "user", parts = new[] { new { text = AiCallPolicy.VoiceMessageCommit } } } },
+            turnComplete = true
+        } }, ct);
     }
 
     public static async Task<AiVoiceReply> ReadReplyAsync(WebSocket socket, JsonElement snapshot,
         Func<JsonElement, Task<object>>? executeTool, CancellationToken ct,
         Func<byte[]?, Task>? stream = null, Task? uploaded = null,
-        Func<string, string, Task>? transcript = null, bool requiresInteractionIdle = false)
+        Func<string, string, Task>? transcript = null, bool requiresInteractionIdle = false, Action<string>? observe = null)
     {
         using var audio = new MemoryStream();
         var input = new StringBuilder();
@@ -250,11 +295,25 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 foreach (var call in toolCall.GetProperty("functionCalls").EnumerateArray())
                 {
                     var name = call.GetProperty("name").GetString()!;
-                    if (AiCallbackService.ToolNames.Contains(name) && executeTool is not null)
+                    if ((AiCallbackService.ToolNames.Contains(name) || name == AiWebSearchTool.Name) && executeTool is not null)
                         responses.Add(new { id = call.GetProperty("id").GetString(), name, response = new { result = await executeTool(call) } });
                     else responses.Add(AiDeviceTools.SnapshotResponse(call, snapshot));
                 }
                 await SendAsync(socket, new { toolResponse = new { functionResponses = responses } }, ct);
+                observe?.Invoke("toolResponses");
+            }
+            // An explicit recovery commit can cancel a provisional provider
+            // turn. Its completion is not the answer to the committed message.
+            if (json.RootElement.TryGetProperty("serverContent", out var interruptedContent) &&
+                interruptedContent.TryGetProperty("interrupted", out var interrupted) && interrupted.ValueKind == JsonValueKind.True) {
+                observe?.Invoke("providerInterruptions");
+                AppendTranscript(interruptedContent, "inputTranscription", input);
+                audio.SetLength(0);
+                output.Clear();
+                inputSent = outputSent = 0;
+                completion = new AiLiveCompletion(requiresInteractionIdle);
+                if (stream is not null) await stream(null);
+                continue;
             }
             var complete = completion.Observe(json.RootElement);
             if (!json.RootElement.TryGetProperty("serverContent", out var content)) {
@@ -275,6 +334,10 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                     outputSent = output.Length;
                 }
             }
+            if (content.TryGetProperty("modelTurn", out var modelTurn) && modelTurn.TryGetProperty("parts", out var parts))
+                foreach (var part in parts.EnumerateArray())
+                    if (part.TryGetProperty("inlineData", out var inline))
+                        observe?.Invoke(inline.TryGetProperty("mimeType", out var mime) && mime.GetString()?.StartsWith("audio/pcm", StringComparison.Ordinal) == true ? "pcmParts" : "otherInlineParts");
             foreach (var chunk in AudioParts(content))
             {
                 if (audio.Length + chunk.Length > 24000 * 2 * 90) throw new InvalidDataException("AI reply too long.");
@@ -287,6 +350,10 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 // Live can finish the tool-call turn before generating the spoken
                 // confirmation. Keep this socket open for the tool-result turn.
                 if (awaitingToolReply) { awaitingToolReply = false; continue; }
+                // A completion can close an interrupted/provisional turn before
+                // the replacement AUDIO turn arrives. Transcription alone is
+                // not a voice reply. The post-Send watchdog bounds this wait.
+                if (audio.Length == 0) { observe?.Invoke("audioFreeCompletions"); continue; }
                 break;
             }
         }
@@ -325,7 +392,8 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         }
         if (json.RootElement.TryGetProperty("error", out var error)) {
             var quota = (error.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.Number && code.TryGetInt32(out var status) && status == 429)
-                || (error.TryGetProperty("status", out var label) && label.ValueKind == JsonValueKind.String && label.GetString() == "RESOURCE_EXHAUSTED");
+                || (error.TryGetProperty("status", out var label) && label.ValueKind == JsonValueKind.String && label.GetString() == "RESOURCE_EXHAUSTED")
+                || (error.TryGetProperty("message", out var detail) && detail.ValueKind == JsonValueKind.String && IsQuotaCloseReason(detail.GetString() ?? ""));
             var expired = error.TryGetProperty("status", out var expiry) && expiry.ValueKind == JsonValueKind.String && expiry.GetString() == "DEADLINE_EXCEEDED";
             var providerCode = error.TryGetProperty("code", out var rawCode) && rawCode.ValueKind == JsonValueKind.Number && rawCode.TryGetInt32(out var number) ? number : (int?)null;
             json.Dispose();

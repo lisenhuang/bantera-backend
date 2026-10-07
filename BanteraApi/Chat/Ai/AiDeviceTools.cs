@@ -30,21 +30,37 @@ public static class AiDeviceTools
 public sealed class AiPendingTools
 {
     private readonly ConcurrentDictionary<string, string> pending = new();
+    private readonly ConcurrentDictionary<string, string> cancelled = new();
+    public void Cancel(JsonElement ids) {
+        if (ids.ValueKind != JsonValueKind.Array) return;
+        foreach (var id in ids.EnumerateArray())
+            if (id.ValueKind == JsonValueKind.String && pending.TryRemove(id.GetString()!, out var name)) cancelled[id.GetString()!] = name;
+    }
     public void Register(JsonElement calls)
     {
         foreach (var call in calls.EnumerateArray()) {
             var name = call.GetProperty("name").GetString()!;
             var id = call.GetProperty("id").GetString()!;
-            if (!AiDeviceTools.Names.Contains(name) || id.Length > 200 || pending.Count >= 10) throw new InvalidDataException();
+            if ((!AiDeviceTools.Names.Contains(name) && name != AiWebSearchTool.Name) || id.Length > 200 || pending.Count >= 10) throw new InvalidDataException();
             if (!pending.TryAdd(id, name)) throw new InvalidDataException();
         }
     }
-    public bool Accept(JsonElement responses)
+    public bool Accept(JsonElement responses) => TryAccept(responses, out _);
+    public bool TryAccept(JsonElement responses, out JsonElement accepted)
     {
-        if (responses.ValueKind != JsonValueKind.Array || responses.GetArrayLength() > 10) return false;
-        foreach (var response in responses.EnumerateArray())
-            if (!response.TryGetProperty("id", out var id) || !response.TryGetProperty("name", out var name) ||
-                !response.TryGetProperty("response", out _) || !pending.TryRemove(id.GetString() ?? "", out var expected) || expected != name.GetString()) return false;
+        accepted = default;
+        if (responses.ValueKind != JsonValueKind.Array || responses.GetArrayLength() > 10 || responses.GetRawText().Length > 150000) return false;
+        var valid = new List<JsonElement>();
+        foreach (var response in responses.EnumerateArray()) {
+            if (!response.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String ||
+                !response.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String ||
+                !response.TryGetProperty("response", out _)) return false;
+            var key = id.GetString()!;
+            if (cancelled.TryRemove(key, out var cancelledName) && cancelledName == name.GetString()) continue;
+            if (!pending.TryRemove(key, out var expected) || expected != name.GetString()) return false;
+            valid.Add(response.Clone());
+        }
+        accepted = JsonSerializer.SerializeToElement(valid);
         return true;
     }
 }

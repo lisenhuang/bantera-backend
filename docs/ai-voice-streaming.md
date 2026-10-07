@@ -332,3 +332,26 @@ veto it. Confident foreign fragments or mixed-language tags in the full context
 reject the whole utterance. This avoids zero credit caused by ambiguous greetings
 or three-word windows, without counting only the target-language parts of detected
 mixed speech. Retries retain the same speech event ID to prevent duplicate credit.
+
+## Device web search and silent-response recovery (1.4.0)
+
+The optional `metadata.deviceWebSearch` capability registers `search_web` only
+for compatible WebSocket clients. Search network requests run in the app;
+`AiWebSearchTool` and `AiVoiceDeviceTools` only declare/relay bounded tool data.
+Upload-only HTTP clients never advertise it. No new DB schema, key or environment
+variable is needed. Search content is not written to technical diagnostics.
+
+A provider completion without reply PCM no longer ends a voice message while a
+replacement turn may still follow. The existing post-Send timeout bounds this
+wait. If the first attempt is silent but produced a user transcription, its one
+fresh-session recovery commits that transcription to the **same selected Live
+model** with prior context. It does not switch models or re-upload PCM in that
+case. Tool mutations retain the operation's existing memoization/idempotency.
+Timeouts after reply audio begins are not replayed. Quota and session-expiry
+handling remain distinct.
+
+Failure diagnostics now include counts of audio-free completions, provider
+interruptions, PCM parts and other inline parts. No recordings, transcripts,
+search queries/results or raw provider error messages are persisted by these
+counters. Synthetic checks establish protocol behavior, not a guarantee that the
+provider can never stall.

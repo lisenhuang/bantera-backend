@@ -42,7 +42,10 @@ public class BanteraAiTests
         var manual = message.GetProperty("realtimeInputConfig").GetProperty("automaticActivityDetection");
         Assert.True(manual.GetProperty("disabled").GetBoolean());
         Assert.False(manual.TryGetProperty("startOfSpeechSensitivity", out _));
-        Assert.Equal("prompt", message.GetProperty("systemInstruction").GetProperty("parts")[0].GetProperty("text").GetString());
+        var messagePrompt = message.GetProperty("systemInstruction").GetProperty("parts")[0].GetProperty("text").GetString();
+        Assert.StartsWith("prompt", messagePrompt);
+        Assert.Contains("one voice message", messagePrompt);
+        Assert.Contains("give one short spoken reply", messagePrompt);
     }
 
     private static JsonElement Json(string value) => JsonDocument.Parse(value).RootElement.Clone();

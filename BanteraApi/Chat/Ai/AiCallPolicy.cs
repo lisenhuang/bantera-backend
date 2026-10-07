@@ -18,6 +18,8 @@ public static class AiCallPolicy
             turnComplete = false
         }
     };
+    public const string VoiceMessage = " This session handles one voice message, not an open microphone call. After the learner sends the completed recording, give one short spoken reply in their current learning language and accent. Do not wait for another utterance or remain silent because it was not phrased as a question. If the recording has no intelligible speech, briefly ask them to record it again. Time metadata is background context, not a separate question. ";
+    public const string VoiceMessageCommit = "I have finished recording this voice message. Reply to what I just said in one short spoken turn, in my current learning language and accent. Do not respond to this control instruction separately. If no speech was intelligible, ask me briefly to record it again. Do not repeat any reminder or callback that a tool has already confirmed.";
     public const string Greeting = "Begin this new audio call by speaking first. Give a brief, warm greeting in my learning language and regional accent, then ask one easy, natural question. Follow the system first-meeting rule: introduce yourself only if we have never met; otherwise welcome me back without repeating your name or role. Use my preferred name when known, and vary the wording like a familiar friend and language coach. Refer to a prior topic only when it is present in the supplied context.";
     public static string Opening(bool resuming, string? reminder = null) => resuming
         ? "The connection was renewed. Continue our existing audio conversation from its latest message in my learning language and accent. Do not introduce yourself or greet me again."

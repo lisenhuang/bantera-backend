@@ -22,7 +22,8 @@ public static class AiLiveModelPolicy
         return config;
     }
 
-    public static object[] Tools(string model) => AiDeviceTools.Declarations
+    public static object[] Tools(string model, bool deviceWebSearch = false) => AiDeviceTools.Declarations
+        .Concat(deviceWebSearch ? new[] { AiWebSearchTool.Declaration } : Array.Empty<object>())
         .Concat(AiCallbackService.Declarations).Select(tool => {
             var declaration = JsonSerializer.SerializeToNode(tool)!.AsObject();
             // Older models use blocking tools implicitly and may reject this

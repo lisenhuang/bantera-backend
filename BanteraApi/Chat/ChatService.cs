@@ -186,7 +186,7 @@ public class ChatService(
         if (spokenLanguage is null)
             return (null, ChatErrorCodes.ChatInvalidLanguage);
 
-        var validationError = ValidateAudioRequest(request);
+        var validationError = ValidateAudioRequest(request, directMessage: true);
         if (validationError is not null)
             return (null, validationError);
 
@@ -1167,13 +1167,13 @@ public class ChatService(
         catch { return false; }
     }
 
-    private static string? ValidateAudioRequest(SendChatAudioRequest request)
+    public static string? ValidateAudioRequest(SendChatAudioRequest request, bool directMessage = false)
     {
         if (request.File is null
             || request.File.Length <= 0
             || request.File.Length > MaxAudioBytes
             || request.DurationMs <= 0
-            || request.DurationMs > MaxDurationMs)
+            || request.DurationMs > (directMessage ? 180_000 : MaxDurationMs))
         {
             return ChatErrorCodes.ChatInvalidAudio;
         }
