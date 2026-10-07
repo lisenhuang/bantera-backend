@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace BanteraApi.Chat.Ai;
 
 public sealed record AiClock(string TimeZone, int UtcOffsetMinutes);
-public sealed record AiClientMetadata(AiClock Clock, string? PushToken)
+public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? HasMetBanteraAi = null, string? AlertPushToken = null)
 {
     public static AiClientMetadata Read(string? json)
     {
@@ -13,7 +13,15 @@ public sealed record AiClientMetadata(AiClock Clock, string? PushToken)
         var clock = doc.RootElement.TryGetProperty("clock", out var c) ? ReadClock(c) : new AiClock("UTC", 0);
         var token = doc.RootElement.TryGetProperty("pushToken", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
         if (token?.Length > 512) throw new InvalidDataException();
-        return new(clock, token);
+        bool? hasMet = null;
+        if (doc.RootElement.TryGetProperty("hasMetBanteraAi", out var met)) {
+            if (met.ValueKind is not (JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null))
+                throw new InvalidDataException();
+            if (met.ValueKind != JsonValueKind.Null) hasMet = met.GetBoolean();
+        }
+        var alert = doc.RootElement.TryGetProperty("alertPushToken", out var a) && a.ValueKind == JsonValueKind.String ? a.GetString() : null;
+        if (alert?.Length > 512) throw new InvalidDataException();
+        return new(clock, token, hasMet, alert);
     }
     public static AiClock ReadClock(JsonElement c)
     {

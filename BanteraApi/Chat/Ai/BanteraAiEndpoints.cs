@@ -39,6 +39,15 @@ public static class BanteraAiEndpoints
                 return Results.Json(new { message = "The model could not be confirmed or saved. Refresh and try again." }, statusCode: 503);
             }
         });
+        app.MapPost("/api/chat/ai/diagnostics", async (AiChatDiagnostics.ClientReport report,
+            ClaimsPrincipal principal, AiChatDiagnostics diagnostics) => {
+            if (!Guid.TryParse(principal.FindFirst("sub")?.Value, out var userId)) return Results.Unauthorized();
+            if (!AiChatDiagnostics.Valid(report)) return Results.BadRequest();
+            await diagnostics.ClientAsync(userId, report);
+            return Results.NoContent();
+        }).RequireAuthorization().RequireRateLimiting("ai-diagnostics")
+            .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(4096));
+        AiReminderDelivery.Map(app);
         var callbackRoutes = app.MapGroup("/api/chat/ai/callbacks").RequireAuthorization();
         callbackRoutes.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => {
             if (!Guid.TryParse(user.FindFirst("sub")?.Value, out var userId)) return Results.Unauthorized();
@@ -64,7 +73,7 @@ public static class BanteraAiEndpoints
     }
 
     private static async Task<IResult> HandleReplyAsync(HttpContext context, AppDbContext db, BanteraAiSettings settings,
-        BanteraAiSessions sessions, GeminiLiveService live, AiCallbackService callbacks, ILoggerFactory logs)
+        BanteraAiSessions sessions, GeminiLiveService live, AiCallbackService callbacks, ILoggerFactory logs, AiChatDiagnostics diagnostics)
     {
         context.Response.Headers.CacheControl = "no-store";
         if (!Guid.TryParse(context.User.FindFirst("sub")?.Value, out var userId)) return Results.Unauthorized();
@@ -75,6 +84,10 @@ public static class BanteraAiEndpoints
         if (!context.Request.HasFormContentType || context.Request.ContentLength > 10 * 1024 * 1024) return Results.BadRequest();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
         timeout.CancelAfter(TimeSpan.FromSeconds(100));
+        Guid? correlationId = null;
+        string? model = null;
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        var inputBytes = 0;
         try
         {
             var form = await context.Request.ReadFormAsync(new Microsoft.AspNetCore.Http.Features.FormOptions {
@@ -84,27 +97,36 @@ public static class BanteraAiEndpoints
             var snapshot = AiDeviceTools.ReadSnapshot(form["deviceData"]);
             var metadata = AiClientMetadata.Read(form["metadata"]);
             if (!Guid.TryParse(form["requestId"], out var requestId)) return Results.BadRequest();
+            correlationId = requestId;
             var text = form["text"].ToString().Trim();
             var file = form.Files.GetFile("audio");
             if (text.Length > 4000 || (file is null && text.Length == 0) || (file is not null && (text.Length > 0 || file.Length > 10 * 1024 * 1024)))
                 return Results.BadRequest();
             var pcm = file is null ? Array.Empty<byte>() : await AiAudioCodec.ReadPcmAsync(file, timeout.Token);
-            var reply = await live.ReplyAsync(await settings.GetModelAsync(timeout.Token), user, pcm, history, timeout.Token, text, snapshot, metadata, call => callbacks.ExecuteAsync(userId, metadata, requestId.ToString(), call.GetProperty("name").GetString()!, call.GetProperty("args"), timeout.Token), voice: await settings.GetVoiceAsync(timeout.Token));
+            inputBytes = pcm.Length;
+            model = await settings.GetModelAsync(timeout.Token);
+            var reply = await live.ReplyAsync(model, user, pcm, history, timeout.Token, text, snapshot, metadata, call => callbacks.ExecuteAsync(userId, metadata, requestId.ToString(), call.GetProperty("name").GetString()!, call.GetProperty("args"), timeout.Token), voice: await settings.GetVoiceAsync(timeout.Token));
             // No database/R2 write: the client owns all history and audio persistence.
             return Results.Ok(new { audio = Convert.ToBase64String(AiAudioCodec.Wave(reply.Pcm)),
                 inputText = text.Length > 0 ? text : reply.InputText, outputText = reply.OutputText });
         }
         catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
-        { return Results.BadRequest(new { message = "This message could not be read. Try recording it again." }); }
+        {
+            await diagnostics.FailureAsync(userId, user.LearningLanguage, "/api/chat/ai/reply", correlationId,
+                ex, new { inputBytes }, (int)elapsed.ElapsedMilliseconds, model);
+            return Results.BadRequest(new { message = "This message could not be read. Try recording it again." });
+        }
         catch (Exception ex) when (ex is not OperationCanceledException || !context.RequestAborted.IsCancellationRequested)
         {
+            await diagnostics.FailureAsync(userId, user.LearningLanguage, "/api/chat/ai/reply", correlationId,
+                ex, new { inputBytes }, (int)elapsed.ElapsedMilliseconds, model);
             logs.CreateLogger("BanteraAI").LogWarning("AI reply failed: {ErrorType}.", ex.GetType().Name);
             return Results.Json(new { message = "Bantera AI could not reply. Please try again shortly." }, statusCode: 503);
         }
     }
 
     private static async Task HandleCallAsync(HttpContext context, AppDbContext db, BanteraAiSettings settings,
-        BanteraAiSessions sessions, GeminiLiveService live, AiCallbackService callbacks, ILoggerFactory logs)
+        BanteraAiSessions sessions, GeminiLiveService live, AiCallbackService callbacks, ILoggerFactory logs, AiChatDiagnostics diagnostics)
     {
         if (!context.WebSockets.IsWebSocketRequest) { context.Response.StatusCode = 400; return; }
         if (!Guid.TryParse(context.User.FindFirst("sub")?.Value, out var userId)) { context.Response.StatusCode = 401; return; }
@@ -115,6 +137,7 @@ public static class BanteraAiEndpoints
         using var client = await context.WebSockets.AcceptWebSocketAsync();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
         timeout.CancelAfter(TimeSpan.FromSeconds(35));
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             // Read local context before connecting. Bound the initial handshake independently.
@@ -123,8 +146,13 @@ public static class BanteraAiEndpoints
             var history = AiCallPolicy.ReadHistory(start.RootElement.TryGetProperty("history", out var h) ? h.GetRawText() : null);
             var metadata = AiClientMetadata.Read(start.RootElement.TryGetProperty("metadata", out var m) ? m.GetRawText() : null);
             var resuming = start.RootElement.TryGetProperty("resuming", out var resume) && resume.ValueKind == System.Text.Json.JsonValueKind.True;
+            if (resuming) metadata = metadata with { HasMetBanteraAi = true };
             var duration = resuming && start.RootElement.TryGetProperty("remainingSeconds", out var seconds) && seconds.TryGetInt32(out var requested)
                 ? Math.Clamp(requested, 1, AiCallPolicy.DurationSeconds) : AiCallPolicy.DurationSeconds;
+            string? reminder = null;
+            if (start.RootElement.TryGetProperty("callbackId", out var callbackValue) && callbackValue.ValueKind == System.Text.Json.JsonValueKind.String &&
+                Guid.TryParse(callbackValue.GetString(), out var callbackId))
+                reminder = await AiCallbackService.ReminderForCallAsync(db, userId, callbackId, timeout.Token);
             var callKey = Guid.NewGuid().ToString();
             var model = await settings.GetModelAsync(timeout.Token);
             var voice = await settings.GetVoiceAsync(timeout.Token);
@@ -132,17 +160,30 @@ public static class BanteraAiEndpoints
             timeout.CancelAfter(TimeSpan.FromSeconds(duration));
             await GeminiLiveService.SendAsync(client, new { type = "ready", maxCallSeconds = AiCallPolicy.DurationSeconds }, timeout.Token);
             await GeminiLiveService.SendAsync(upstream, new { clientContent = new {
-                turns = new[] { new { role = "user", parts = new[] { new { text = resuming ? "The connection was renewed. Continue our existing audio conversation from its latest message in my learning language and accent. Do not introduce yourself or greet me again." : AiCallPolicy.Greeting } } } }, turnComplete = true
+                turns = new[] { new { role = "user", parts = new[] { new { text = AiCallPolicy.Opening(resuming, reminder) } } } }, turnComplete = true
             } }, timeout.Token);
             using var conversation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
             var state = new CallState(metadata, (meta, call) => callbacks.ExecuteAsync(userId, meta, callKey + ":" + call.GetProperty("id").GetString(), call.GetProperty("name").GetString()!, call.GetProperty("args"), timeout.Token));
             var upload = ForwardMicrophoneAsync(client, upstream, state, timeout.Token);
             try
             {
-            var download = ForwardSpeakerAsync(upstream, client, state, conversation.Token, timeout.Token);
+            var download = ForwardSpeakerAsync(upstream, client, state, live, conversation.Token, timeout.Token);
             var farewell = Task.Delay(TimeSpan.FromSeconds(Math.Max(0, duration - 30)), timeout.Token);
             var finished = await Task.WhenAny(upload, download, farewell);
             // Stop the old generation and microphone even when the learner is mid-sentence.
+            // Observe genuine download failures before cancellation can hide them.
+            if (finished == download) await download;
+            if (finished == upload) {
+                try { await upload; }
+                catch when (!timeout.IsCancellationRequested) {
+                    // A provider close can fail a microphone send just before
+                    // the receiving task sends the quota/expiry recovery event.
+                    try { await download.WaitAsync(TimeSpan.FromSeconds(2), timeout.Token); }
+                    catch (TimeoutException) { throw; }
+                    // The speaker task either sent a recovery event or threw.
+                    // Continue to the clean close when recovery was delivered.
+                }
+            }
             state.Ending = true;
             await conversation.CancelAsync();
             upstream.Abort();
@@ -151,7 +192,7 @@ public static class BanteraAiEndpoints
             {
                 await GeminiLiveService.SendAsync(client, new { type = "farewell" }, timeout.Token);
                 // A separate Live turn prevents buffered old speech/turnComplete from ending the farewell early.
-                var goodbye = await live.ReplyAsync(model, user, [], [], timeout.Token, AiCallPolicy.Farewell, metadata: metadata, voice: voice);
+                var goodbye = await live.ReplyAsync(model, user, [], [], timeout.Token, AiCallPolicy.Farewell, metadata: metadata with { HasMetBanteraAi = true }, voice: voice);
                 await client.SendAsync(new ArraySegment<byte>(goodbye.Pcm), WebSocketMessageType.Binary, true, timeout.Token);
                 await GeminiLiveService.SendAsync(client, new { type = "transcript", role = "model", text = goodbye.OutputText }, timeout.Token);
                 await GeminiLiveService.SendAsync(client, new { type = "goodbyeComplete" }, timeout.Token);
@@ -161,7 +202,18 @@ public static class BanteraAiEndpoints
 
             }
             }
+            catch {
+                // Send the terminal status before finally closes the socket.
+                if (client.State == WebSocketState.Open) try {
+                    using var errorTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    await GeminiLiveService.SendAsync(client, new { type = "error", message = "Bantera AI could not continue the call. Please try again shortly." }, errorTimeout.Token);
+                } catch { }
+                throw;
+            }
             finally {
+                state.Ending = true;
+                await conversation.CancelAsync();
+                upstream.Abort();
                 // Deliver the expiry control and a clean close before cancelling the
                 // pending client receive (which otherwise aborts its WebSocket).
                 if (client.State == WebSocketState.Open) try {
@@ -173,7 +225,13 @@ public static class BanteraAiEndpoints
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !context.RequestAborted.IsCancellationRequested)
         {
+            await diagnostics.FailureAsync(userId, user.LearningLanguage, "/ws/chat/ai", null,
+                ex, new { clientState = client.State.ToString() }, (int)elapsed.ElapsedMilliseconds);
             logs.CreateLogger("BanteraAI").LogWarning("AI audio call ended: {ErrorType}.", ex.GetType().Name);
+            if (client.State == WebSocketState.Open) try {
+                using var errorTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await GeminiLiveService.SendAsync(client, new { type = "error", message = "Bantera AI could not continue the call. Please try again shortly." }, errorTimeout.Token);
+            } catch { }
         }
         finally
         {
@@ -221,7 +279,7 @@ public static class BanteraAiEndpoints
                     if (elapsed.Elapsed.TotalSeconds - lastClock < 1) continue;
                     lastClock = elapsed.Elapsed.TotalSeconds;
                     state.Metadata = state.Metadata with { Clock = AiClientMetadata.ReadClock(response.RootElement.GetProperty("clock")) };
-                    await state.SendAsync(upstream, new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text = "[Time context only; do not respond to this note.]" + state.Metadata.TimePrompt } } } }, turnComplete = false } }, ct);
+                    await state.SendAsync(upstream, new { realtimeInput = new { text = "[Time context for this spoken message; do not respond separately.]" + state.Metadata.TimePrompt } }, ct);
                     continue;
                 }
                 if (!response.RootElement.TryGetProperty("type", out var messageType) || messageType.GetString() != "toolResponse" ||
@@ -237,14 +295,25 @@ public static class BanteraAiEndpoints
             catch (Exception) when (state.Ending && !ct.IsCancellationRequested) { }
         }
     }
-    private static async Task ForwardSpeakerAsync(WebSocket upstream, WebSocket client, CallState state, CancellationToken ct, CancellationToken clientToken)
+    private static async Task ForwardSpeakerAsync(WebSocket upstream, WebSocket client, CallState state, GeminiLiveService live, CancellationToken ct, CancellationToken clientToken)
     {
+        using var greetingDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        greetingDeadline.CancelAfter(TimeSpan.FromSeconds(20));
         while (!ct.IsCancellationRequested)
         {
             System.Text.Json.JsonDocument received;
-            try { received = await GeminiLiveService.ReceiveJsonAsync(upstream, ct); }
+            try { received = await GeminiLiveService.ReceiveJsonAsync(upstream, greetingDeadline.Token); }
             catch (AiLiveSessionExpiredException) {
                 await GeminiLiveService.SendAsync(client, new { type = "reconnect", reason = "session_expired" }, clientToken);
+                return;
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests) {
+                live.ReportCallQuota(upstream);
+                await GeminiLiveService.SendAsync(client, new { type = "reconnect", reason = "quota_exceeded" }, clientToken);
+                return;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested && greetingDeadline.IsCancellationRequested) {
+                await GeminiLiveService.SendAsync(client, new { type = "reconnect", reason = "response_timeout" }, clientToken);
                 return;
             }
             using var message = received;
@@ -270,13 +339,13 @@ public static class BanteraAiEndpoints
             if (!message.RootElement.TryGetProperty("serverContent", out var content)) continue;
             if (content.TryGetProperty("interrupted", out var interrupted) && interrupted.GetBoolean())
                 await GeminiLiveService.SendAsync(client, new { type = "interrupted" }, clientToken);
-            if (content.TryGetProperty("inputTranscription", out _))
-                await state.SendAsync(upstream, new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text = "[Time context for this spoken message; do not respond separately.]" + state.Metadata.TimePrompt } } } }, turnComplete = false } }, ct);
             foreach (var name in new[] { "inputTranscription", "outputTranscription" })
                 if (content.TryGetProperty(name, out var transcript) && transcript.TryGetProperty("text", out var text))
                     await GeminiLiveService.SendAsync(client, new { type = "transcript", role = name == "inputTranscription" ? "user" : "model", text = text.GetString() }, clientToken);
-            foreach (var audio in GeminiLiveService.AudioParts(content))
+            foreach (var audio in GeminiLiveService.AudioParts(content)) {
+                if (audio.Length > 2) greetingDeadline.CancelAfter(Timeout.InfiniteTimeSpan);
                 await client.SendAsync(new ArraySegment<byte>(audio), WebSocketMessageType.Binary, true, clientToken);
+            }
             if (content.TryGetProperty("turnComplete", out var done) && done.GetBoolean())
                 await GeminiLiveService.SendAsync(client, new { type = "turnComplete" }, clientToken);
         }

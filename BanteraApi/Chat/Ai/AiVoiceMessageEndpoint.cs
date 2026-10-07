@@ -8,7 +8,7 @@ namespace BanteraApi.Chat.Ai;
 public static class AiVoiceMessageEndpoint
 {
     public static async Task HandleAsync(HttpContext context, AppDbContext db, BanteraAiSettings settings,
-        BanteraAiSessions sessions, GeminiLiveService live, AiCallbackService callbacks, ILoggerFactory logs)
+        BanteraAiSessions sessions, GeminiLiveService live, AiCallbackService callbacks, ILoggerFactory logs, AiChatDiagnostics diagnostics)
     {
         if (!context.WebSockets.IsWebSocketRequest) { context.Response.StatusCode = 400; return; }
         if (!Guid.TryParse(context.User.FindFirst("sub")?.Value, out var userId)) { context.Response.StatusCode = 401; return; }
@@ -20,41 +20,57 @@ public static class AiVoiceMessageEndpoint
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
         lifetime.CancelAfter(TimeSpan.FromSeconds(20));
         Task? receive = null, generate = null;
+        AiVoiceInput? input = null;
+        long outputBytes = 0;
+        int inputChars = 0, outputChars = 0, resets = 0;
+        long? firstAudioMs = null;
+        Guid? correlationId = null;
+        string? model = null, voice = null;
+        var phase = "start";
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
         try {
             using var start = await GeminiLiveService.ReceiveJsonAsync(client, lifetime.Token);
             var root = start.RootElement;
             if (root.GetProperty("type").GetString() != "start" || !Guid.TryParse(root.GetProperty("requestId").GetString(), out var requestId)) throw new InvalidDataException();
+            correlationId = requestId;
             var history = AiCallPolicy.ReadHistory(root.TryGetProperty("history", out var h) ? h.GetRawText() : null);
             var snapshot = AiDeviceTools.ReadSnapshot(root.TryGetProperty("deviceData", out var d) ? d.GetRawText() : null);
             var metadata = AiClientMetadata.Read(root.TryGetProperty("metadata", out var m) ? m.GetRawText() : null);
-            var input = new AiVoiceInput();
+            var streamTranscripts = WantsTranscripts(root);
+            input = new AiVoiceInput();
             lifetime.CancelAfter(TimeSpan.FromSeconds(190));
             await GeminiLiveService.SendAsync(client, new { type = "ready" }, lifetime.Token);
             receive = ReceiveRecordingAsync(client, input, lifetime);
-            var replyTask = live.StreamReplyAsync(await settings.GetModelAsync(lifetime.Token), user, input, history, snapshot,
-                metadata, await settings.GetVoiceAsync(lifetime.Token),
+            model = await settings.GetModelAsync(lifetime.Token);
+            voice = await settings.GetVoiceAsync(lifetime.Token);
+            phase = "stream";
+            var replyTask = live.StreamReplyAsync(model, user, input, history, snapshot,
+                metadata, voice,
                 async call => await callbacks.ExecuteAsync(userId, await input.Committed, requestId.ToString(),
                     call.GetProperty("name").GetString()!, call.GetProperty("args"), lifetime.Token),
                 async bytes => {
-                    if (bytes is null) await GeminiLiveService.SendAsync(client, new { type = "reset" }, lifetime.Token);
-                    else await client.SendAsync(bytes.AsMemory(), WebSocketMessageType.Binary, true, lifetime.Token);
-                }, lifetime.Token);
+                    if (bytes is null) { resets++; await GeminiLiveService.SendAsync(client, new { type = "reset" }, lifetime.Token); }
+                    else { firstAudioMs ??= elapsed.ElapsedMilliseconds; outputBytes += bytes.Length; await client.SendAsync(bytes.AsMemory(), WebSocketMessageType.Binary, true, lifetime.Token); }
+                }, lifetime.Token, async (role, text) => {
+                    if (role == "user") inputChars += text.Length; else outputChars += text.Length;
+                    if (streamTranscripts) await GeminiLiveService.SendAsync(client, new { type = "transcript", role, text }, lifetime.Token);
+                });
             generate = replyTask;
             await await Task.WhenAny(receive, replyTask);
             var reply = await replyTask;
+            phase = "complete";
             await GeminiLiveService.SendAsync(client, new { type = "complete", inputText = reply.InputText, outputText = reply.OutputText }, lifetime.Token);
         }
-        catch (Exception ex) when (!context.RequestAborted.IsCancellationRequested) {
-            // Only classify messages authored here. Provider exception text can
-            // contain URLs, keys, or conversation content and must stay private.
-            var reason = ex is InvalidDataException ? ex.Message switch {
-                "AI returned no audio." => "missing_reply_audio",
-                "AI reply too long." => "reply_audio_limit",
-                "Too many Live tool rounds." => "tool_round_limit",
-                "Live request failed." => "provider_request_failed",
-                _ => "invalid_data"
-            } : "stream_failed";
-            logs.CreateLogger("BanteraAI").LogWarning("AI voice stream ended: {ErrorType}; reason={Reason}.", ex.GetType().Name, reason);
+        catch (Exception ex) {
+            var reason = AiChatDiagnostics.Reason(ex, context.RequestAborted.IsCancellationRequested);
+            await diagnostics.FailureAsync(userId, user.LearningLanguage, "/ws/chat/ai/voice", correlationId,
+                ex, new { phase, voice, committed = input?.Committed.IsCompletedSuccessfully == true,
+                    inputBytes = input?.ByteCount ?? 0, outputBytes, inputChars, outputChars, resets, firstAudioMs,
+                    clientState = client.State.ToString() }, (int)elapsed.ElapsedMilliseconds, model,
+                context.RequestAborted.IsCancellationRequested);
+            logs.CreateLogger("BanteraAI").LogWarning(
+                "AI voice stream ended: {ErrorType}; reason={Reason}; committed={Committed}; inputBytes={InputBytes}; outputBytes={OutputBytes}; elapsedMs={ElapsedMs}.",
+                ex.GetType().Name, reason, input?.Committed.IsCompletedSuccessfully == true, input?.ByteCount ?? 0, outputBytes, elapsed.ElapsedMilliseconds);
             // Wait for the only output producer before sending a generic terminal error.
             await lifetime.CancelAsync();
             if (generate is not null) try { await generate; } catch { }
@@ -74,6 +90,10 @@ public static class AiVoiceMessageEndpoint
             if (generate is not null) try { await generate; } catch { }
         }
     }
+
+    // Old released clients reject unknown frame types, so this is opt-in.
+    public static bool WantsTranscripts(JsonElement start) =>
+        start.TryGetProperty("streamTranscripts", out var value) && value.ValueKind == JsonValueKind.True;
 
     public static async Task ReceiveRecordingAsync(WebSocket client, AiVoiceInput input, CancellationTokenSource lifetime)
     {

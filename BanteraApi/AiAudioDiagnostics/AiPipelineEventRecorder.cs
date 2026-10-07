@@ -62,7 +62,8 @@ public sealed class AiPipelineEventRecorder(IServiceScopeFactory scopeFactory, I
                 DurationMs = durationMs,
             });
             // Not the request's token: record even when the generation timed out.
-            await db.SaveChangesAsync(CancellationToken.None);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            await db.SaveChangesAsync(deadline.Token);
         }
         catch (Exception ex)
         {

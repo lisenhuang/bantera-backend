@@ -14,6 +14,7 @@ public sealed class AiVoiceInput
     private int length;
     private bool complete;
     public Task<AiClientMetadata> Committed => committed.Task;
+    public int ByteCount { get { lock (gate) return length; } }
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     public void Add(byte[] pcm)
     {

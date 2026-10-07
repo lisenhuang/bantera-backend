@@ -49,8 +49,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<AiCallback>(e => {
             e.ToTable("ai_callbacks"); e.HasKey(x => x.Id);
             e.Property(x => x.RequestKey).HasMaxLength(200);
+            e.Property(x => x.Reminder).HasMaxLength(500);
             e.Property(x => x.TimeZone).HasMaxLength(100);
             e.Property(x => x.Status).HasMaxLength(20);
+            e.Property(x => x.Delivery).HasMaxLength(20).HasDefaultValue("call");
+            e.Property(x => x.Transcript).HasMaxLength(12000);
+            e.Property(x => x.Language).HasMaxLength(50);
             e.HasIndex(x => new { x.UserId, x.RequestKey }).IsUnique();
             e.HasIndex(x => new { x.Status, x.DueAt });
             e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);

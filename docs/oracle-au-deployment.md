@@ -195,3 +195,179 @@ This restores `cloudflared-20261007-2` and backend 1.0.162, retaining the websit
 and current database writes. The active release record remains
 `/home/ubuntu/releases/bantera-current.json`. Derive the next release from that
 record, rather than reusing names/ports from this controller.
+
+
+## 7 October 2026: AI greetings and callback reminders (release 4)
+
+Release `/home/ubuntu/releases/bantera-20261007-4` completed at
+02:42:03 UTC. The active record now selects:
+
+- Backend **1.0.165**, container `bantera-api-20261007-4`, loopback port 18084.
+- Website **0.1.58**, rebuilt from unchanged commit `0a3ab34` as
+  `bantera-website-20261007-4`, loopback port 13003. Its public deployment
+  marker is `bantera-20261007-4`.
+- Connector `cloudflared-20261007-4`, readiness port 12004. Only the two
+  Bantera origins changed; tunnel identity, credentials, image, networks
+  and unrelated routes were preserved.
+
+Backend source is the reviewed working tree based on `19b4ea2`, including
+first-meeting greetings and required callback reminder notes. Compatibility
+is **GO for existing published apps**: metadata fields are optional and
+migration `20261007022443_AddAiCallbackReminder` only adds nullable
+`ai_callbacks.Reminder` (`varchar(500)`). Existing callback rows remain valid.
+No new production settings are required. The 3,260,911-byte pre-migration
+PostgreSQL backup passed archive validation; the applied migration and column
+were checked in production. Startup logs contained no error entries at staging.
+
+Both candidates passed local checks before the rolling connector handover.
+Public API version, website release marker, home/download/login pages,
+admin authentication redirects/rejections and public lesson listing passed.
+All **128/128** monitored HTTP samples returned 200 from 02:39:50 through
+02:42:02 UTC. This verifies observed HTTP availability, not uninterrupted
+individual live calls or real Gemini/APNs conversations.
+
+The release directory retains source archive hashes, base commits and dirty
+file lists in `source-manifest.json`, private runtime snapshots, database
+backup, candidate verification and build/promotion/availability logs.
+Source was deployed without creating commits or pushing Git branches.
+
+Rollback for this release:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261007-4/deploy.py rollback
+```
+
+This restores `cloudflared-20261007-3`, backend **1.0.163** and website
+`bantera-website-20261007-1` (**0.1.58**). Retained application containers
+remain available. Leave the nullable reminder column and current database
+writes intact; do not restore the backup as an application rollback.
+
+
+## 7 October 2026: voice response recovery (release 5)
+
+Prepared `/home/ubuntu/releases/bantera-20261007-5` with backend **1.0.166**
+and website **0.1.58**. The backend adds stalled-reply renewal, active-call
+quota recovery and noninterrupting clock updates. No new migrations or
+configuration are required; old app contracts remain compatible.
+
+Staging succeeded at 03:50:02 UTC on 7 October 2026. Containers are
+`bantera-api-20261007-5` (18085) and `bantera-website-20261007-5` (13004),
+with an unstarted `cloudflared-20261007-5` (12005). The first cached website
+image retained the previous deployment marker and failed staging, before
+traffic was changed. A fresh build of
+`bantera-website:bantera-20261007-5-verified` passed the marker check; the
+isolated failed candidate was stopped and renamed with `-staging-failed`.
+For future release markers, set fresh file timestamps or explicitly invalidate
+the build cache, and always verify the served marker.
+
+Promotion completed at **04:18:01 UTC** after SSH access recovered. The active
+record selects release 5. Both public domains serve the expected version and
+marker; all **128/128** monitored HTTP samples succeeded from 04:15:49 through
+04:18:01 UTC. The verified pre-release database backup is **3,261,051 bytes**.
+Public home/download/login, admin redirect, public lesson listing and voice
+route authentication checks passed. Local SSH/DNS access was intermittent,
+while server-side rollout checks remained healthy.
+
+Rollback:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261007-5/deploy.py rollback
+```
+
+This restores connector `cloudflared-20261007-4`, backend **1.0.165** and the
+release 4 website, preserving current database writes. Runtime snapshots,
+source manifests and build/staging/promotion/availability logs remain in the
+release directory. No commit or push was performed.
+
+Local validation: 571 backend tests passed (6 opt-in tests skipped), followed
+by two explicit real-model voice/callback-tool tests, both passed; first audio
+was approximately 1.9 and 2.1 seconds after Send. Six focused app tests and
+analysis passed. Signed iOS **2.0.131+319**, built from `lib/main.dart`, was subsequently
+installed on the user's iPhone 17 Pro. Device metadata confirmed version
+2.0.131 and build 319. Installation did not run physical-device tests.
+
+## 7 October 2026: streamed replies and voice reminders (release 6)
+
+Release `/home/ubuntu/releases/bantera-20261007-6` completed at **10:11:10 UTC**.
+Backend **1.0.168** and website **0.1.59** are live through
+`cloudflared-20261007-6` (readiness port 12006). Application containers are
+`bantera-api-20261007-6` (18086) and `bantera-website-20261007-6` (13005).
+The current release record selects release 6.
+
+The additive `20261007094604_AddAiVoiceReminders` migration preserves old
+callbacks as calls. New voice reminders use `queued`, a status older callback
+workers do not claim, so retaining old application containers cannot turn
+voice reminders into phone calls. Streamed transcript events require an explicit
+client opt-in; existing voice clients retain their response contract. No new
+environment variables are required. Existing APNs credentials deliver ordinary
+voice-reminder notifications; CallKit remains for explicit call requests.
+
+A verified PostgreSQL backup of **3,263,158 bytes**, private runtime snapshots,
+source archive hashes and build/staging/promotion logs remain in the release
+directory. All **128/128** monitored public HTTP samples succeeded between
+10:08:58 and 10:11:09 UTC. Public API version, website release marker,
+home/download/dashboard login, public lessons and authentication gates passed.
+The backend startup log had no error-level or unhandled-exception entries in
+the checked startup window. This verifies HTTP availability, not an end-to-end
+physical-device reminder delivery.
+
+Rollback:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261007-6/deploy.py rollback
+```
+
+This restores connector `cloudflared-20261007-5`, backend **1.0.166** and
+website **0.1.58**, then stops the candidate API worker after restored public
+health checks pass. Keep the additive columns and current database writes;
+do not restore the backup for an application rollback. Voice reminders require
+release 6's worker and do not run while rolled back.
+
+Validation: 578 backend tests passed (5 opt-in tests skipped), with explicit
+real-model reminder selection and voice/callback regression checks also passed.
+The Flutter feature suite passed 31 tests. Sources were deployed with their
+reviewed uncommitted changes; no commit or push was performed.
+
+Signed iOS **2.0.133+321**, built from `lib/main.dart`, was installed on the
+user's iPhone 17 Pro after deployment. Device metadata confirmed version
+2.0.133 and build 321. Signature verification and final controller analysis
+passed. No physical-device tests were run.
+
+## 8 October 2026: incomplete AI reply diagnostics
+
+Release **`bantera-20261008-1`** completed at **00:24:01 NZDT** on 8 October
+(7 October 11:24:01 UTC). Backend **1.0.169** runs in
+`bantera-api-20261008-1` (loopback **18087**), behind
+`cloudflared-20261008-1` (readiness **12007**). Website **0.1.59** remains in
+`bantera-website-20261007-6` on 13005, with its original release marker.
+The active release record selects this backend/website combination.
+
+No new migration or environment variables were required. The existing
+`ai_pipeline_events` table now receives technical AI chat failure diagnostics;
+old clients remain compatible. An authenticated synthetic diagnostic was saved
+and correlated in the production database before promotion, invalid categories
+were rejected, and the synthetic row was removed. Public unauthenticated POSTs
+to the new endpoint return 401. Startup error checks found no error-level or
+unhandled-exception entries.
+
+All **128/128** monitored public HTTP samples succeeded from 11:21:49 through
+11:24:00 UTC. The verified pre-release database backup is **3,264,045 bytes**.
+The release directory contains private runtime snapshots, source archive hashes,
+staging/build/promotion logs and the diagnostics verification script. Production
+conversation content was not used for the smoke test.
+
+Rollback:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261008-1/deploy.py rollback
+```
+
+This restores connector `cloudflared-20261007-6` and backend **1.0.168**, keeps
+the existing website, and stops the candidate API after restored public health
+checks pass. No database restore is part of application rollback. No Git commit
+or push was performed.
+
+Signed iOS **2.0.134+322** was then installed on the user's iPhone 17 Pro.
+CoreDevice confirmed version 2.0.134 and build 322. Signature verification passed;
+the build uses `lib/main.dart`. No physical-device tests or diagnostic launch
+were performed.

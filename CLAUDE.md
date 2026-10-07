@@ -26,7 +26,7 @@ Every time any code is modified in this codebase, bump the version in `BanteraAp
 <Version>1.0.37</Version>  →  <Version>1.0.38</Version>
 ```
 
-- Increment the patch segment (third number)
+- Choose the version from the changes: patch for fixes, minor for new features, major for a substantial redesign or breaking changes. Reset lower segments when increasing minor or major; do not automatically use another patch for a feature release. A major version bump does not remove the API compatibility requirements below.
 - Do this as part of the same edit batch — not only before commits
 - After changing the version, run `dotnet build` to verify the build succeeds before finishing
 

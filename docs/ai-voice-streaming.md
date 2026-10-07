@@ -88,3 +88,181 @@ Production deployment verdict: **GO** for existing published apps. No API shape,
 authentication, schema, migration, or environment-variable changes. Runtime
 verification requires API version 1.0.163, unauthenticated voice routes rejected,
 and both public domains healthy. Retain the previous connector for rollback.
+
+
+## First-meeting metadata (1.0.164)
+
+All three AI transports accept optional boolean `metadata.hasMetBanteraAi`.
+It is an account-scoped local app preference passed for inference, with no new
+server persistence. A prior model turn in supplied history also identifies a
+returning learner, covering old clients and stale/absent flags. The shared Live
+system prompt introduces Bantera AI only on the first conversation across voice
+messages and calls. Returning voice-message replies answer directly; each fresh
+call is explicitly prompted to speak first with a warm, varied greeting.
+Reconnections and the final farewell never restart the introduction.
+
+Name priority is the latest explicitly supplied personal/preferred name in the
+available conversation, then the profile name. Do not infer names from email
+addresses or claim memories absent from supplied context. The shared prompt
+emphasises friendly, level-appropriate speaking and listening practice.
+
+Deployment compatibility: GO for existing published app clients. The metadata
+field is optional and existing requests/responses stay valid. No migration, new
+configuration, secret or DI dependency. Deploy the backend and update the app to
+get durable first-meeting behaviour after chat history is cleared. Runtime smoke
+check: first voice reply introduces once, then a new call greets first without
+another introduction; subsequent voice replies answer directly. Prompt/unit
+tests establish the rules and state flow, not a guarantee of model wording.
+
+
+## Callback reminder topic (1.0.165)
+
+The schedule_callback tool now requires a learner-provided reminder (1–500 trimmed
+characters). For a time-only request the model must ask what the call should remind
+them about and wait; it must not assume language practice. The service returns
+needsReminder before any database access/write if the note is absent or invalid.
+Times are still interpreted with the learner's timezone and trusted server clock.
+
+The short note is scheduling metadata stored in ai_callbacks.Reminder, separate
+from device-local chat history and audio. It follows the existing seven-day cleanup.
+It is not placed in APNs payloads or lock-screen notification text. The app supplies
+callbackId when answering; the server reads a reminder only for that authenticated
+user and an answered callback. A fresh callback greeting states the reminder,
+while connection renewal does not repeat it. Old schedules without notes retain
+the normal greeting. Privacy/help copy in all 17 app locales explains the storage.
+
+Deployment compatibility: GO with the additive AddAiCallbackReminder migration.
+The Reminder column is nullable, so existing rows and old app clients remain valid.
+Apply the migration before serving the new backend (normal startup migration also
+handles it). No new environment variable or secret is required. Rollback to older
+code can leave this optional column in place; do not drop it and lose reminders.
+A new app build is needed to identify the exact callback reminder. Verify a time-only
+request asks a follow-up, a time+topic creates one schedule, and answering the
+callback says its reminder. Local PostgreSQL tests cover persistence, idempotency,
+missing-topic rejection and owner/status isolation. Real model wording and push
+arrival still require a live smoke check after release.
+
+
+### Reply recovery (7 October, backend 1.0.166 / iOS 2.0.131+319)
+
+A production voice stream reached its request deadline without completing a
+reply. Direct checks of all 14 configured keys returned audio, so this did not
+establish a general quota outage. Keep timeout, quota and session expiry distinct.
+
+- A voice reply gets a 20-second audio-progress deadline after Send, never while
+  recording. A stalled reply renews once with the same key and bounded recording
+  and context; partial output is reset and callback tool results are memoized.
+- Explicit quota failures rotate eligible keys. Active-call quota failures now
+  cool down the exact connected key and send `reconnect: quota_exceeded`; session
+  expiry still sends `session_expired`. A silent opening sends `response_timeout`.
+  The updated app handles all three with bounded renewal and its existing timer.
+- Clock notes during audio use `realtimeInput.text`. Do not send `clientContent`
+  on each input transcription: Google documents that it interrupts generation.
+  Initial history and the explicit call greeting still use `clientContent`.
+- Stream failure logs include safe reason, commit state, byte counts and elapsed
+  time, never transcript contents, keys, push tokens or raw provider exceptions.
+
+Reference: [Google Live WebSocket message semantics](https://ai.google.dev/api/live#bidigeneratecontentclientcontent).
+
+## Progressive voice-message bubbles (1.0.167 / app 2.0.132+320)
+
+New apps send `streamTranscripts: true` in the initial `start` frame. After commit,
+the backend forwards incremental `{type: "transcript", role: "user" | "model",
+text: "..."}` frames alongside the existing binary PCM audio. Text is a delta to
+append; `complete.inputText` and `complete.outputText` remain authoritative full
+transcripts. Gemini's transcription events are independent of audio chunks and
+must not be assumed to align word-for-word with playback.
+
+The first model audio or transcript creates a provisional AI bubble and replaces
+Sending with replying. Transcript and received-audio duration grow as data arrives.
+`reset` clears partial captions and audio while keeping the same provisional bubble;
+successful completion saves that bubble once. Failed or cancelled partial replies
+are not written to history. Translation remains an on-device, manual action after
+the reply completes.
+
+Deployment verdict: **GO for existing published apps**. Transcript frames require
+an explicit boolean opt-in because older clients reject unknown frame types.
+Without opt-in, the existing wire format is unchanged. No new migration, environment
+variable, secret or service registration is required by this change. Deploy the
+backend and update the app for progressive captions; the new app can still show
+the early audio bubble against the previous backend. Verify `/version` is 1.0.167,
+both public domains remain healthy, and a short voice message displays its AI
+bubble before completion. Retain the previous release for rollback.
+
+Verification: 577 backend tests passed (six opt-in checks skipped in the normal
+run), and the separately enabled real-model transcript check passed. In that
+synthetic sample, first audio arrived 2,460 ms after Send, first transcript at
+2,459 ms, and completion at 3,776 ms. Concatenated streamed transcripts matched
+the final response. These timings are a sample, not a production latency promise.
+
+## Voice reminders and explicit calls (1.0.168 / app 2.0.133+321)
+
+Reminder-only requests use `schedule_reminder`, standard APNs alerts, and a voice
+message in the AI conversation. Only explicit requests for a call use
+`schedule_callback`, which requires `explicitCallRequested: true`. Time-only
+requests still require a reminder topic. New client metadata carries a separate
+`alertPushToken`; missing support/notification permission returns an unavailable
+result and must never cause the model to substitute a call.
+
+The additive `AddAiVoiceReminders` migration adds delivery kind, temporary audio,
+transcript/language, and generation attempt fields to `ai_callbacks`. Existing
+rows default to calls. Message reminders use `queued`, never `scheduled`, so old
+callback workers retained during a rolling deploy cannot ring for them. A separate
+worker claims generation atomically, retries up to three times, and checks for
+cancellation before publishing a ready message. Normal message notifications carry
+no reminder text. Receipt/cancellation clears audio and transcript; seven-day
+schedule cleanup provides the expiry. App privacy and Usage copy explain this
+temporary delivery storage in all 17 languages.
+
+Authenticated `/api/chat/ai/reminders` lists the owner's schedules; per-ID audio,
+receipt and cancellation routes enforce the same owner. The app saves audio and
+text locally before acknowledging receipt and uses stable IDs for retry deduplication.
+The Reminders menu lists upcoming items first with voice-message/call labels,
+local date/time, status and confirmation before cancellation.
+
+**Deployment GO for existing published apps**, after backing up and applying the
+additive migration. No new env vars, secrets or DI services external to the existing
+Gemini/APNs configuration. Old clients retain their wire formats and cannot request
+message delivery without the new alert-token metadata. Keep the previous release
+for application rollback; do not drop the new columns or restore the old database.
+Public smoke checks must confirm version 1.0.168, both domains, auth rejection for
+all new routes, and healthy reminder-worker startup with the migrated database.
+
+## Incomplete reply diagnostics (1.0.169 / iOS 2.0.134+322)
+
+Voice-stream terminal failures now persist to the existing `ai_pipeline_events`
+table, alongside the console warning. HTTP voice fallback and real-time call
+failures also record an event. The voice-stream request UUID correlates these
+events with best-effort app reports sent to authenticated
+`POST /api/chat/ai/diagnostics`. This endpoint accepts bounded technical fields,
+has a 4 KiB request limit and a 20-per-10-minute rate limit. The authenticated
+account supplies UserId; the client cannot select another account.
+
+Use the admin-only `GET /api/admin/ai-pipeline/events?stage=ai_voice_server`
+or `stage=ai_voice_client`, then match `detailJson.requestId`. Existing 90-day
+cleanup applies. Diagnostics writes have a three-second deadline and cannot
+turn a chat or generation into a failure. Client reports are best effort: an
+offline phone, closed app, or old backend may prevent delivery.
+
+Recorded information includes category, operation phase, model/voice on the
+server, app version on the client, audio byte counts, elapsed time, first-audio
+time, reset count, transcript character counts, committed state, numeric
+provider/socket status, native error code where safe, and server method names.
+Never include chat text/audio, tool arguments, reminders, prompts, learning
+snapshots, raw exception messages, provider URLs, credentials or push tokens.
+Quota, session expiry, stalled response, request deadline, client disconnect,
+playback failure and local-save failure have distinct categories.
+
+The app freezes a failed stream before saving its partial reply locally. The
+same bubble remains, marked **Reply interrupted**, and can replay the received
+audio. Partial model replies are excluded from future AI context and cannot be
+submitted as a user's Retry. A playback-drain failure after a complete saved
+reply does not incorrectly mark the user's message as unsent. Cleanup errors
+cannot prevent the composer from leaving its busy state. A failure does not
+automatically resend a committed voice message or repeat reminder side effects.
+
+**Deployment GO for published apps:** wire formats remain compatible; the
+diagnostics endpoint is additive. This patch needs no migration or new environment
+variables. Before release, verify existing database availability, DI startup,
+unauthenticated diagnostics rejection, and a correlated metadata-only test event.
+These diagnostics cannot reconstruct a failure from before their deployment.

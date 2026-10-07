@@ -13,6 +13,11 @@ public sealed class AiLiveSessionExpiredException : Exception
     public AiLiveSessionExpiredException() : base("Live session needs renewal.") { }
 }
 
+public sealed class AiLiveQuotaUnavailableException : Exception
+{
+    public AiLiveQuotaUnavailableException() : base("Live capacity temporarily unavailable.") { }
+}
+
 public sealed record AiVoiceReply(byte[] Pcm, string InputText, string OutputText);
 public sealed record AiContextTurn(string Role, string Text);
 
@@ -31,6 +36,12 @@ public sealed class BanteraAiSessions
 public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKeyHealthService health,
     ILogger<GeminiLiveService> logger)
 {
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<WebSocket, Action> quotaHandlers = new();
+    public void ReportCallQuota(WebSocket socket)
+    {
+        if (quotaHandlers.TryGetValue(socket, out var report)) report();
+    }
+
     public static object Setup(string model, string prompt, bool voiceMessage, string voice = BanteraAiVoices.Default) => new {
         setup = new {
             model = "models/" + model,
@@ -47,7 +58,14 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
     public async Task<ClientWebSocket> ConnectAsync(string model, User user, bool voiceMessage,
         IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata = null, string voice = BanteraAiVoices.Default)
     {
-        return await WithKeysAsync(model, (key, token) => ConnectKeyAsync(key, model, user, voiceMessage, history, token, metadata, voice), ct);
+        return await WithKeysAsync(model, async (key, token) => {
+            var socket = await ConnectKeyAsync(key, model, user, voiceMessage, history, token, metadata, voice);
+            quotaHandlers.Add(socket, () => {
+                health.CoolDown(key, model);
+                logger.LogWarning("Bantera AI active call quota reached; key cooled down before reconnection.");
+            });
+            return socket;
+        }, ct);
     }
 
     // Retry only explicit provider quota failures. Every eligible key gets at most one attempt.
@@ -60,6 +78,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             try {
                 for (var renewals = 0; ; renewals++) {
                     try { return await attempt(key, ct); }
+                    catch (AiLiveResponseTimeoutException) when (renewals < 1 && !ct.IsCancellationRequested) { }
                     catch (AiLiveSessionExpiredException) when (renewals < 2 && !ct.IsCancellationRequested) {
                         // A fresh session replays the caller's context and bounded recording.
                         // Expiry is not evidence that this key has exhausted its quota.
@@ -69,7 +88,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests && !ct.IsCancellationRequested)
             { coolDown(key); }
         }
-        throw new InvalidOperationException("AI connection unavailable.");
+        throw new AiLiveQuotaUnavailableException();
     }
 
     private async Task<T> WithKeysAsync<T>(string model, Func<string, CancellationToken, Task<T>> attempt, CancellationToken ct)
@@ -91,7 +110,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         try
         {
             await socket.ConnectAsync(new Uri("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" + Uri.EscapeDataString(key)), timeout.Token);
-            await SendAsync(socket, Setup(model, BanteraAiIdentity.Prompt(user) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).TimePrompt, voiceMessage, voice), timeout.Token);
+            await SendAsync(socket, Setup(model, BanteraAiIdentity.Prompt(user) + AiCallPolicy.IntroductionPolicy(metadata, history) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).TimePrompt, voiceMessage, voice), timeout.Token);
             using var ready = await ReceiveJsonAsync(socket, timeout.Token);
             if (!ready.RootElement.TryGetProperty("setupComplete", out _)) throw new InvalidDataException("Live setup was not accepted.");
             if (history.Count > 0)
@@ -143,16 +162,21 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
 
     public async Task<AiVoiceReply> StreamReplyAsync(string model, User user, AiVoiceInput input,
         IReadOnlyList<AiContextTurn> history, JsonElement snapshot, AiClientMetadata metadata, string voice,
-        Func<JsonElement, Task<object>>? executeTool, Func<byte[]?, Task> output, CancellationToken ct)
+        Func<JsonElement, Task<object>>? executeTool, Func<byte[]?, Task> output, CancellationToken ct,
+        Func<string, string, Task>? transcript = null)
     {
         var tools = MemoizeTools(executeTool);
         var attempts = 0;
         return await WithKeysAsync(model, async (key, token) => {
             if (attempts++ > 0) await output(null); // Discard a partial response before replaying on another key.
             using var socket = await ConnectKeyAsync(key, model, user, true, history, token, metadata, voice);
-            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(token);
+            await using var watchdog = new AiReplyWatchdog(input.Committed, token);
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(watchdog.Token);
             var upload = UploadVoiceAsync(socket, input, attempt.Token);
-            var reply = ReadReplyAsync(socket, snapshot, tools, attempt.Token, output, upload);
+            var reply = ReadReplyAsync(socket, snapshot, tools, attempt.Token, async bytes => {
+                if (bytes is { Length: > 2 }) watchdog.Progress();
+                await output(bytes);
+            }, upload, transcript);
             try {
                 var first = await Task.WhenAny(upload, reply);
                 try { await first; }
@@ -167,6 +191,10 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 }
                 await upload;
                 return await reply;
+            }
+            catch (OperationCanceledException) when (watchdog.TimedOut && !token.IsCancellationRequested) {
+                logger.LogWarning("Bantera AI voice reply stalled after Send; renewing session without marking quota.");
+                throw new AiLiveResponseTimeoutException();
             }
             finally {
                 await attempt.CancelAsync();
@@ -183,21 +211,24 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         await foreach (var chunk in input.ReadAsync(ct)) await SendAudioAsync(socket, chunk, ct);
         // Commit carries the current device timezone; trusted server time is sampled now.
         var metadata = await input.Committed.WaitAsync(ct);
-        await SendAsync(socket, new { clientContent = new { turns = new[] { new { role = "user", parts = new[] {
-            new { text = "[Time context for this voice message; do not respond separately.]" + metadata.TimePrompt }
-        } } }, turnComplete = false } }, ct);
+        await SendAsync(socket, new { realtimeInput = new {
+            text = "[Time context for this voice message; do not respond separately.]" + metadata.TimePrompt
+        } }, ct);
         await SendAsync(socket, new { realtimeInput = new { activityEnd = new { } } }, ct);
     }
 
     public static async Task<AiVoiceReply> ReadReplyAsync(WebSocket socket, JsonElement snapshot,
         Func<JsonElement, Task<object>>? executeTool, CancellationToken ct,
-        Func<byte[]?, Task>? stream = null, Task? uploaded = null)
+        Func<byte[]?, Task>? stream = null, Task? uploaded = null,
+        Func<string, string, Task>? transcript = null)
     {
         using var audio = new MemoryStream();
         var input = new StringBuilder();
         var output = new StringBuilder();
         var awaitingToolReply = false;
         var toolRounds = 0;
+        var inputSent = 0;
+        var outputSent = 0;
         while (true)
         {
             using var json = await ReceiveJsonAsync(socket, ct);
@@ -219,6 +250,18 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             if (!json.RootElement.TryGetProperty("serverContent", out var content)) continue;
             AppendTranscript(content, "inputTranscription", input);
             AppendTranscript(content, "outputTranscription", output);
+            // Continue receiving provider frames during recording (including
+            // quota errors); buffer captions until the user has pressed Send.
+            if (transcript is not null && (uploaded is null || uploaded.IsCompletedSuccessfully)) {
+                if (input.Length > inputSent) {
+                    await transcript("user", input.ToString(inputSent, input.Length - inputSent));
+                    inputSent = input.Length;
+                }
+                if (output.Length > outputSent) {
+                    await transcript("model", output.ToString(outputSent, output.Length - outputSent));
+                    outputSent = output.Length;
+                }
+            }
             foreach (var chunk in AudioParts(content))
             {
                 if (audio.Length + chunk.Length > 24000 * 2 * 90) throw new InvalidDataException("AI reply too long.");
@@ -271,13 +314,23 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             var quota = (error.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.Number && code.TryGetInt32(out var status) && status == 429)
                 || (error.TryGetProperty("status", out var label) && label.ValueKind == JsonValueKind.String && label.GetString() == "RESOURCE_EXHAUSTED");
             var expired = error.TryGetProperty("status", out var expiry) && expiry.ValueKind == JsonValueKind.String && expiry.GetString() == "DEADLINE_EXCEEDED";
+            var providerCode = error.TryGetProperty("code", out var rawCode) && rawCode.ValueKind == JsonValueKind.Number && rawCode.TryGetInt32(out var number) ? number : (int?)null;
             json.Dispose();
             if (expired) throw new AiLiveSessionExpiredException();
             if (quota) throw new HttpRequestException("Live quota unavailable.", null, System.Net.HttpStatusCode.TooManyRequests);
-            throw new InvalidDataException("Live request failed.");
+            var failure = new InvalidDataException("Live request failed.");
+            if (providerCode is not null) failure.Data["providerCode"] = providerCode.Value;
+            throw failure;
         }
         return json;
     }
+    public static bool IsQuotaCloseReason(string reason) =>
+        reason.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) ||
+        reason.Contains("resource exhausted", StringComparison.OrdinalIgnoreCase) ||
+        reason.Contains("quota", StringComparison.OrdinalIgnoreCase) ||
+        reason.Contains("rate limit", StringComparison.OrdinalIgnoreCase) ||
+        reason.Contains("too many requests", StringComparison.OrdinalIgnoreCase);
+
     public static async Task<(byte[] Bytes, WebSocketMessageType Type)> ReceiveAsync(WebSocket socket, int maxBytes, CancellationToken ct)
     {
         using var data = new MemoryStream();
@@ -288,11 +341,13 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             part = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
             if (part.MessageType == WebSocketMessageType.Close) {
                 var reason = part.CloseStatusDescription ?? "";
-                if (reason.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) || reason.Contains("quota exceeded", StringComparison.OrdinalIgnoreCase))
+                if (IsQuotaCloseReason(reason))
                     throw new HttpRequestException("Live quota unavailable.", null, System.Net.HttpStatusCode.TooManyRequests);
                 if (reason.Contains("Deadline expired before operation could complete", StringComparison.OrdinalIgnoreCase))
                     throw new AiLiveSessionExpiredException();
-                throw new WebSocketException("Session closed.");
+                var failure = new WebSocketException("Session closed.");
+                if (part.CloseStatus is not null) failure.Data["closeCode"] = (int)part.CloseStatus.Value;
+                throw failure;
             }
             if (data.Length + part.Count > maxBytes) throw new InvalidDataException("Frame too large.");
             data.Write(buffer, 0, part.Count);

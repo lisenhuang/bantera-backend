@@ -27,7 +27,10 @@ public class AiVoiceStreamingTests
         Assert.Contains("audio/pcm;rate=16000", await socket.Sent.Reader.ReadAsync(timeout.Token));
         input.Commit(Metadata);
         await upload;
-        Assert.Contains("Pacific/Auckland", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        var clock = await socket.Sent.Reader.ReadAsync(timeout.Token);
+        Assert.Contains("Pacific/Auckland", clock);
+        Assert.Contains("realtimeInput", clock);
+        Assert.DoesNotContain("clientContent", clock);
         Assert.Contains("activityEnd", await socket.Sent.Reader.ReadAsync(timeout.Token));
         var replay = new List<int>();
         await foreach (var chunk in input.ReadAsync(timeout.Token)) replay.Add(chunk.Length);
@@ -140,6 +143,97 @@ public class AiVoiceStreamingTests
         Assert.Equal(preamble ? 4 : 2, reply.Pcm.Length);
         Assert.Equal("I will call you back.", reply.OutputText);
     }
+    [Fact]
+    public async Task StalledReplyRenewsOnceWithoutCoolingOrRotatingKey()
+    {
+        var attempts = new List<string>();
+        var result = await GeminiLiveService.TryKeysAsync(["a", "b"], (string key, CancellationToken _) => {
+            attempts.Add(key);
+            if (attempts.Count == 1) throw new AiLiveResponseTimeoutException();
+            return Task.FromResult("audio");
+        }, _ => Assert.Fail("A stalled reply is not quota"), default);
+        Assert.Equal("audio", result);
+        Assert.Equal(new[] { "a", "a" }, attempts);
+        var count = 0;
+        await Assert.ThrowsAsync<AiLiveResponseTimeoutException>(() => GeminiLiveService.TryKeysAsync<int>(["a", "b"], (_, _) => {
+            count++; throw new AiLiveResponseTimeoutException();
+        }, _ => Assert.Fail("Not quota"), default));
+        Assert.Equal(2, count);
+    }
+    [Fact]
+    public async Task ReplyDeadlineStartsAtCommitAndAudioProgressExtendsIt()
+    {
+        var commit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var watchdog = new AiReplyWatchdog(commit.Task, default, TimeSpan.FromMilliseconds(200));
+        await Task.Delay(250);
+        Assert.False(watchdog.Token.IsCancellationRequested);
+        commit.SetResult();
+        await Task.Delay(100);
+        watchdog.Progress();
+        await Task.Delay(130);
+        Assert.False(watchdog.Token.IsCancellationRequested);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Delay(2000, watchdog.Token));
+        Assert.True(watchdog.TimedOut);
+    }
+    [Fact]
+    public async Task ParentCancellationIsNotAStalledProvider()
+    {
+        using var parent = new CancellationTokenSource();
+        await using var watchdog = new AiReplyWatchdog(Task.CompletedTask, parent.Token);
+        await parent.CancelAsync();
+        Assert.False(watchdog.TimedOut);
+    }
+    [Theory]
+    [InlineData("Resource exhausted. Please try again later.", true)]
+    [InlineData("Quota exceeded for concurrent sessions", true)]
+    [InlineData("Rate limit exceeded", true)]
+    [InlineData("RESOURCE_EXHAUSTED", true)]
+    [InlineData("Deadline expired before operation could complete", false)]
+    [InlineData("Internal server error", false)]
+    public void CloseReasonsDistinguishQuotaFromSessionOrServiceErrors(string reason, bool quota) =>
+        Assert.Equal(quota, GeminiLiveService.IsQuotaCloseReason(reason));
+
+    [Fact]
+    public async Task TranscriptFragmentsArriveBeforeCompletionAndFinalTextMatches()
+    {
+        using var socket = new Socket();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var fragments = new List<(string Role, string Text)>();
+        var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var task = GeminiLiveService.ReadReplyAsync(socket, default, null, timeout.Token, transcript: (role, text) => {
+            fragments.Add((role, text)); first.TrySetResult(); return Task.CompletedTask;
+        });
+        socket.Incoming.Writer.TryWrite("""{"serverContent":{"outputTranscription":{"text":"Hello "}}}""");
+        await first.Task.WaitAsync(timeout.Token);
+        Assert.False(task.IsCompleted);
+        socket.Incoming.Writer.TryWrite("""{"serverContent":{"inputTranscription":{"text":"Hi"},"outputTranscription":{"text":"there"},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AQI="}}]},"turnComplete":true}}""");
+        var reply = await task;
+        Assert.Equal("Hello there", reply.OutputText);
+        Assert.Equal(new[] { ("model", "Hello "), ("user", "Hi"), ("model", "there") }, fragments);
+    }
+    [Fact]
+    public async Task PreCommitTranscriptsStayBufferedWithoutBlockingQuotaDetection()
+    {
+        using var socket = new Socket();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var upload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var task = GeminiLiveService.ReadReplyAsync(socket, default, null, timeout.Token,
+            uploaded: upload.Task, transcript: (_, _) => { Assert.Fail("Not committed"); return Task.CompletedTask; });
+        socket.Incoming.Writer.TryWrite("""{"serverContent":{"inputTranscription":{"text":"private unfinished recording"}}}""");
+        socket.Incoming.Writer.TryWrite("""{"error":{"code":429}}""");
+        await Assert.ThrowsAsync<HttpRequestException>(() => task);
+    }
+    [Theory]
+    [InlineData("{}", false)]
+    [InlineData("{\"streamTranscripts\":false}", false)]
+    [InlineData("{\"streamTranscripts\":true}", true)]
+    [InlineData("{\"streamTranscripts\":\"true\"}", false)]
+    public void TranscriptFramesRequireExplicitClientSupport(string start, bool expected)
+    {
+        using var json = JsonDocument.Parse(start);
+        Assert.Equal(expected, AiVoiceMessageEndpoint.WantsTranscripts(json.RootElement));
+    }
+
     private sealed class Socket(string? incoming = null) : WebSocket
     {
         public Channel<string> Incoming { get; } = Channel.CreateUnbounded<string>();

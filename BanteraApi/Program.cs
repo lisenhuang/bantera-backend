@@ -64,8 +64,10 @@ builder.Services.Configure<BanteraAiOptions>(builder.Configuration.GetSection("B
 builder.Services.AddScoped<BanteraAiSettings>();
 builder.Services.AddScoped<AiCallbackService>();
 builder.Services.AddHostedService<AiCallbackWorker>();
+builder.Services.AddHostedService<AiReminderWorker>();
 builder.Services.AddSingleton<BanteraAiSessions>();
 builder.Services.AddSingleton<GeminiLiveService>();
+builder.Services.AddSingleton<AiChatDiagnostics>();
 builder.Services.AddScoped<ChatCallSettingsService>();
 builder.Services.Configure<CloudflareTurnSettings>(builder.Configuration.GetSection(CloudflareTurnSettings.Section));
 builder.Services.AddHttpClient<ChatIceServersService>(client =>
@@ -196,6 +198,11 @@ builder.Services.AddRateLimiter(opts =>
             Window = TimeSpan.FromMinutes(5),
             QueueLimit = 0,
         }));
+
+    opts.AddPolicy("ai-diagnostics", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: ctx.User.FindFirst("sub")?.Value ?? GetClientIp(ctx),
+        factory: _ => new FixedWindowRateLimiterOptions
+        { PermitLimit = 20, Window = TimeSpan.FromMinutes(10), QueueLimit = 0 }));
 
     opts.AddPolicy("website-analytics", _ => RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: "website", factory: _ => new FixedWindowRateLimiterOptions
