@@ -84,15 +84,24 @@ public static class AiVoiceMessageEndpoint
             } catch { }
         }
         finally {
-            // Close output first: cancelling ReceiveAsync aborts a .NET WebSocket.
-            if (client.State == WebSocketState.Open) try {
-                using var end = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                await client.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Voice message ended", end.Token);
-            } catch { }
-            await lifetime.CancelAsync();
-            if (receive is not null) try { await receive; } catch { }
+            await CloseClientAsync(client, receive, lifetime);
             if (generate is not null) try { await generate; } catch { }
         }
+    }
+
+    public static async Task CloseClientAsync(WebSocket client, Task? receive, CancellationTokenSource lifetime)
+    {
+        // Cancelling an outstanding .NET ReceiveAsync aborts the transport. Do
+        // not race that abort against the final reply and close frames: let the
+        // existing receive loop consume the peer's close acknowledgement first.
+        using var end = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        try {
+            if (client.State == WebSocketState.Open)
+                await client.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Voice message ended", end.Token);
+            if (receive is not null) await receive.WaitAsync(end.Token);
+        } catch { /* Failed/disconnected peers still get bounded cleanup. */ }
+        await lifetime.CancelAsync();
+        if (receive is not null) try { await receive; } catch { }
     }
 
     // Old released clients reject unknown frame types, so this is opt-in.

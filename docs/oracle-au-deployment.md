@@ -527,3 +527,42 @@ App **2.4.0 (327)**, commit `10a5e7069e266d08a70f6cee6d10c9b79cbe0ea5`,
 was pushed to main and passed the iOS build, but was **not installed** as part
 of this deployment. Device search and the background reply fix require that
 app update. Physical iPhone background playback remains a user smoke check.
+
+## Voice reply completion fix, 8 October 2026, 16:39 NZDT
+
+Release **`bantera-20261008-8`** succeeded at **2026-10-08 03:39:01 UTC**.
+Backend **1.4.1** runs in `bantera-api-20261008-8`, loopback **18094**, via
+`cloudflared-20261008-8`, readiness **12014**. Website **0.1.59** remains in
+`bantera-website-20261007-6`; its static release marker describes that website
+build, so use the API `/version` endpoint for the current backend version.
+
+This release waits for the WebSocket close acknowledgement before cancelling
+the receive loop, preventing an abort from racing the final voice reply frame.
+The app also processes queued completion frames before transport errors and
+closes the socket independently of queued playback. Regression tests fail with
+the old code and pass with the fixes: 46 focused backend tests and 15 app tests.
+**GO for existing published clients:** API contracts remain unchanged, with no
+new migration, configuration or secret required.
+
+The release source is based on backend commit
+`7895ee75cb5d7fbfeea2f43c56ccfcec191a95be` plus the reviewed working-tree fix.
+The archive hash and dirty paths are in `source-manifest.json` on the server.
+Private runtime snapshots and the verified **3,281,260-byte** PostgreSQL backup
+remain in the release directory. Staging reported no startup error entries.
+All **156/156** monitored public HTTP samples returned 200. Independent checks
+confirmed backend 1.4.1, the website home/download pages and its existing release
+marker. HTTP checks do not establish uninterrupted pre-existing WebSocket calls.
+
+Rollback:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261008-8/deploy.py rollback
+```
+
+This restores `cloudflared-20261008-7` and backend **1.4.0**, preserves the
+website and database writes, and stops the candidate after rollback health
+checks. Previous application containers and the connector are retained.
+
+Signed iOS **2.5.1 (331)** was installed afterward on the user's iPhone 17 Pro.
+CoreDevice confirmed version/build. Installation only: no app launch or
+physical-device test. No Git commit/push or App Store submission was performed.
