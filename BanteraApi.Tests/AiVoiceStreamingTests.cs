@@ -16,13 +16,14 @@ public class AiVoiceStreamingTests
         using var socket = new Socket();
         var input = new AiVoiceInput();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        var upload = GeminiLiveService.UploadTranscriptAsync(socket, input, "Could you help me practise?", timeout.Token);
+        var upload = GeminiLiveService.UploadTranscriptAsync(socket, input, "Could you help me practise?", timeout.Token, [new("model", "Hello", DateTimeOffset.UtcNow.AddDays(-3))]);
         Assert.False(upload.IsCompleted);
         input.Add(new byte[320]);
         input.Commit(Metadata);
         await upload;
         var frame = await socket.Sent.Reader.ReadAsync(timeout.Token);
         Assert.Contains("Could you help me practise?", frame);
+        Assert.Contains("returning_after_days", frame);
         Assert.Contains("Pacific/Auckland", frame);
         Assert.Contains("clientContent", frame);
         Assert.Contains("\"turnComplete\":true", frame);
@@ -177,7 +178,7 @@ public class AiVoiceStreamingTests
         input.Add(new byte[320]);
         using var socket = new Socket();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var upload = GeminiLiveService.UploadVoiceAsync(socket, input, timeout.Token);
+        var upload = GeminiLiveService.UploadVoiceAsync(socket, input, timeout.Token, history: [new("user", "Earlier message", DateTimeOffset.UtcNow.AddHours(-4))]);
         Assert.Contains("activityStart", await socket.Sent.Reader.ReadAsync(timeout.Token));
         Assert.Contains("audio/pcm;rate=16000", await socket.Sent.Reader.ReadAsync(timeout.Token));
         Assert.False(upload.IsCompleted);
@@ -188,6 +189,7 @@ public class AiVoiceStreamingTests
         await upload;
         var clock = await socket.Sent.Reader.ReadAsync(timeout.Token);
         Assert.Contains("Pacific/Auckland", clock);
+        Assert.Contains("returning_after_hours", clock);
         Assert.Contains("realtimeInput", clock);
         Assert.DoesNotContain("clientContent", clock);
         Assert.Contains("activityEnd", await socket.Sent.Reader.ReadAsync(timeout.Token));
@@ -334,6 +336,36 @@ public class AiVoiceStreamingTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Delay(2000, watchdog.Token));
         Assert.True(watchdog.TimedOut);
     }
+    [Fact]
+    public async Task BufferedSpeechDoesNotTripIdleDeadlineWhileWaitingForTurnCompletion()
+    {
+        await using var watchdog = new AiReplyWatchdog(Task.CompletedTask, default, TimeSpan.FromMilliseconds(100));
+        watchdog.AudioProgress(48000); // One second of audio delivered instantly.
+        await Task.Delay(250);
+        Assert.False(watchdog.TimedOut);
+        watchdog.Progress(); // A tool response must not shorten the playback allowance.
+        await Task.Delay(200);
+        Assert.False(watchdog.TimedOut);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Delay(2500, watchdog.Token));
+        Assert.True(watchdog.TimedOut); // A genuinely missing completion remains bounded.
+    }
+
+    [Fact]
+    public async Task PlaybackAllowanceResetsBetweenAttemptsAndParentCancellationStillWins()
+    {
+        using var parent = new CancellationTokenSource();
+        await using var watchdog = new AiReplyWatchdog(Task.CompletedTask, parent.Token, TimeSpan.FromMilliseconds(100));
+        watchdog.AudioProgress(48000 * 60);
+        watchdog.ResetAudio();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Delay(2000, watchdog.Token));
+        Assert.True(watchdog.TimedOut);
+        await using var second = new AiReplyWatchdog(Task.CompletedTask, parent.Token);
+        second.AudioProgress(48000 * 60);
+        await parent.CancelAsync();
+        Assert.True(second.Token.IsCancellationRequested);
+        Assert.False(second.TimedOut);
+    }
+
     [Fact]
     public async Task ParentCancellationIsNotAStalledProvider()
     {

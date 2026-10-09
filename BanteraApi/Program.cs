@@ -18,6 +18,7 @@ using BanteraApi.Gemini;
 using BanteraApi.Mcp;
 using BanteraApi.Mcp.Tools;
 using BanteraApi.Profile;
+using BanteraApi.OpenAi;
 using BanteraApi.RevAi;
 using BanteraApi.Storage;
 using BanteraApi.Videos;
@@ -48,6 +49,14 @@ builder.Services.Configure<GoogleSignInSettings>(builder.Configuration.GetSectio
 builder.Services.AddHttpClient<GoogleIdentityTokenValidator>();
 builder.Services.AddHttpClient<GoogleWebAuthService>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.Configure<ChatGptConnectionOptions>(builder.Configuration.GetSection("ChatGptConnection"));
+builder.Services.AddHttpClient<ChatGptConnection>(client => client.Timeout = TimeSpan.FromSeconds(20))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+    .RemoveAllLoggers();
+
+builder.Services.AddHttpClient<ChatGptSubscriptionClient>(client => client.Timeout = Timeout.InfiniteTimeSpan)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+    .RemoveAllLoggers();
 
 builder.Services.Configure<R2Settings>(builder.Configuration.GetSection(R2Settings.Section));
 builder.Services.AddSingleton<R2StorageService>();
@@ -198,6 +207,19 @@ builder.Services.AddRateLimiter(opts =>
             Window = TimeSpan.FromMinutes(5),
             QueueLimit = 0,
         }));
+
+    opts.AddPolicy("admin-chatgpt", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.User.FindFirst("sub")?.Value ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    opts.AddPolicy("admin-search-test", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: ctx.User.FindFirst("sub")?.Value ?? GetClientIp(ctx),
+        factory: _ => new FixedWindowRateLimiterOptions
+        { PermitLimit = 5, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+
+    opts.AddPolicy("ai-summary", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: ctx.User.FindFirst("sub")?.Value ?? GetClientIp(ctx),
+        factory: _ => new FixedWindowRateLimiterOptions
+        { PermitLimit = 30, Window = TimeSpan.FromMinutes(10), QueueLimit = 0 }));
 
     opts.AddPolicy("ai-diagnostics", ctx => RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: ctx.User.FindFirst("sub")?.Value ?? GetClientIp(ctx),
@@ -400,9 +422,10 @@ app.UseExceptionHandler(errorApp =>
 });
 
 app.UseForwardedHeaders();
-app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+// User-scoped limits need authenticated claims; reject unauthorised calls first.
+app.UseRateLimiter();
 
 // Records that an authenticated user was active today. Runs after the response is
 // produced and never throws, so it cannot affect request handling.
@@ -3094,6 +3117,8 @@ AdminEndpoints.Map(app);
 BanteraApi.WebsiteAnalytics.WebsiteAnalyticsEndpoints.Map(app);
 BanteraApi.Profile.WordActivityEndpoints.Map(app);
 AiSettingsEndpoints.Map(app);
+ChatGptConnectionEndpoints.Map(app);
+AiSearchTestEndpoint.Map(app);
 ChatCallSettingsEndpoints.Map(app);
 BanteraAiEndpoints.Map(app);
 AdminAudioTestEndpoints.Map(app);

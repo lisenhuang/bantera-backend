@@ -7,10 +7,10 @@ public class GeminiSettings
     /// <summary>Default text model (dialogue, transcript fixes, alignment). Admins can override it in the dashboard.</summary>
     public string TextModel { get; set; } = "gemini-flash-lite-latest";
 
-    /// <summary>Model for web-search generation. Only 2.5 supports the google_search tool on these keys.</summary>
+    /// <summary>Legacy config field. Server search now enforces AiSearchPolicy.GeminiModel unless an admin selects GPT.</summary>
     public string LatestNewsTextModel { get; set; } = "gemini-2.5-flash";
 
-    /// <summary>Only keys with this prefix can use web search; other calls may use any key.</summary>
+    /// <summary>Legacy config field. Search always enforces AiSearchPolicy.GeminiKeyPrefix; other calls may use any key.</summary>
     public string WebSearchKeyPrefix { get; set; } = "AIzaSy";
 
     /// <summary>Fallback line-timing model, used only when word-level transcription fails.</summary>

@@ -566,3 +566,372 @@ checks. Previous application containers and the connector are retained.
 Signed iOS **2.5.1 (331)** was installed afterward on the user's iPhone 17 Pro.
 CoreDevice confirmed version/build. Installation only: no app launch or
 physical-device test. No Git commit/push or App Store submission was performed.
+
+## Conversation timing and travel context, 9 October 2026, 12:10 NZDT
+
+Release **`bantera-20261009-1`** succeeded at **2026-10-08 23:10:06 UTC**.
+Backend **1.5.0** is live in `bantera-api-20261009-1` (loopback **18095**)
+through `cloudflared-20261009-1` (readiness **12017**). Website **0.1.61**
+continues in `bantera-website-20261008-10`, loopback **13007**. Its static
+release marker still describes that website build; `/version` is authoritative
+for the current backend.
+
+The release sends dated history to Gemini, derives conversational continuity
+from server time, and supplies guidance for relevant future plans and changes
+of device time zone. **GO for published clients:** timestamp/zone history fields
+are optional; old clients remain supported. No DB migration, new configuration,
+secret or persisted chat data is added. Production model/voice settings remain
+unchanged. Prompt guidance does not guarantee identical model wording.
+
+The source manifest records backend base `6b57441` plus reviewed working-tree
+changes and SHA-256 `d7f7385a146ee113756fd09019b17378d78656fa33657bd4f35a39f61f9d4fb8`.
+Runtime snapshots, controller and verified **3,302,029-byte** PostgreSQL backup
+are retained privately in the release directory. Candidate API/authentication,
+website and ingress checks passed; startup logs had no error entries.
+All **144/144** public HTTP availability samples returned 200 through the
+rolling handover and stability window. Independent public checks confirmed
+backend 1.5.0, home, download and the retained website marker. This does not
+establish uninterrupted pre-existing WebSocket calls.
+
+Rollback:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261009-1/deploy.py rollback
+```
+
+This restores `cloudflared-20261008-10`, API **1.4.1** and the prior active
+record, while retaining website 0.1.61 and current database writes. The old API
+and connector remain available. Promotion would automatically roll back on
+failed health checks.
+
+Validation: **106 backend tests passed**, four optional integration tests
+skipped; **35 app tests passed**, targeted Dart analysis clean, debug and signed
+release iOS builds passed. Signed iOS **2.7.0 (336)** was installed on the user's
+iPhone 17 Pro after deployment, without launching or testing on that phone.
+No commit/push or store submission was performed.
+
+## Private conversation history and admin search diagnostics, 9 October 2026
+
+Release **`bantera-20261009-3`** succeeded at **2026-10-09 00:13:20 UTC**.
+Backend **1.8.0** runs in `bantera-api-20261009-3` on loopback **18097**
+(image `bantera-backend:bantera-20261009-3-r2`); website **0.3.0** runs in
+`bantera-website-20261009-3` on **13009**. Connector
+`cloudflared-20261009-3` uses readiness port **12019**. Independent public
+checks confirmed both version markers; all **128/128** monitored public HTTP
+samples returned 200. Existing WebSocket continuity was not measured.
+
+**GO for published clients:** existing contracts remain compatible. No database
+migration, new secret or required configuration. Historical message timing is
+now private background context rather than replayed assistant dialogue; the
+resumption cache identity changed to avoid reusing contaminated sessions.
+Fresh and resumed real Gemini sessions both retained the seeded context.
+
+The admin search test verified grounded Gemini 2.5 Flash results in **3,289 ms**.
+Validation, per-admin rate limiting, anonymous HTTP 401 and non-admin HTTP 403
+checks passed. Authentication now precedes rate limiting so authenticated user
+limits do not accidentally share an IP bucket. The authenticated website rendered
+the search test panel successfully. No production model settings were changed.
+
+The release directory retains source manifests, archive hashes, protected runtime
+snapshots and a validated **3,305,138-byte** database backup. The revised candidate
+was rebuilt before promotion to correct middleware ordering.
+
+Rollback:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261009-3/deploy.py rollback
+```
+
+This restores `cloudflared-20261009-2`, backend **1.7.0** and website **0.2.0**
+while preserving current database writes. Previous containers are retained;
+promotion automatically rolls back if health checks fail.
+
+ChatGPT hosted-plan OAuth and GPT provider selection are **not enabled** in this
+release; they require an approved hosted-app registration. The iOS **2.8.1 (338)**
+legacy transcript cleanup was built locally but not installed in this deployment.
+No commit/push or store submission was performed.
+
+
+## Conversation memory, Live resumption and reasoning controls, 9 October 2026
+
+Release **`bantera-20261009-2`** succeeded at **2026-10-08 23:46:00 UTC**.
+Backend **1.7.0** runs in `bantera-api-20261009-2` on loopback **18096**
+(image `bantera-backend:bantera-20261009-2-r2`); website **0.2.0** runs in
+`bantera-website-20261009-2` on **13008**. Connector
+`cloudflared-20261009-2` uses readiness port **12018**. The active release record
+and independent public checks confirmed both versions, home/download HTTP 200,
+and unauthenticated admin/summary HTTP 401. All **128/128** monitored public
+HTTP samples returned 200. These checks do not establish uninterrupted existing
+WebSocket calls.
+
+**GO for published clients:** changes are additive. No DB migration, new secret
+or required configuration. Existing model/voice selections remain unchanged.
+The new summary endpoint processes context transiently; the phone stores the
+rolling summary locally. Eligible Live resumption handles are bounded and kept
+only in process memory. New sessions use device summary/recent history.
+
+The release directory retains source manifests/archive hashes, protected runtime
+snapshots and a validated **3,302,307-byte** database backup. The unpromoted API
+candidate was rebuilt as `r2` after a summary smoke test exposed a slow primary
+text model; per-model timeouts now allow the configured fallback to run. Two
+successive real summary updates then passed, preserving a preference and a
+cancelled-plan update. A real Gemini test separately verified session resumption
+retains context without replaying the earlier user message. Admin capability and
+invalid-reasoning checks passed, with production settings unchanged.
+
+Rollback:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261009-2/deploy.py rollback
+```
+
+This restores `cloudflared-20261009-1`, backend **1.5.0**, website **0.1.61**,
+and the previous release record while preserving current database writes.
+Previous containers are retained; promotion automatically rolls back on failed
+health checks.
+
+Validation included 119 focused backend tests (3 optional tests skipped), a
+real Live resumption test, 60 AI app tests and 16 memory/history tests repeated
+after the final fragment-handling edit. Website, debug iOS and signed release
+iOS builds passed. CoreDevice confirmed **2.8.0 (337)** installed on the user's
+iPhone 17 Pro. Installation only, without launching or testing on that phone.
+No commit/push or store submission was performed.
+
+## Admin ChatGPT OAuth connection panel, 9 October 2026
+
+Release **`bantera-20261009-4`** succeeded at **2026-10-09 00:39:20 UTC**.
+Backend **1.9.0** runs in `bantera-api-20261009-4` on loopback **18098**;
+website **0.4.0** runs in `bantera-website-20261009-4` on **13010**. Images are
+`bantera-backend:bantera-20261009-4` and `bantera-website:bantera-20261009-4`.
+Connector `cloudflared-20261009-4` uses readiness port **12020**.
+
+**GO for existing apps:** only additive admin endpoints, no DB migration, no
+changes to Gemini configuration or generation routing. No new configuration is
+needed to keep existing functionality working. ChatGPT OAuth remains inactive:
+the authenticated dashboard shows **Continue with ChatGPT** and **Setup required**.
+No OpenAI account was connected or subscription inference verified.
+
+Activation needs the approved hosted OpenAI client and `ChatGptConnection__*`
+settings documented in the backend README. Before activation, mount a dedicated
+persistent private credential directory into the API container; ensure future
+release controllers explicitly preserve this mount and its encryption key. The
+current unconfigured release does not create or use credential storage. Do not
+set `PlanAccessApproved` merely to enable the button without provider approval.
+
+The staged endpoint returned configured/connected false, rejected start with 409
+and anonymous requests with 401. After public promotion, authenticated dashboard
+HTML confirmed both the button and registered-callback setup guidance. All
+**128/128** monitored HTTP samples returned 200; this does not prove uninterrupted
+pre-existing WebSockets. A **3,306,198-byte** DB backup was validated before staging.
+
+Twenty-nine focused backend tests passed, including signed JWT validation,
+browser/admin-bound state, rejection of replay, encrypted storage, concurrent
+refresh serialization and cancellation. Backend and website builds and targeted
+ESLint passed. Real provider OAuth remains untested pending client registration.
+
+Rollback:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261009-4/deploy.py rollback
+```
+
+This restores `cloudflared-20261009-3`, backend **1.8.0** and website **0.3.0**,
+keeping current database writes. Prior containers remain available. Automatic
+rollback was enabled during promotion. No commit/push or app installation.
+
+## ChatGPT device-code connection, 9 October 2026
+
+Release **`bantera-20261009-5`** uses backend **1.10.0** and website **0.5.0**.
+Candidates: `bantera-api-20261009-5` on **18099**, `bantera-website-20261009-5`
+on **13011**, and `cloudflared-20261009-5` on readiness port **12021**. The
+controller, source archives/hashes, protected runtime snapshots and a validated
+**3,306,658-byte** database backup are retained in the release directory.
+
+**GO for existing app clients:** additive admin-only connection/model-test APIs,
+no DB migrations, no change to existing Gemini model routing. Device-code login
+replaces the dashboard's registered-hosted-client flow. A real OpenAI device-code
+request from the staged Oracle AU API succeeded; that test attempt was cancelled
+without authorising an account. Actual model and web-search access still require
+the admin to sign in and run the dashboard test. Twenty-one focused connection
+and provider tests passed; local backend/website builds and targeted lint passed.
+
+Persistent credential storage is now active. The dedicated host directory
+`/home/ubuntu/data/bantera-chatgpt` is mounted at `/var/lib/bantera/chatgpt` in the
+API. Its encryption key/settings are kept in the owner-only server file
+`/home/ubuntu/.config/bantera/chatgpt-storage.json`, injected as
+`ChatGptConnection__EncryptionKey` and `ChatGptConnection__StorageDirectory`.
+**Preserve that key and mount in every future release.** The release controller
+now clones application mounts in addition to environments/networks. Do not print
+or copy these secret values into a repository. Back up encrypted credentials and
+the key separately. Prior hosted OAuth registration fields are not required for
+this device-code flow.
+
+Rollback command:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261009-5/deploy.py rollback
+```
+
+This restores release 4 (backend 1.9.0, website 0.4.0) while keeping current DB
+writes and the new encrypted credential directory. The restored release will not
+use the device connection. Old application containers and connector are retained.
+
+The existing signed universal iOS **2.8.1 (338)** build was also installed on the
+paired iPad Air (5th generation). CoreDevice confirmed bundle/version; the app
+was not launched or tested on the physical device. No app code change, Git push,
+or store submission was performed for this release.
+
+Promotion completed at **2026-10-09 01:10:01 UTC**. The active release record and
+both public domains confirmed the expected versions. Authenticated dashboard
+HTML showed the device-code connection panel without the hosted-client setup
+blocker. All **146/146** public availability samples returned HTTP 200, including
+the stable post-switch window. This does not prove uninterrupted pre-existing
+WebSocket calls. Automatic rollback remained enabled throughout promotion.
+
+## GPT text/search routing and voice reply continuity, 9 October 2026
+
+Release **`bantera-20261009-6`** deployed backend **1.11.0** and website **0.6.0**
+at **2026-10-09 01:34:19 UTC**. API candidate **18100**, website **13012**, and
+connector readiness **12022**. The active release record and both public domains
+confirmed this release. All **130/130** monitored HTTP samples returned 200.
+Existing WebSocket continuity is not established by these HTTP checks.
+
+**GO for existing published clients:** changes are additive admin fields and
+provider routing behind saved selections; no DB migration or new environment
+variable. Existing model selections were preserved. Persistent encrypted ChatGPT
+storage and its key/mount were retained. A **3,312,040-byte** database backup was
+validated before staging. Runtime startup, public APIs, authentication gates and
+an authenticated dashboard render passed before and after promotion.
+
+GPT/Gemini text and search models now have independent primary/fallback choices.
+GPT reasoning uses the selected account model's live capabilities. An actual
+**GPT-6 Luna / max** search through the staged API completed with verified search
+SSE evidence and **20 source links**. Its safe proof record is
+`provider-search-proof.json` in the release directory. The invalid-reasoning API
+check rejected the request before any setting changed. Browser checks verified
+Luna/Astra reasoning options and the reset to model default on selection change;
+unsaved test selections were discarded. Production text/search selections remain
+as they were until an admin saves new choices. AI chat's on-device web search is
+separate and unchanged.
+
+Backend tests: **692 passed, 10 environment-dependent tests skipped**. Backend
+build, website build and targeted ESLint passed. Existing NuGet vulnerability
+warnings remain; this release does not change those dependencies. Regression
+tests cover streamed search evidence with empty final output, incomplete streams,
+per-model reasoning, cross-provider fallback, and short-gap greeting instructions.
+Greeting behavior was not tested on a physical device. The signed universal iOS
+**2.8.1 (338)** build contains the current app source; this batch changes only the
+backend and website, so no new iOS build number was needed.
+
+Rollback (preserves new database writes and connected credentials):
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261009-6/deploy.py rollback
+```
+
+This restores release 5, backend **1.10.0**, website **0.5.0**, and
+`cloudflared-20261009-5`. Prior applications/connector, source archives/hashes,
+protected runtime snapshots and the deployment controller are retained in
+`/home/ubuntu/releases/bantera-20261009-6/`. Automatic rollback was enabled during
+promotion. No Git commit/push or App Store submission was performed.
+
+CoreDevice subsequently confirmed iOS **2.8.1 (338)** installed on both **Eason's
+iPad Air (5th generation)** and **Ethan's iPhone 17 Pro**. Both install receipts
+and installed-app readbacks are retained locally as
+`/tmp/bantera-release6-{ipad,iphone}-{install,installed-app}.json`. Neither app was
+launched or tested on the physical device.
+
+## Search restrictions, GPT timeout and chat-history retention, 9 October 2026
+
+Release **`bantera-20261009-7`** completed at **2026-10-09 02:03:05 UTC**
+(**15:03 NZDT**). Backend **1.12.0** is on loopback **18101**, website **0.7.0**
+on **13013**, and connector `cloudflared-20261009-7` readiness on **12023**.
+The active record and both public version markers confirm this release;
+**130/130** monitored public HTTP samples returned 200. Candidate startup logs
+contained no error entries. HTTP checks do not prove uninterrupted existing calls.
+
+**GO for existing published apps:** additive admin timeout field; no database
+migration or new configuration/secrets. The saved GPT timeout defaults to **180
+seconds**, configurable from **30–300** in the AI dashboard. Omitted fields retain
+existing settings. GPT transport and dashboard test budgets accommodate this;
+caller cancellation, summary and overall lesson deadlines remain authoritative.
+Gemini backend search permits only `gemini-2.5-flash` and `AIzaSy` keys; other
+Gemini keys are never used as a fallback. Connected GPT choices remain available.
+App AI searches continue directly on-device, separately from backend search.
+
+The protected release directory contains source manifests/hashes, runtime
+snapshots, controller and a validated **3,329,393-byte** PostgreSQL backup.
+ChatGPT credential encryption key/storage mounts were preserved. The candidate
+and public smoke checks verified admin gates, live catalogues, timeout default,
+invalid-value rejection, search allowlist and authenticated dashboard rendering.
+Validation: **714 backend tests passed**, 10 environment-dependent tests skipped;
+backend/website builds and targeted lint passed. Existing NuGet warnings remain.
+
+Rollback, preserving database writes and connected credentials:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261009-7/deploy.py rollback
+```
+
+This restores release 6 (backend **1.11.0**, website **0.6.0**) through its retained
+connector. Promotion had automatic rollback enabled; old applications remain.
+
+The app **2.8.2 (339)** adds a local checkpoint when leaving AI chat mid-reply,
+retaining both visible transcripts and received reply audio. A newly opened chat
+waits for pending account-specific writes. **25 focused app tests passed**,
+including immediate reopen during a streamed reply; targeted analysis, debug
+and signed release iOS builds passed. User requested iPhone installation only
+after the iPad remained unavailable. No Git commit/push or store submission.
+
+CoreDevice confirmed **2.8.2 (339)** installed on **Ethan's iPhone 17 Pro**.
+Receipt and installed-app readback are `/tmp/bantera-release7-iphone-install.json`
+and `/tmp/bantera-release7-iphone-installed-app.json` on the Mac. Installation
+only: the app was not launched or tested on the physical phone.
+
+## Voice playback deadline and GPT diagnostics, 9 October 2026
+
+Release **`bantera-20261009-8`** completed at **2026-10-09 02:47:38 UTC**
+(**15:47 NZDT**). Backend **1.12.1** is on loopback **18102**; unchanged website
+**0.7.0** is redeployed on **13014**; connector readiness is **12024**. Both
+public version markers and the current-release record match. **130/130** public
+HTTP samples returned 200. Existing calls were not exercised during handover.
+The verified PostgreSQL backup is **3,339,144 bytes**.
+
+**GO for published clients:** no migration, new secrets or API contract change.
+Voice-reply inactivity now accounts for queued 24 kHz PCM playback while awaiting
+Gemini's completion event. A real missing completion still times out, and caller
+cancellation/overall limits still win. Counts of generation/turn completion
+signals are added to existing technical failure diagnostics.
+
+GPT retries a transient server error once, within the same configured deadline;
+quota/auth/unsupported requests and partially generated answers are not retried.
+Database diagnostics retain only safe error codes, HTTP status, stage, completion
+flag and character count, never response text, prompts or credentials. The admin
+search test no longer imposes an unrelated 30-second cap on GPT; Gemini retains
+its separate test deadline. Selected models, reasoning and timeout are unchanged.
+
+The user's lesson `2a20d955-0544-4cdc-9a89-fd7f09c29d47` hit the configured
+180-second GPT deadline. A staged real search reproduced OpenAI `server_error`
+after `web_search_call.completed`, before answer text, on both attempts. This is
+an unresolved upstream failure, not proof that web search is unsupported. The
+configured Gemini 2.5 Flash fallback returned a verified answer with 20 sources
+in **22.2 seconds** total. Evidence: `search-resilience-proof.json` in the protected
+release directory; test ID `bbfcb1f4-3dd0-436e-8a35-68aa56880efd`. Both GPT failures
+were verified in `ai_pipeline_events` with `searchCompleted: true` and
+`stage: answer_started`.
+
+Validation: **727 backend tests passed**, 10 environment-dependent tests skipped;
+backend build, website production build and candidate/live authenticated smoke
+checks passed. Existing build warnings remain. Rollback is available without
+restoring the database or losing connected ChatGPT credentials:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261009-8/deploy.py rollback
+```
+
+This restores release 7 (backend **1.12.0**, website **0.7.0**). No commit/push.
+The changes are server-only; iOS **2.8.2 (339)** remains the matching current build.
+Requested iPhone-only reinstall was attempted but CoreDevice returned error 4016
+because the phone was unavailable. Receipt: `/tmp/bantera-release8-iphone-install.json`
+on the Mac. Installation remains pending a connected/unlocked iPhone. No iPad
+installation, physical-device launch or testing was performed.

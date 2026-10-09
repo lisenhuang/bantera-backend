@@ -8,14 +8,17 @@ namespace BanteraApi.Chat.Ai;
 
 public static class BanteraAiEndpoints
 {
-    public sealed record ModelRequest(string Model, string? Voice = null);
+    public sealed record ModelRequest(string Model, string? Voice = null, string? Reasoning = null);
     public static void Map(WebApplication app)
     {
         var admin = app.MapGroup("/api/admin/bantera-ai").RequireAuthorization("Admin");
         admin.MapGet("", async (BanteraAiSettings settings, GeminiService gemini, CancellationToken ct) => {
             try {
                 var catalog = await gemini.ListModelsAsync(ct);
-                return Results.Ok(new { model = await settings.GetModelAsync(ct), defaultModel = settings.DefaultModel,
+                var model = await settings.GetModelAsync(ct);
+                return Results.Ok(new { model, reasoning = await settings.GetReasoningAsync(model, ct),
+                    reasoningByModel = await settings.GetReasoningSelectionsAsync((catalog.LiveModels ?? []).Append(model), ct),
+                    reasoningCapabilities = (catalog.LiveModels ?? []).Append(model).Distinct().ToDictionary(m => m, AiLiveReasoning.ForModel), defaultModel = settings.DefaultModel,
                     liveModels = catalog.LiveModels ?? [], voice = await settings.GetVoiceAsync(ct),
                     defaultVoice = BanteraAiSettings.DefaultVoice, voices = BanteraAiVoices.All, maxCallSeconds = settings.MaxCallSeconds });
             } catch (Exception ex) when (ex is not OperationCanceledException) {
@@ -29,12 +32,14 @@ public static class BanteraAiEndpoints
             if (voice is not null && !BanteraAiVoices.IsSupported(voice))
                 return Results.BadRequest(new { message = "Choose an available Live voice." });
             if (string.IsNullOrWhiteSpace(model) || model.Length > 100) return Results.BadRequest(new { message = "Choose an available Live model." });
+            if (request.Reasoning is not null && !AiLiveReasoning.IsSupported(model, request.Reasoning))
+                return Results.BadRequest(new { message = "Choose a reasoning setting supported by the selected Live model." });
             try {
                 var catalog = await gemini.ListModelsAsync(ct);
                 if (catalog.LiveModels?.Contains(model, StringComparer.Ordinal) != true)
                     return Results.BadRequest(new { message = "Choose an available Live model." });
-                await settings.SetAsync(model, voice, userId, ct);
-                return Results.Ok(new { model, voice = await settings.GetVoiceAsync(ct) });
+                await settings.SetAsync(model, voice, userId, ct, request.Reasoning);
+                return Results.Ok(new { model, voice = await settings.GetVoiceAsync(ct), reasoning = await settings.GetReasoningAsync(model, ct) });
             } catch (Exception ex) when (ex is not OperationCanceledException) {
                 return Results.Json(new { message = "The model could not be confirmed or saved. Refresh and try again." }, statusCode: 503);
             }
@@ -47,6 +52,7 @@ public static class BanteraAiEndpoints
             return Results.NoContent();
         }).RequireAuthorization().RequireRateLimiting("ai-diagnostics")
             .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(4096));
+        AiConversationSummary.Map(app);
         AiReminderDelivery.Map(app);
         var callbackRoutes = app.MapGroup("/api/chat/ai/callbacks").RequireAuthorization();
         callbackRoutes.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => {
@@ -105,7 +111,7 @@ public static class BanteraAiEndpoints
             var pcm = file is null ? Array.Empty<byte>() : await AiAudioCodec.ReadPcmAsync(file, timeout.Token);
             inputBytes = pcm.Length;
             model = await settings.GetModelAsync(timeout.Token);
-            var reply = await live.ReplyAsync(model, user, pcm, history, timeout.Token, text, snapshot, metadata, call => callbacks.ExecuteAsync(userId, metadata, requestId.ToString(), call.GetProperty("name").GetString()!, call.GetProperty("args"), timeout.Token), voice: await settings.GetVoiceAsync(timeout.Token));
+            var reply = await live.ReplyAsync(model, user, pcm, history, timeout.Token, text, snapshot, metadata, call => callbacks.ExecuteAsync(userId, metadata, requestId.ToString(), call.GetProperty("name").GetString()!, call.GetProperty("args"), timeout.Token), voice: await settings.GetVoiceAsync(timeout.Token), reasoning: await settings.GetReasoningAsync(model, timeout.Token));
             // No database/R2 write: the client owns all history and audio persistence.
             return Results.Ok(new { audio = Convert.ToBase64String(AiAudioCodec.Wave(reply.Pcm)),
                 inputText = text.Length > 0 ? text : reply.InputText, outputText = reply.OutputText });
@@ -156,11 +162,12 @@ public static class BanteraAiEndpoints
             var callKey = Guid.NewGuid().ToString();
             var model = await settings.GetModelAsync(timeout.Token);
             var voice = await settings.GetVoiceAsync(timeout.Token);
-            using var upstream = await live.ConnectAsync(model, user, false, history, timeout.Token, metadata, voice);
+            var reasoning = await settings.GetReasoningAsync(model, timeout.Token);
+            using var upstream = await live.ConnectAsync(model, user, false, history, timeout.Token, metadata, voice, reasoning);
             timeout.CancelAfter(TimeSpan.FromSeconds(duration));
             await GeminiLiveService.SendAsync(client, new { type = "ready", maxCallSeconds = AiCallPolicy.DurationSeconds }, timeout.Token);
             await GeminiLiveService.SendAsync(upstream, new { clientContent = new {
-                turns = new[] { new { role = "user", parts = new[] { new { text = AiCallPolicy.Opening(resuming, reminder) } } } }, turnComplete = true
+                turns = new[] { new { role = "user", parts = new[] { new { text = metadata.TimePrompt + AiConversationTiming.Prompt(history, metadata.Clock) + AiCallPolicy.Opening(resuming, reminder) } } } }, turnComplete = true
             } }, timeout.Token);
             using var conversation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
             var state = new CallState(metadata, (meta, call) => callbacks.ExecuteAsync(userId, meta, callKey + ":" + call.GetProperty("id").GetString(), call.GetProperty("name").GetString()!, call.GetProperty("args"), timeout.Token));
@@ -192,7 +199,7 @@ public static class BanteraAiEndpoints
             {
                 await GeminiLiveService.SendAsync(client, new { type = "farewell" }, timeout.Token);
                 // A separate Live turn prevents buffered old speech/turnComplete from ending the farewell early.
-                var goodbye = await live.ReplyAsync(model, user, [], [], timeout.Token, AiCallPolicy.Farewell, metadata: metadata with { HasMetBanteraAi = true }, voice: voice);
+                var goodbye = await live.ReplyAsync(model, user, [], [], timeout.Token, AiCallPolicy.Farewell, metadata: metadata with { HasMetBanteraAi = true }, voice: voice, reasoning: reasoning);
                 await client.SendAsync(new ArraySegment<byte>(goodbye.Pcm), WebSocketMessageType.Binary, true, timeout.Token);
                 await GeminiLiveService.SendAsync(client, new { type = "transcript", role = "model", text = goodbye.OutputText }, timeout.Token);
                 await GeminiLiveService.SendAsync(client, new { type = "goodbyeComplete" }, timeout.Token);
@@ -211,6 +218,7 @@ public static class BanteraAiEndpoints
                 throw;
             }
             finally {
+                AiLiveResumeCache.Release(upstream);
                 state.Ending = true;
                 await conversation.CancelAsync();
                 upstream.Abort();

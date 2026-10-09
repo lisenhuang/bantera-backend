@@ -155,8 +155,8 @@ public class WordTimingAlignerTests
     }
 
     [Fact]
-    public void SelectKeys_WebSearchFallsBackToAllKeysWhenNoneHaveThePrefix()
+    public void SelectKeys_WebSearchNeverFallsBackToDisallowedKeys()
     {
-        Assert.Equal(["k1", "k2"], GeminiService.SelectKeys(["k1", "k2"], webSearch: true, "AIzaSy").Order());
+        Assert.Empty(GeminiService.SelectKeys(["k1", "k2", "aizasy-wrong-case"], webSearch: true, "AIzaSy"));
     }
 }

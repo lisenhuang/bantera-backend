@@ -19,7 +19,9 @@ public sealed class AiLiveQuotaUnavailableException : Exception
 }
 
 public sealed record AiVoiceReply(byte[] Pcm, string InputText, string OutputText);
-public sealed record AiContextTurn(string Role, string Text);
+public sealed record AiContextTurn(string Role, string Text, DateTimeOffset? CreatedAt = null,
+    string? TimeZone = null,
+    [property: System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)] int? UtcOffsetMinutes = null);
 
 // One active AI operation per account. Entries are removed, not retained forever.
 public sealed class BanteraAiSessions
@@ -42,12 +44,12 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         if (quotaHandlers.TryGetValue(socket, out var report)) report();
     }
 
-    public static object Setup(string model, string prompt, bool voiceMessage, string voice = BanteraAiVoices.Default, bool deviceWebSearch = false) => new {
+    public static object Setup(string model, string prompt, bool voiceMessage, string voice = BanteraAiVoices.Default, bool deviceWebSearch = false, string? reasoning = null) => new {
         setup = new {
             model = "models/" + model,
             contextWindowCompression = new { slidingWindow = new { } },
-            generationConfig = AiLiveModelPolicy.GenerationConfig(model, voice),
-            systemInstruction = new { parts = new[] { new { text = prompt + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
+            generationConfig = AiLiveModelPolicy.GenerationConfig(model, voice, reasoning),
+            systemInstruction = new { parts = new[] { new { text = prompt + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
             tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model, deviceWebSearch) } },
             inputAudioTranscription = new { }, outputAudioTranscription = new { },
             realtimeInputConfig = new { automaticActivityDetection = voiceMessage
@@ -64,16 +66,16 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
     };
 
     public async Task<ClientWebSocket> ConnectAsync(string model, User user, bool voiceMessage,
-        IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata = null, string voice = BanteraAiVoices.Default)
+        IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata = null, string voice = BanteraAiVoices.Default, string? reasoning = null)
     {
         return await WithKeysAsync(model, async (key, token) => {
-            var socket = await ConnectKeyAsync(key, model, user, voiceMessage, history, token, metadata, voice);
+            var socket = await ConnectKeyAsync(key, model, user, voiceMessage, history, token, metadata, voice, reasoning);
             quotaHandlers.Add(socket, () => {
                 health.CoolDown(key, model);
                 logger.LogWarning("Bantera AI active call quota reached; key cooled down before reconnection.");
             });
             return socket;
-        }, ct);
+        }, ct, AiLiveResumeCache.Preferred(AiLiveResumeCache.Identity(model, user, voiceMessage, metadata, voice, reasoning)));
     }
 
     // Retry only explicit provider quota failures. Every eligible key gets at most one attempt.
@@ -99,9 +101,10 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         throw new AiLiveQuotaUnavailableException();
     }
 
-    private async Task<T> WithKeysAsync<T>(string model, Func<string, CancellationToken, Task<T>> attempt, CancellationToken ct)
+    private async Task<T> WithKeysAsync<T>(string model, Func<string, CancellationToken, Task<T>> attempt, CancellationToken ct, string? preferredKeyHash = null)
     {
         var keys = await health.EligibleKeysAsync(GeminiService.SelectKeys(options.Value.ApiKeys, false, ""), model, ct);
+        if (preferredKeyHash is not null) keys = keys.OrderByDescending(key => AiLiveResumeCache.Hash(key) == preferredKeyHash).ToArray();
         return await TryKeysAsync(keys, attempt, key => {
             health.CoolDown(key, model);
             logger.LogWarning("Bantera AI quota reached for {Model}; trying another eligible key.", model);
@@ -109,7 +112,21 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
     }
 
     private static async Task<ClientWebSocket> ConnectKeyAsync(string key, string model, User user, bool voiceMessage,
-        IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata, string voice)
+        IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata, string voice, string? reasoning)
+    {
+        var identity = AiLiveResumeCache.Identity(model, user, voiceMessage, metadata, voice, reasoning);
+        var resume = AiLiveResumeCache.Take(identity, key, history);
+        try {
+            return await OpenKeyAsync(key, model, user, voiceMessage, history, ct, metadata, voice, reasoning, identity, resume?.Handle);
+        } catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests) { throw; }
+        catch when (resume is not null && !ct.IsCancellationRequested) {
+            // Expired/rejected handles renew once on the same key; this is not quota.
+            return await OpenKeyAsync(key, model, user, voiceMessage, history, ct, metadata, voice, reasoning, identity, null);
+        }
+    }
+
+    private static async Task<ClientWebSocket> OpenKeyAsync(string key, string model, User user, bool voiceMessage,
+        IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata, string voice, string? reasoning, string? identity, string? resumeHandle)
     {
         var socket = new ClientWebSocket();
         socket.Options.CollectHttpResponseDetails = true;
@@ -118,16 +135,26 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         try
         {
             await socket.ConnectAsync(new Uri("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" + Uri.EscapeDataString(key)), timeout.Token);
-            await SendAsync(socket, Setup(model, BanteraAiIdentity.Prompt(user) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).LevelPrompt + AiCallPolicy.IntroductionPolicy(metadata, history) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).TimePrompt, voiceMessage, voice, metadata?.DeviceWebSearch == true), timeout.Token);
+            var setup = System.Text.Json.JsonSerializer.SerializeToNode(Setup(model, BanteraAiIdentity.Prompt(user) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).LevelPrompt + AiCallPolicy.IntroductionPolicy(metadata, history, voiceMessage) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).TimePrompt + AiConversationTiming.Prompt(history, metadata?.Clock) + (voiceMessage ? AiConversationTiming.VoiceReplyDirective(history, metadata?.Clock, DateTimeOffset.UtcNow) : ""), voiceMessage, voice, metadata?.DeviceWebSearch == true, reasoning))!.AsObject();
+            if (identity is not null) setup["setup"]!["sessionResumption"] = resumeHandle is null
+                ? new System.Text.Json.Nodes.JsonObject() : new System.Text.Json.Nodes.JsonObject { ["handle"] = resumeHandle };
+            if (identity is not null) setup["setup"]!["contextWindowCompression"] = new System.Text.Json.Nodes.JsonObject { ["slidingWindow"] = new System.Text.Json.Nodes.JsonObject() };
+            if (resumeHandle is not null) setup["setup"]!.AsObject().Remove("systemInstruction");
+            await SendAsync(socket, setup, timeout.Token);
             using var ready = await ReceiveJsonAsync(socket, timeout.Token);
             if (!ready.RootElement.TryGetProperty("setupComplete", out _)) throw new InvalidDataException("Live setup was not accepted.");
-            if (history.Count > 0)
-                await SendAsync(socket, new { clientContent = new { turns = history.Select(t => new { role = t.Role, parts = new[] { new { text = t.Text } } }), turnComplete = false } }, timeout.Token);
+            AiLiveResumeCache.Attach(socket, identity, key, model, resumeHandle is not null);
+            AiLiveResumeCache.Observe(socket, ready.RootElement);
+            if (resumeHandle is null && history.Count > 0)
+                await SendAsync(socket, AiConversationTiming.HistoryContext(history), timeout.Token);
+            if (resumeHandle is not null)
+                await SendAsync(socket, AiCallPolicy.ClockContext(metadata!), timeout.Token);
             return socket;
         }
         catch (Exception ex)
         {
             var quota = (int)socket.HttpStatusCode == 429 || ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests };
+            AiLiveResumeCache.Release(socket, false);
             socket.Dispose();
             ct.ThrowIfCancellationRequested();
             if (quota) throw new HttpRequestException("Live quota unavailable.", null, System.Net.HttpStatusCode.TooManyRequests);
@@ -138,7 +165,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
     }
 
     public async Task<AiVoiceReply> ReplyAsync(string model, User user, byte[] pcm,
-        IReadOnlyList<AiContextTurn> history, CancellationToken ct, string? text = null, JsonElement snapshot = default, AiClientMetadata? metadata = null, Func<JsonElement, Task<object>>? executeTool = null, string voice = BanteraAiVoices.Default)
+        IReadOnlyList<AiContextTurn> history, CancellationToken ct, string? text = null, JsonElement snapshot = default, AiClientMetadata? metadata = null, Func<JsonElement, Task<object>>? executeTool = null, string voice = BanteraAiVoices.Default, string? reasoning = null)
     {
         if (string.IsNullOrWhiteSpace(text)) {
             var input = new AiVoiceInput();
@@ -146,14 +173,14 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 input.Add(pcm.AsSpan(offset, Math.Min(16000, pcm.Length - offset)).ToArray());
             input.Commit(metadata ?? new(new("UTC", 0), null));
             return await StreamReplyAsync(model, user, input, history, snapshot,
-                metadata ?? new(new("UTC", 0), null), voice, executeTool, _ => Task.CompletedTask, ct);
+                metadata ?? new(new("UTC", 0), null), voice, executeTool, _ => Task.CompletedTask, ct, reasoning: reasoning);
         }
         var tools = MemoizeTools(executeTool);
         return await WithKeysAsync(model, async (key, token) => {
-            using var socket = await ConnectKeyAsync(key, model, user, true, history, token, metadata, voice);
+            using var socket = await ConnectKeyAsync(key, model, user, true, history, token, metadata, voice, reasoning);
             await SendAsync(socket, new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text } } } }, turnComplete = true } }, token);
             return await ReadReplyAsync(socket, snapshot, tools, token, requiresInteractionIdle: AiLiveModelPolicy.RequiresInteractionIdle(model));
-        }, ct);
+        }, ct, AiLiveResumeCache.Preferred(AiLiveResumeCache.Identity(model, user, true, metadata, voice, reasoning)));
     }
 
     private static Func<JsonElement, Task<object>>? MemoizeTools(Func<JsonElement, Task<object>>? execute)
@@ -171,7 +198,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
     public async Task<AiVoiceReply> StreamReplyAsync(string model, User user, AiVoiceInput input,
         IReadOnlyList<AiContextTurn> history, JsonElement snapshot, AiClientMetadata metadata, string voice,
         Func<JsonElement, Task<object>>? executeTool, Func<byte[]?, Task> output, CancellationToken ct,
-        Func<string, string, Task>? transcript = null)
+        Func<string, string, Task>? transcript = null, string? reasoning = null)
     {
         var tools = MemoizeTools(executeTool);
         var attempts = 0;
@@ -179,10 +206,11 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         return await WithKeysAsync(model, async (key, token) => {
             var recovering = attempts++ > 0;
             if (recovering) await output(null); // Start a distinct attempt with the same bounded recording/context.
-            using var socket = await ConnectKeyAsync(key, model, user, true, history, token, metadata, voice);
+            using var socket = await ConnectKeyAsync(key, model, user, true, history, token, metadata, voice, reasoning);
             await using var watchdog = new AiReplyWatchdog(input.Committed, token);
             using var attempt = CancellationTokenSource.CreateLinkedTokenSource(watchdog.Token);
             var receivedAudio = false;
+            var succeeded = false;
             var providerEvents = new Dictionary<string, int>();
             void Observe(string name) {
                 providerEvents[name] = providerEvents.GetValueOrDefault(name) + 1;
@@ -197,12 +225,12 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             // attempt, commit that utterance as a text turn to the SAME Live
             // model, avoiding another proactive-audio decision on replayed PCM.
             var upload = transcriptRecovery is not null
-                ? UploadTranscriptAsync(socket, input, transcriptRecovery, attempt.Token)
-                : UploadVoiceAsync(socket, input, attempt.Token, requireReply: recovering);
+                ? UploadTranscriptAsync(socket, input, transcriptRecovery, attempt.Token, history)
+                : UploadVoiceAsync(socket, input, attempt.Token, requireReply: recovering, history: history);
             if (transcriptRecovery is not null && transcript is not null) await transcript("user", transcriptRecovery);
             var reply = ReadReplyAsync(socket, snapshot, tools, attempt.Token, async bytes => {
-                if (bytes is null) attemptInput.Clear();
-                if (bytes is { Length: > 2 }) { receivedAudio = true; watchdog.Progress(); }
+                if (bytes is null) { attemptInput.Clear(); watchdog.ResetAudio(); }
+                if (bytes is { Length: > 2 }) { receivedAudio = true; watchdog.AudioProgress(bytes.Length); }
                 await output(bytes);
             }, upload, async (role, text) => {
                 if (role == "user") { attemptInput.Append(text); capturedInput = attemptInput.ToString(); }
@@ -222,6 +250,13 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 }
                 await upload;
                 var result = await reply;
+                if (metadata.ConversationId is not null && !AiLiveResumeCache.HasCheckpoint(socket)) {
+                    using var checkpoint = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    checkpoint.CancelAfter(TimeSpan.FromMilliseconds(750));
+                    try { while (!AiLiveResumeCache.HasCheckpoint(socket)) { using var update = await ReceiveJsonAsync(socket, checkpoint.Token); } }
+                    catch { /* A missing checkpoint cannot invalidate an already complete voice reply. */ }
+                }
+                succeeded = true;
                 return transcriptRecovery is null ? result : result with { InputText = transcriptRecovery };
             }
             catch (OperationCanceledException) when (watchdog.TimedOut && !token.IsCancellationRequested) {
@@ -232,33 +267,34 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             }
             catch (Exception ex) { Annotate(ex); throw; }
             finally {
+                AiLiveResumeCache.Release(socket, succeeded);
                 await attempt.CancelAsync();
                 socket.Abort();
                 try { await upload; } catch { }
                 try { await reply; } catch { }
             }
-        }, ct);
+        }, ct, AiLiveResumeCache.Preferred(AiLiveResumeCache.Identity(model, user, true, metadata, voice, reasoning)));
     }
 
-    public static async Task UploadTranscriptAsync(WebSocket socket, AiVoiceInput input, string transcript, CancellationToken ct)
+    public static async Task UploadTranscriptAsync(WebSocket socket, AiVoiceInput input, string transcript, CancellationToken ct, IReadOnlyList<AiContextTurn>? history = null)
     {
         var metadata = await input.Committed.WaitAsync(ct);
         await SendAsync(socket, new { clientContent = new {
             turns = new[] { new { role = "user", parts = new[] {
-                new { text = "[A completed voice message is transcribed below. Answer it aloud once; do not discuss this delivery instruction.]" + metadata.TimePrompt },
+                new { text = "[A completed voice message is transcribed below. Answer it aloud once; do not discuss this delivery instruction.]" + metadata.TimePrompt + AiConversationTiming.Prompt(history ?? [], metadata.Clock) + AiConversationTiming.VoiceReplyDirective(history ?? [], metadata.Clock, DateTimeOffset.UtcNow) },
                 new { text = transcript }
             } } }, turnComplete = true
         } }, ct);
     }
 
-    public static async Task UploadVoiceAsync(WebSocket socket, AiVoiceInput input, CancellationToken ct, bool requireReply = false)
+    public static async Task UploadVoiceAsync(WebSocket socket, AiVoiceInput input, CancellationToken ct, bool requireReply = false, IReadOnlyList<AiContextTurn>? history = null)
     {
         await SendAsync(socket, new { realtimeInput = new { activityStart = new { } } }, ct);
         await foreach (var chunk in input.ReadAsync(ct)) await SendAudioAsync(socket, chunk, ct);
         // Commit carries the current device timezone; trusted server time is sampled now.
         var metadata = await input.Committed.WaitAsync(ct);
         await SendAsync(socket, new { realtimeInput = new {
-            text = "[Time context for this voice message; do not respond separately.]" + metadata.TimePrompt
+            text = "[Time context for this voice message; do not respond separately.]" + metadata.TimePrompt + AiConversationTiming.Prompt(history ?? [], metadata.Clock) + AiConversationTiming.VoiceReplyDirective(history ?? [], metadata.Clock, DateTimeOffset.UtcNow)
         } }, ct);
         await SendAsync(socket, new { realtimeInput = new { activityEnd = new { } } }, ct);
         // A fresh recovery session can otherwise make the same silent decision.
@@ -320,6 +356,8 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 if (complete && audio.Length > 0) break;
                 continue;
             }
+            if (content.TryGetProperty("generationComplete", out var generated) && generated.ValueKind == JsonValueKind.True) observe?.Invoke("generationCompletions");
+            if (content.TryGetProperty("turnComplete", out var ended) && ended.ValueKind == JsonValueKind.True) observe?.Invoke("turnCompletions");
             AppendTranscript(content, "inputTranscription", input);
             AppendTranscript(content, "outputTranscription", output);
             // Continue receiving provider frames during recording (including
@@ -403,6 +441,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             if (providerCode is not null) failure.Data["providerCode"] = providerCode.Value;
             throw failure;
         }
+        AiLiveResumeCache.Observe(socket, json.RootElement);
         return json;
     }
     public static bool IsQuotaCloseReason(string reason) =>

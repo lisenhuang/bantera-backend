@@ -67,6 +67,8 @@ public sealed class AiChatDiagnostics(AiPipelineEventRecorder events)
                 audioFreeCompletions = ex.Data["audioFreeCompletions"] as int?,
                 providerInterruptions = ex.Data["providerInterruptions"] as int?,
                 pcmParts = ex.Data["pcmParts"] as int?,
+                generationCompletions = ex.Data["generationCompletions"] as int?,
+                turnCompletions = ex.Data["turnCompletions"] as int?,
                 otherInlineParts = ex.Data["otherInlineParts"] as int?,
                 requestId, errorType = ex.GetType().Name, progress, frames,
                 providerCode = ex.Data["providerCode"] is int code ? code : (int?)null,

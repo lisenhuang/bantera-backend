@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace BanteraApi.Chat.Ai;
 
 public sealed record AiClock(string TimeZone, int UtcOffsetMinutes);
-public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? HasMetBanteraAi = null, string? AlertPushToken = null, string? LearningLevel = null, bool DeviceWebSearch = false)
+public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? HasMetBanteraAi = null, string? AlertPushToken = null, string? LearningLevel = null, bool DeviceWebSearch = false, string? ConversationId = null)
 {
     public static AiClientMetadata Read(string? json)
     {
@@ -24,7 +24,8 @@ public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? Ha
         var level = doc.RootElement.TryGetProperty("learningLevel", out var l) && l.ValueKind == JsonValueKind.String
             ? NormalizeLevel(l.GetString()) : null;
         var search = doc.RootElement.TryGetProperty("deviceWebSearch", out var searchFlag) && searchFlag.ValueKind == JsonValueKind.True;
-        return new(clock, token, hasMet, alert, level, search);
+        var conversation = doc.RootElement.TryGetProperty("conversationId", out var id) && id.ValueKind == JsonValueKind.String && Guid.TryParse(id.GetString(), out var parsed) ? parsed.ToString() : null;
+        return new(clock, token, hasMet, alert, level, search, conversation);
     }
     private static string? NormalizeLevel(string? level) => level?.Trim().ToLowerInvariant() switch {
         "beginner" => "beginner", "intermediate" => "intermediate", "advanced" => "advanced", _ => null

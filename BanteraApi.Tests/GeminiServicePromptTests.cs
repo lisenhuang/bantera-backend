@@ -254,7 +254,7 @@ public class GeminiServicePromptTests
     public async Task GenerateDialogueAsync_LatestNewsPrompt_AllowsFewerStoriesThanRequested()
     {
         var handler = new CapturingHandler();
-        var service = CreateService(handler);
+        var service = CreateService(handler, apiKeys: ["AIzaSy-test-search-key"]);
 
         await service.GenerateDialogueAsync(
             "English",
@@ -276,6 +276,15 @@ public class GeminiServicePromptTests
         Assert.DoesNotContain("Weave all 4", prompt);
         Assert.DoesNotContain("Aim for approximately", prompt);
         Assert.Contains("words total across all speakers", prompt);
+    }
+
+    [Fact]
+    public async Task SearchWithOnlyDisallowedKeysNeverContactsGemini()
+    {
+        var handler = new FallbackHandler(audio: false);
+        var service = CreateService(handler, apiKeys: ["AQ-not-for-search"]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateDialogueAsync("English", "en-US", "", 60, "latest_news"));
+        Assert.Empty(handler.Models);
     }
 
     [Fact]
@@ -510,6 +519,16 @@ public class GeminiServicePromptTests
 
         Assert.NotEmpty(dialogue.Lines);
         Assert.Equal(["primary-text", "backup-text"], handler.Models);
+    }
+
+    [Fact]
+    public async Task DisconnectedChatGptUsesGeminiTextFallback()
+    {
+        var handler = new FallbackHandler(audio: false);
+        var service = CreateService(handler, new("chatgpt/account-model", "tts", "backup-text", null));
+        var dialogue = await service.GenerateDialogueAsync("English", "en-US", "ordering coffee", 60);
+        Assert.NotEmpty(dialogue.Lines);
+        Assert.Equal(["backup-text"], handler.Models);
     }
 
     [Fact]
@@ -776,7 +795,7 @@ public class GeminiServicePromptTests
     public async Task Duration_ShortNewsDraftProceedsWithoutAnotherSearchOrRevision()
     {
         var handler = new DurationHandler([288, 700]);
-        var dialogue = await CreateService(handler).GenerateDialogueAsync("English", "en-NZ", "", 240, "latest_news");
+        var dialogue = await CreateService(handler, apiKeys: ["AIzaSy-test-search-key"]).GenerateDialogueAsync("English", "en-NZ", "", 240, "latest_news");
         Assert.Contains("google_search", Assert.Single(handler.TextRequests));
         Assert.Equal(288, dialogue.DurationPlan!.Count(dialogue.Lines));
     }
@@ -789,7 +808,7 @@ public class GeminiServicePromptTests
     {
         // 54 five-letter tokens count as 270 characters, below the 303-character minimum.
         var handler = new DurationHandler([54]);
-        var service = CreateService(handler);
+        var service = CreateService(handler, apiKeys: ["AIzaSy-test-search-key"]);
         var dialogue = await service.GenerateDialogueAsync("Chinese", locale, "", 120, "latest_news", level: "beginner");
         await service.GenerateAudioAsync(dialogue, locale);
         Assert.Single(handler.TextRequests);

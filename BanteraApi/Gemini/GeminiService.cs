@@ -4,12 +4,13 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using BanteraApi.Audio;
+using BanteraApi.OpenAi;
 using BanteraApi.Diagnostics;
 using Microsoft.Extensions.Options;
 
 namespace BanteraApi.Gemini;
 
-public class GeminiService(
+public partial class GeminiService(
     IHttpClientFactory httpClientFactory,
     IOptions<GeminiSettings> options,
     AiModelSettingsService modelSettings,
@@ -18,7 +19,8 @@ public class GeminiService(
     Mp3Encoder mp3Encoder,
     AiPipelineEventRecorder events,
     IDialogueDurationPlanner durationPlanner,
-    ILogger<GeminiService> logger)
+    ILogger<GeminiService> logger,
+    ChatGptSubscriptionClient? chatGpt = null)
 {
     private const string LatestNewsScenarioId = "latest_news";
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
@@ -335,8 +337,8 @@ public class GeminiService(
         var useGoogleSearch = IsLatestNewsScenario(scenarioId)
             || (useWebSearchForCustom && !string.IsNullOrWhiteSpace(scenario));
         var models = await modelSettings.GetAsync(cancellationToken);
-        var textModel = testSession?.TextModel ?? (useGoogleSearch ? Settings.LatestNewsTextModel : models.TextModel);
-        var fallbackTextModel = useGoogleSearch ? null : models.FallbackTextModel;
+        var textModel = testSession?.TextModel ?? (useGoogleSearch ? models.SearchModel ?? AiSearchPolicy.GeminiModel : models.TextModel);
+        var fallbackTextModel = useGoogleSearch ? models.FallbackSearchModel : models.FallbackTextModel;
         var todayUtc = DateTime.UtcNow.Date;
         var recentStartUtc = DateTime.UtcNow.AddDays(-1);
         var requestedNewsCount = Math.Max(1, durationSeconds / 60);
@@ -528,10 +530,8 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                             contents = new[] { new { parts = new[] { new { text = requestPrompt } } } }
                         };
 
-                    using var response = testSession is null
-                        ? await client.PostAsync(url,
-                            new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
-                            cancellationToken)
+                    using var response = testSession is null || IsChatGpt(selectedModel)
+                        ? await SendTextRequestAsync(selectedModel, key, body, cancellationToken, useGoogleSearch, ReasoningFor(models, selectedModel, useGoogleSearch))
                         : await testSession.SendAsync(client, url, "dialogue", selectedModel, key, body, cancellationToken);
 
                     var json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -870,10 +870,7 @@ Example output for 3 cues:
             var url = $"/v1beta/models/{textModel}:generateContent?key={key}";
             var body = new { contents = new[] { new { parts = new[] { new { text = prompt } } } } };
 
-            using var response = await client.PostAsync(
-                url,
-                new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
-                cancellationToken);
+            using var response = await SendTextRequestAsync(textModel, key, body, cancellationToken, reasoning: ReasoningFor(models, textModel));
 
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
@@ -1519,10 +1516,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
                     },
                 },
             };
-            using var response = await client.PostAsync(
-                $"/v1beta/models/{textModel}:generateContent?key={key}",
-                new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json"),
-                cancellationToken);
+            using var response = await SendTextRequestAsync(textModel, key, body, cancellationToken, reasoning: ReasoningFor(models, textModel));
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
@@ -1579,8 +1573,9 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
     }
 
     /// <summary>
-    /// The keys a call may use, de-duplicated and shuffled. Web search only works on keys
-    /// with <see cref="GeminiSettings.WebSearchKeyPrefix"/>; if none have it, all keys are tried.
+    /// The keys a call may use, de-duplicated and shuffled. Search strictly requires
+    /// the product-approved prefix; never fall back to other keys. The legacy prefix
+    /// argument is retained for callers but cannot relax this restriction.
     /// </summary>
     public static string[] SelectKeys(IEnumerable<string> configured, bool webSearch, string webSearchPrefix)
     {
@@ -1589,11 +1584,8 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
             .Where(k => k.Length > 0)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        if (webSearch && !string.IsNullOrEmpty(webSearchPrefix))
-        {
-            var searchKeys = keys.Where(k => k.StartsWith(webSearchPrefix, StringComparison.Ordinal)).ToArray();
-            if (searchKeys.Length > 0) keys = searchKeys;
-        }
+        if (webSearch)
+            keys = keys.Where(k => k.StartsWith(AiSearchPolicy.GeminiKeyPrefix, StringComparison.Ordinal)).ToArray();
         for (var i = keys.Length - 1; i > 0; i--)
         {
             var j = Random.Shared.Next(i + 1);
@@ -1614,6 +1606,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
 
         try
         {
+            if (IsChatGpt(primaryModel)) return await fn(primaryModel, "");
             return await WithGeminiKeyAsync(operation, key => fn(primaryModel, key), cancellationToken,
                 webSearch: webSearch, model: primaryModel, fallbackAvailable: fallbackModel is not null, singleAttempt: singleAttempt);
         }
@@ -1623,15 +1616,16 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
         {
             var stage = operation.Replace(' ', '_').Replace("(", "").Replace(")", "");
             logger.LogWarning(primaryError,
-                "Gemini {Operation} failed on primary model {PrimaryModel}; trying fallback model {FallbackModel}.",
+                "AI {Operation} failed on primary model {PrimaryModel}; trying fallback model {FallbackModel}.",
                 operation, primaryModel, fallbackModel);
             await events.RecordAsync(AiPipelineSeverity.Warning, stage, "model_fallback_attempted",
                 "Primary model failed; trying the configured fallback model.",
                 new { primaryModel, fallbackModel }, primaryModel);
 
-            var result = await WithGeminiKeyAsync(operation, key => fn(fallbackModel, key), cancellationToken,
-                webSearch: webSearch, model: fallbackModel);
-            logger.LogInformation("Gemini {Operation} succeeded on fallback model {FallbackModel}.", operation, fallbackModel);
+            var result = IsChatGpt(fallbackModel) ? await fn(fallbackModel, "")
+                : await WithGeminiKeyAsync(operation, key => fn(fallbackModel, key), cancellationToken,
+                    webSearch: webSearch, model: fallbackModel);
+            logger.LogInformation("AI {Operation} succeeded on fallback model {FallbackModel}.", operation, fallbackModel);
             await events.RecordAsync(AiPipelineSeverity.Info, stage, "model_fallback_succeeded",
                 "Generation continued with the configured fallback model.",
                 new { primaryModel, fallbackModel }, fallbackModel);
@@ -1646,7 +1640,9 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
     private async Task<T> WithGeminiKeyAsync<T>(string operation, Func<string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false, string? model = null, bool fallbackAvailable = false, bool singleAttempt = false)
     {
         var stage = operation.Replace(' ', '_').Replace("(", "").Replace(")", "");
-        var configuredKeys = SelectKeys(Settings.ApiKeys, webSearch, Settings.WebSearchKeyPrefix);
+        if (webSearch && model != AiSearchPolicy.GeminiModel)
+            throw new InvalidOperationException("This Gemini model is not allowed for web search.");
+        var configuredKeys = SelectKeys(Settings.ApiKeys, webSearch, AiSearchPolicy.GeminiKeyPrefix);
         if (configuredKeys.Length == 0) throw new InvalidOperationException("No Gemini API keys configured.");
         var keys = await keyHealth.EligibleKeysAsync(configuredKeys, model, cancellationToken);
         if (keys.Length == 0)

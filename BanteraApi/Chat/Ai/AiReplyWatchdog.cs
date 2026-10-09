@@ -14,6 +14,8 @@ public sealed class AiReplyWatchdog : IAsyncDisposable
     private readonly CancellationToken parent;
     private readonly TimeSpan idle;
     private readonly Task arm;
+    private readonly System.Diagnostics.Stopwatch playback = new();
+    private double audioSeconds;
     public AiReplyWatchdog(Task committed, CancellationToken parent, TimeSpan? idle = null)
     {
         this.parent = parent;
@@ -23,7 +25,19 @@ public sealed class AiReplyWatchdog : IAsyncDisposable
     }
     public CancellationToken Token => stop.Token;
     public bool TimedOut => stop.IsCancellationRequested && !parent.IsCancellationRequested;
-    public void Progress() => stop.CancelAfter(idle);
+    // Gemini generates PCM faster than playback and may withhold turnComplete
+    // until that audio would have finished playing. Waiting for buffered speech
+    // to finish is not a stalled provider. The parent still bounds the whole turn.
+    public void AudioProgress(int bytes)
+    {
+        if (bytes <= 2) return; // Do not treat the resume keepalive as speech.
+        if (!playback.IsRunning) playback.Start();
+        audioSeconds += bytes / 48000d;
+        Progress();
+    }
+    public void ResetAudio() { audioSeconds = 0; playback.Reset(); Progress(); }
+    public void Progress() => stop.CancelAfter(idle + TimeSpan.FromSeconds(
+        Math.Max(0, audioSeconds - playback.Elapsed.TotalSeconds)));
     private async Task ArmAsync(Task committed)
     {
         try { await committed.WaitAsync(stop.Token); Progress(); }

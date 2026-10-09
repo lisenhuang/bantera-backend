@@ -44,6 +44,7 @@ public static class AiVoiceMessageEndpoint
             receive = ReceiveRecordingAsync(client, input, lifetime, deviceTools);
             model = await settings.GetModelAsync(lifetime.Token);
             voice = await settings.GetVoiceAsync(lifetime.Token);
+            var reasoning = await settings.GetReasoningAsync(model, lifetime.Token);
             phase = "stream";
             var replyTask = live.StreamReplyAsync(model, user, input, history, snapshot,
                 metadata, voice,
@@ -58,7 +59,7 @@ public static class AiVoiceMessageEndpoint
                 }, lifetime.Token, async (role, text) => {
                     if (role == "user") inputChars += text.Length; else outputChars += text.Length;
                     if (streamTranscripts) await GeminiLiveService.SendAsync(client, new { type = "transcript", role, text }, lifetime.Token);
-                });
+                }, reasoning: reasoning);
             generate = replyTask;
             await await Task.WhenAny(receive, replyTask);
             var reply = await replyTask;

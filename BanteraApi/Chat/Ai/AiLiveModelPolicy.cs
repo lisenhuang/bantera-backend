@@ -11,14 +11,21 @@ public static class AiLiveModelPolicy
     public static bool RequiresInteractionIdle(string model) =>
         Name(model).StartsWith("gemini-3.8-live-extended-thinking", StringComparison.Ordinal);
 
-    public static object GenerationConfig(string model, string voice)
+    public static object GenerationConfig(string model, string voice, string? reasoning = null)
     {
         var config = new Dictionary<string, object> {
             ["responseModalities"] = new[] { "AUDIO" }, ["maxOutputTokens"] = 2048,
             ["speechConfig"] = new { voiceConfig = new { prebuiltVoiceConfig = new { voiceName = voice } } }
         };
-        // Required by Extended Thinking; plain 3.8 rejects thinkingConfig.
-        if (RequiresInteractionIdle(model)) config["thinkingConfig"] = new { thinkingLevel = "low" };
+        // Unsupported fields are omitted, including for standard 3.8 Live.
+        if (AiLiveReasoning.Config(model, reasoning) is { } thinking) {
+            config["thinkingConfig"] = thinking;
+            // A small combined output cap can consume the entire response in
+            // reasoning. Let the provider allocate its normal output allowance
+            // for explicitly selected thinking; the coaching prompt keeps speech brief.
+            if (AiLiveReasoning.EffectiveValue(model, reasoning) != AiLiveReasoning.Default)
+                config.Remove("maxOutputTokens");
+        }
         return config;
     }
 

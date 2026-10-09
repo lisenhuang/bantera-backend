@@ -79,8 +79,9 @@ public sealed class AiReminderWorker(IServiceScopeFactory scopes, ILogger<AiRemi
             timeout.CancelAfter(TimeSpan.FromSeconds(90));
             var settings = scope.ServiceProvider.GetRequiredService<BanteraAiSettings>();
             var live = scope.ServiceProvider.GetRequiredService<GeminiLiveService>();
-            var reply = await live.ReplyAsync(await settings.GetModelAsync(timeout.Token), item.User, [], [], timeout.Token,
-                text: AiReminderDelivery.Prompt(item.Reminder ?? ""), metadata: new(new(item.TimeZone, 0), null, true), voice: await settings.GetVoiceAsync(timeout.Token));
+            var model = await settings.GetModelAsync(timeout.Token);
+            var reply = await live.ReplyAsync(model, item.User, [], [], timeout.Token,
+                text: AiReminderDelivery.Prompt(item.Reminder ?? ""), metadata: new(new(item.TimeZone, 0), null, true), voice: await settings.GetVoiceAsync(timeout.Token), reasoning: await settings.GetReasoningAsync(model, timeout.Token));
             var audio = AiAudioCodec.Wave(reply.Pcm);
             // Cancellation during generation wins; never notify or revive a cancelled reminder.
             if (await db.AiCallbacks.Where(c => c.Id == item.Id && c.Status == "generating").ExecuteUpdateAsync(u => u
