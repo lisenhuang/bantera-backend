@@ -935,3 +935,187 @@ Requested iPhone-only reinstall was attempted but CoreDevice returned error 4016
 because the phone was unavailable. Receipt: `/tmp/bantera-release8-iphone-install.json`
 on the Mac. Installation remains pending a connected/unlocked iPhone. No iPad
 installation, physical-device launch or testing was performed.
+
+
+## 2026-10-09 release 9: call clock and readable historical context
+
+Explicit user deployment authorised staging and promotion of the local backend
+working tree as `bantera-20261009-9`. Public API version **1.12.3** and website
+version **0.7.0** were verified after the connector handover. Website source was
+unchanged; its deployment marker identifies release 9.
+
+The call relay consumes legacy client `clock` updates as metadata without sending
+a Gemini `clientContent` turn, which could interrupt the AI's own reply. The
+current clock remains available through the time tool and fresh setup/resumption
+context. Historical timing JSON uses readable punctuation. Existing app versions
+remain compatible. No database migration, new configuration, provider-model
+change or credential change was required.
+
+Release directory: `/home/ubuntu/releases/bantera-20261009-9`. Candidate API/web
+ports are **18103/13015**; tunnel readiness port **12025**. Protected source
+manifests, runtime snapshots, a **3,376,669-byte** verified database dump,
+`deploy.py`, `prepare.py`, `smoke.py`, build logs, promotion log and availability
+samples are retained there. Existing encrypted ChatGPT storage mount and its
+configuration were cloned without printing credentials. Both Bantera origins
+were replaced while preserving other tunnel ingress routes and networks.
+
+Candidate and post-handover authenticated checks passed, including connected AI
+accounts, fetched model/reasoning choices, search allowlist, timeout settings and
+authentication gates. The two-minute stability window passed. All **130** public
+availability samples returned HTTP **200**; this establishes sampled availability,
+not a guarantee that every individual request experienced zero downtime. Focused
+backend validation passed **61 tests**, with **4** environment-dependent tests
+skipped. The deployment controller rolls back automatically on promotion failure.
+
+Manual application rollback, without restoring the database or losing new writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261009-9/deploy.py rollback
+```
+
+This restores release 8 (backend **1.12.1**, website **0.7.0**). Previous application
+containers and `cloudflared-20261009-8` remain available. This deployment used the
+local source archives and did not commit or push Git changes.
+
+
+The accompanying normal iOS release **2.10.0 (344)** was installed on the user's
+iPhone and read back through CoreDevice. Receipt files on the Mac:
+`/tmp/bantera344-iphone-install.json` and
+`/tmp/bantera344-iphone-installed-app.json`. No physical-device launch or tests
+were performed. The signed release explicitly targets `lib/main.dart`; temporary
+simulator diagnostic entrypoints were not installed on the phone.
+
+App verification included native audio/CallKit configuration tests (**7 passed**),
+Dart regression tests, **12** repeated simulator navigation cycles with 2,000
+synthetic messages, and real on-device-executed simulator image searches that
+retrieved JPEG previews from two non-Wikimedia websites. The exact intermittent
+half-transition reported by the user was not conclusively reproduced; route
+coordination and deferred/lazy history rendering address observed code races.
+Web image search is app-local and required no additional backend changes.
+
+
+## 10 October 2026: latest voice turn, resumption and explicit search
+
+User-authorised release `bantera-20261010-1` completed at **2026-10-09
+21:03:13 UTC (10:03 NZDT on 10 October)**. Public API **1.12.4** and the
+website **0.7.0** release marker were verified. The website source was unchanged;
+its candidate was redeployed alongside the backend. The API/web loopback ports
+are **18104/13016**, with connector readiness on **12026**.
+
+**GO for existing published apps:** optional `resumeText` is additive and older
+clients retain checkpoint compatibility. No migration, new secret, configured
+model/voice change or authentication-contract change. Fresh Gemini sessions get
+summary/history once as private setup reference, never an unfinished learner
+turn. Successful resumption sends neither old setup instructions nor history.
+Current committed recordings retain trusted time and device-zone/continuity
+metadata. Prompt revision 4 replaces checkpoints with the old policy. Historical
+questions/tool requests are completed, and device search requires a current
+explicit request rather than an ordinary question.
+
+Validation: **733 backend tests passed**, **11** environment-dependent tests
+skipped; **30 app regressions passed**; targeted Dart analysis, .NET build and
+signed normal iOS release build succeeded. A real three-round test on production's
+selected `gemini-3.1-flash-live-preview` verified two resumed follow-ups, no
+search for either ordinary question, and a search tool invocation for an explicit
+search request. A separate synthetic PCM recording exercised streaming upload
+and confirmed that the newest topic was answered without repeating the older
+festival request. No physical-phone launch or test was performed.
+
+Candidate/admin and post-handover checks passed. All **130** monitored public
+HTTP samples returned **200** during promotion and the stability window. This
+records sampled availability, not guaranteed continuity for every existing call.
+Startup logs showed no error entries. Protected source hashes, runtime snapshots,
+build/controller files and a validated **3,380,719-byte** database dump are retained
+in `/home/ubuntu/releases/bantera-20261010-1`. Existing connected ChatGPT storage,
+keys, Docker networks and other Cloudflare Tunnel routes were preserved.
+
+Rollback retains current database writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261010-1/deploy.py rollback
+```
+
+This restores release 9 through `cloudflared-20261009-9`, whose applications remain
+available. Promotion had automatic rollback on failed public checks. Source was
+published from reviewed working-tree archives; no Git commit/push or store
+submission was performed for this fix.
+
+CoreDevice confirmed normal iOS **2.10.1 (345)** installed on the user's iPhone.
+Install and app-version receipts are `/tmp/bantera345-iphone-install.json` and
+`/tmp/bantera345-iphone-installed-app.json` on the Mac. Installation only; the app
+was not launched or tested on the phone.
+
+## 10 October 2026: current-turn focus and dated summary provenance
+
+User-authorised release `bantera-20261010-2` completed at **2026-10-09
+21:19:19 UTC (10:19 NZDT on 10 October)**. Public API **1.12.5** and
+website **0.7.0** release marker were verified. Website source is unchanged.
+Candidate API/web ports are **18105/13017**; connector readiness is **12027**.
+All **130** monitored public HTTP samples were 200 and startup/error log checks
+found no error entries. The previous applications and connector remain available.
+
+**GO for published apps:** no migration or new environment variables/secrets.
+The optional `contextKind` field is additive. The summary endpoint still returns
+a `summary` string; its new internal version-2 format carries source timestamps
+per item, which existing clients preserve as background text. Source-message time
+and planned-event time are separate. Legacy undated memory remains unknown.
+Current voice metadata explicitly identifies the new recording and trusted
+current date/time/timezone. Summary and completed messages remain private setup
+reference only for fresh sessions. A checkpoint received before reply completion
+cannot be saved as if it includes that completed reply. Policy version 5 renews
+older checkpoints once. Current production model/voice settings are unchanged.
+
+Validation: **735** full-suite backend tests passed with **11** environment-only
+skips, followed by **21** focused timing tests after adding one more regression;
+**17** app history/memory tests passed. .NET build, targeted Dart analysis, debug
+and signed normal iOS release builds passed. Real streamed PCM tests on
+`gemini-3.1-flash-live-preview` exercised a barbecue preference, a mild-spice
+follow-up, and a change to mango sorbet. Two follow-ups resumed successfully;
+responses addressed new details and made no unsolicited searches. Staged real
+text-provider summary generation and incremental merge retained source dates and
+a later timezone change. These were synthetic inputs, not physical-phone tests.
+
+Source archives/hashes, runtime snapshots, build logs, smoke proof, and validated
+**3,381,694-byte** database backup are in
+`/home/ubuntu/releases/bantera-20261010-2`. Existing connected-account storage,
+secrets, networks and unrelated Cloudflare routes were preserved. Promotion had
+automatic rollback. Manual rollback preserves current DB writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261010-2/deploy.py rollback
+```
+
+This restores `bantera-20261010-1` (API 1.12.4). No Git commit/push or store
+submission was performed. Normal iOS **2.10.2 (346)** was installed on the user's
+iPhone without launching it; CoreDevice receipts are
+`/tmp/bantera346-iphone-install.json` and
+`/tmp/bantera346-iphone-installed-app.json` on the Mac.
+
+
+## 11 October 2026: locked-screen callback startup diagnostics
+
+Release `bantera-20261011-1` passed promotion on 10 October at 14:10:53 UTC
+(11 October, 03:10:53 NZDT). Backend **1.12.6**, website **0.7.0**. The
+website source is unchanged; its release marker identifies this deployment.
+
+- API: `bantera-api-20261011-1`, loopback port **18106**.
+- Website: `bantera-website-20261011-1`, loopback port **13018**.
+- Tunnel: `cloudflared-20261011-1`, readiness port **12028**.
+- Release directory: `/home/ubuntu/releases/bantera-20261011-1`.
+- Previous release `bantera-20261010-2` remains available. Rollback with
+  `python3 /home/ubuntu/releases/bantera-20261011-1/deploy.py rollback`.
+- Compatibility: **GO** for existing released apps. New allowlisted diagnostic
+  codes/phase are additive; no schema changes or new required secrets.
+- Local backend build and tests passed (739 passed, 11 integration/live tests
+  skipped). Staged API, authenticated dashboard, configuration validation,
+  public domains, and the two-minute post-promotion window passed.
+- Companion app **2.10.3 (347)** starts native duplex I/O in CallKit activation,
+  retains early activation until Dart readiness, and avoids deactivating the
+  system-owned session during handoff. Native compilation and callback
+  event-order tests passed. Physical locked-screen audio is unverified.
+- The signed iPhone build is ready. Installation was blocked by CoreDevice 4016
+  because the phone was unavailable; no device launch or test was performed.
+
+Private runtime snapshots, source hashes, verified database backup, stage and
+promotion logs are retained in the release directory. Automatic rollback covers
+failed promotion; it does not restore an old database or discard new user writes.

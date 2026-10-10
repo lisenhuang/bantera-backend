@@ -13,10 +13,10 @@ namespace BanteraApi.Tests;
 public class BanteraAiTests
 {
     [Fact]
-    public void CallClockUpdateCannotCompleteATurnOrSendRealtimeText()
+    public void ResumeClockContextWaitsForTheResumedTurn()
     {
         var metadata = new AiClientMetadata(new("Pacific/Auckland", 780), null);
-        var update = JsonSerializer.SerializeToElement(AiCallPolicy.ClockContext(metadata));
+        var update = JsonSerializer.SerializeToElement(AiCallPolicy.ResumeClockContext(metadata));
         Assert.False(update.TryGetProperty("realtimeInput", out _));
         var content = update.GetProperty("clientContent");
         Assert.False(content.GetProperty("turnComplete").GetBoolean());
@@ -44,7 +44,7 @@ public class BanteraAiTests
         Assert.False(manual.TryGetProperty("startOfSpeechSensitivity", out _));
         var messagePrompt = message.GetProperty("systemInstruction").GetProperty("parts")[0].GetProperty("text").GetString();
         Assert.StartsWith("prompt", messagePrompt);
-        Assert.Contains("one voice message", messagePrompt);
+        Assert.Contains("Each completed recording is a new learner turn", messagePrompt);
         Assert.Contains("give one short spoken reply", messagePrompt);
     }
 

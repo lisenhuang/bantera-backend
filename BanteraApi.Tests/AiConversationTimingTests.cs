@@ -6,6 +6,20 @@ namespace BanteraApi.Tests;
 
 public class AiConversationTimingTests
 {
+    [Fact]
+    public void HistoryKeepsHumanLanguageReadableWithoutBreakingJsonTransport()
+    {
+        const string text = "You're learning Cantonese: 你好. “Light soup” with \"quotes\", a newline\n and a \\slash.";
+        var prompt = AiConversationTiming.HistoryPrompt([new("model", text)]);
+        Assert.Contains("You're", prompt);
+        Assert.Contains("你好", prompt);
+        Assert.Contains("“Light soup”", prompt);
+        Assert.DoesNotContain(@"\u0027", prompt);
+        var start = prompt.IndexOf("[{", StringComparison.Ordinal);
+        var end = prompt.LastIndexOf("]", StringComparison.Ordinal);
+        using var history = JsonDocument.Parse(prompt[start..(end + 1)]);
+        Assert.Equal(text, history.RootElement[0].GetProperty("text").GetString());
+    }
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-10-09T01:00:00Z");
     private static readonly AiClock Auckland = new("Pacific/Auckland", 780);
 
@@ -89,10 +103,59 @@ public class AiConversationTimingTests
         Assert.Contains("My plan tomorrow", prompt);
         Assert.Contains("Pacific/Auckland", prompt);
         Assert.DoesNotContain("Historical message timing", prompt);
-        var context = JsonSerializer.SerializeToElement(AiConversationTiming.HistoryContext(history)).GetProperty("clientContent");
-        Assert.False(context.GetProperty("turnComplete").GetBoolean());
-        Assert.Single(context.GetProperty("turns").EnumerateArray());
-        Assert.Equal("user", context.GetProperty("turns")[0].GetProperty("role").GetString());
+        var fresh = GeminiLiveService.SessionSetup("gemini-3.8-live", new(), true, history, new(Auckland, null), "Puck", null, "test", null);
+        var system = fresh["setup"]!["systemInstruction"]!["parts"]![0]!["text"]!.GetValue<string>();
+        Assert.Contains("My plan tomorrow", system);
+        Assert.Contains("none is an unanswered request", system);
+        Assert.False(fresh.ContainsKey("clientContent"));
+        var resumed = GeminiLiveService.SessionSetup("gemini-3.8-live", new(), true, history, new(Auckland, null), "Puck", null, "test", "handle");
+        Assert.Null(resumed["setup"]!["systemInstruction"]);
+        Assert.DoesNotContain("My plan tomorrow", resumed.ToJsonString());
+        Assert.DoesNotContain("Private conversation reference", resumed.ToJsonString());
+        Assert.Equal("handle", resumed["setup"]!["sessionResumption"]!["handle"]!.GetValue<string>());
+
+    }
+
+    [Fact]
+    public void SummaryAndCompletedMessagesAreExplicitlySeparateFromCurrentAudio()
+    {
+        var prompt = AiConversationTiming.HistoryPrompt([
+            new("user", "Dated older facts", ContextKind: "summary"),
+            new("user", "Earlier choice", Now, "Pacific/Auckland", 780),
+            new("model", "Already answered", Now.AddSeconds(1), "Pacific/Auckland", 780)]);
+        Assert.Contains("\"kind\":\"SUMMARY\"", prompt);
+        Assert.Contains("\"kind\":\"COMPLETED_MESSAGE\"", prompt);
+        Assert.Contains("CURRENT MESSAGE is NOT included above", prompt);
+        Assert.Contains("2026-10-09T14:00:00", prompt);
+        Assert.Contains("original source-message time", prompt);
+    }
+
+    [Fact]
+    public void CurrentVoiceMetadataNeverReplaysHistoricalRequestsOrSummary()
+    {
+        AiContextTurn[] history = [new("user", "Search the food festival", DateTimeOffset.UtcNow.AddMinutes(-1)),
+            new("model", "Already searched and answered", DateTimeOffset.UtcNow.AddSeconds(-20)),
+            new("user", "Historical conversation summary: search the festival")];
+        var context = AiConversationTiming.CurrentVoiceContext(history, new(Auckland, null, true));
+        Assert.DoesNotContain("food festival", context);
+        Assert.DoesNotContain("Already searched", context);
+        Assert.DoesNotContain("Historical conversation summary", context);
+        Assert.Contains("Pacific/Auckland", context);
+        Assert.Contains("Do NOT say welcome back", context);
+        Assert.Contains("Answer only the current recording", context);
+        Assert.Contains("clock below is NOW", context);
+        Assert.Contains("never ask the same question again", context);
+    }
+
+    [Fact]
+    public void SearchRequiresCurrentExplicitRequestAndNeverAnOrdinaryQuestion()
+    {
+        var setup = GeminiLiveService.SessionSetup("any-live-model", new(), true, [], new(Auckland, null, true, DeviceWebSearch: true), "Puck", null, "id", null);
+        var system = setup["setup"]!["systemInstruction"]!["parts"]![0]!["text"]!.GetValue<string>();
+        Assert.Contains("An ordinary question is NOT permission to search", system);
+        Assert.Contains("When explicitly asked to search, call the tool", system);
+        Assert.Contains("Old search requests in history", system);
+        Assert.Contains("Never claim you saved vocabulary", system);
     }
 
     [Theory]

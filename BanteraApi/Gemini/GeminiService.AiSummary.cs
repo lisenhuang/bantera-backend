@@ -11,8 +11,9 @@ public partial class GeminiService
         var models = await modelSettings.GetAsync(ct);
         return await WithModelFallbackAsync("conversation summary", models.TextModel, models.FallbackTextModel, async (model, key) => {
             var body = new {
+                generationConfig = new { responseMimeType = "application/json", responseSchema = AiConversationSummary.Schema },
                 systemInstruction = new { parts = new[] { new { text = AiConversationSummary.Instructions } } },
-                contents = new[] { new { role = "user", parts = new[] { new { text = JsonSerializer.Serialize(request, JsonOpts) } } } }
+                contents = new[] { new { role = "user", parts = new[] { new { text = JsonSerializer.Serialize(AiConversationSummary.SourceData(request), JsonOpts) } } } }
             };
             using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
             attempt.CancelAfter(TimeSpan.FromSeconds(20));
@@ -27,7 +28,7 @@ public partial class GeminiService
                     .Where(p => !p.TryGetProperty("thought", out var thought) || thought.ValueKind != JsonValueKind.True)
                     .Select(p => p.TryGetProperty("text", out var text) ? text.GetString() : null)).Trim();
                 if (summary.Length is 0 or > 6000) throw new InvalidDataException();
-                return summary;
+                return AiConversationSummary.BuildMemory(summary, request);
             } catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException("Summary provider timed out."); }
             catch (OperationCanceledException) { throw; }
             catch (HttpRequestException ex) { throw new HttpRequestException("Summary provider unavailable.", null, ex.StatusCode); }

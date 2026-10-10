@@ -21,7 +21,7 @@ public sealed class AiLiveQuotaUnavailableException : Exception
 public sealed record AiVoiceReply(byte[] Pcm, string InputText, string OutputText);
 public sealed record AiContextTurn(string Role, string Text, DateTimeOffset? CreatedAt = null,
     string? TimeZone = null,
-    [property: System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)] int? UtcOffsetMinutes = null);
+    [property: System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)] int? UtcOffsetMinutes = null, string? ResumeText = null, string? ContextKind = null);
 
 // One active AI operation per account. Entries are removed, not retained forever.
 public sealed class BanteraAiSessions
@@ -49,7 +49,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             model = "models/" + model,
             contextWindowCompression = new { slidingWindow = new { } },
             generationConfig = AiLiveModelPolicy.GenerationConfig(model, voice, reasoning),
-            systemInstruction = new { parts = new[] { new { text = prompt + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
+            systemInstruction = new { parts = new[] { new { text = prompt + AiConversationTiming.LatestMessagePolicy + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
             tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model, deviceWebSearch) } },
             inputAudioTranscription = new { }, outputAudioTranscription = new { },
             realtimeInputConfig = new { automaticActivityDetection = voiceMessage
@@ -64,6 +64,29 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             }
         }
     };
+
+    public static System.Text.Json.Nodes.JsonObject SessionSetup(string model, User user, bool voiceMessage,
+        IReadOnlyList<AiContextTurn> history, AiClientMetadata? metadata, string voice, string? reasoning,
+        string? identity, string? resumeHandle)
+    {
+        var current = metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null);
+        // A fresh session learns its background reference once, in setup. Sending
+        // this as an unfinished user turn makes old questions part of new audio input.
+        var prompt = resumeHandle is null
+            ? BanteraAiIdentity.Prompt(user) + current.LevelPrompt + AiCallPolicy.IntroductionPolicy(metadata, history, voiceMessage) +
+              current.TimePrompt + AiConversationTiming.Prompt(history, current.Clock) +
+              (voiceMessage ? AiConversationTiming.VoiceReplyDirective(history, current.Clock, DateTimeOffset.UtcNow) : "") +
+              AiConversationTiming.HistoryPrompt(history)
+            : "";
+        var setup = JsonSerializer.SerializeToNode(Setup(model, prompt, voiceMessage, voice,
+            current.DeviceWebSearch, reasoning))!.AsObject();
+        if (identity is not null) setup["setup"]!["sessionResumption"] = resumeHandle is null
+            ? new System.Text.Json.Nodes.JsonObject()
+            : new System.Text.Json.Nodes.JsonObject { ["handle"] = resumeHandle };
+        // Gemini restores the existing instructions and history with its handle.
+        if (resumeHandle is not null) setup["setup"]!.AsObject().Remove("systemInstruction");
+        return setup;
+    }
 
     public async Task<ClientWebSocket> ConnectAsync(string model, User user, bool voiceMessage,
         IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata = null, string voice = BanteraAiVoices.Default, string? reasoning = null)
@@ -111,21 +134,23 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         }, ct);
     }
 
-    private static async Task<ClientWebSocket> ConnectKeyAsync(string key, string model, User user, bool voiceMessage,
+    private async Task<ClientWebSocket> ConnectKeyAsync(string key, string model, User user, bool voiceMessage,
         IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata, string voice, string? reasoning)
     {
         var identity = AiLiveResumeCache.Identity(model, user, voiceMessage, metadata, voice, reasoning);
-        var resume = AiLiveResumeCache.Take(identity, key, history);
+        var resume = AiLiveResumeCache.Take(identity, key, history, reason =>
+            logger.LogInformation("Bantera AI session checkpoint: {Reason}; mode={Mode}.", reason, voiceMessage ? "voice_message" : "call"));
         try {
             return await OpenKeyAsync(key, model, user, voiceMessage, history, ct, metadata, voice, reasoning, identity, resume?.Handle);
         } catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests) { throw; }
         catch when (resume is not null && !ct.IsCancellationRequested) {
             // Expired/rejected handles renew once on the same key; this is not quota.
+            logger.LogInformation("Bantera AI resume rejected; starting fresh session without replaying prior requests.");
             return await OpenKeyAsync(key, model, user, voiceMessage, history, ct, metadata, voice, reasoning, identity, null);
         }
     }
 
-    private static async Task<ClientWebSocket> OpenKeyAsync(string key, string model, User user, bool voiceMessage,
+    private async Task<ClientWebSocket> OpenKeyAsync(string key, string model, User user, bool voiceMessage,
         IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata, string voice, string? reasoning, string? identity, string? resumeHandle)
     {
         var socket = new ClientWebSocket();
@@ -135,20 +160,14 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         try
         {
             await socket.ConnectAsync(new Uri("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" + Uri.EscapeDataString(key)), timeout.Token);
-            var setup = System.Text.Json.JsonSerializer.SerializeToNode(Setup(model, BanteraAiIdentity.Prompt(user) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).LevelPrompt + AiCallPolicy.IntroductionPolicy(metadata, history, voiceMessage) + (metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null)).TimePrompt + AiConversationTiming.Prompt(history, metadata?.Clock) + (voiceMessage ? AiConversationTiming.VoiceReplyDirective(history, metadata?.Clock, DateTimeOffset.UtcNow) : ""), voiceMessage, voice, metadata?.DeviceWebSearch == true, reasoning))!.AsObject();
-            if (identity is not null) setup["setup"]!["sessionResumption"] = resumeHandle is null
-                ? new System.Text.Json.Nodes.JsonObject() : new System.Text.Json.Nodes.JsonObject { ["handle"] = resumeHandle };
-            if (identity is not null) setup["setup"]!["contextWindowCompression"] = new System.Text.Json.Nodes.JsonObject { ["slidingWindow"] = new System.Text.Json.Nodes.JsonObject() };
-            if (resumeHandle is not null) setup["setup"]!.AsObject().Remove("systemInstruction");
+            var setup = SessionSetup(model, user, voiceMessage, history, metadata, voice, reasoning, identity, resumeHandle);
             await SendAsync(socket, setup, timeout.Token);
             using var ready = await ReceiveJsonAsync(socket, timeout.Token);
             if (!ready.RootElement.TryGetProperty("setupComplete", out _)) throw new InvalidDataException("Live setup was not accepted.");
             AiLiveResumeCache.Attach(socket, identity, key, model, resumeHandle is not null);
             AiLiveResumeCache.Observe(socket, ready.RootElement);
-            if (resumeHandle is null && history.Count > 0)
-                await SendAsync(socket, AiConversationTiming.HistoryContext(history), timeout.Token);
-            if (resumeHandle is not null)
-                await SendAsync(socket, AiCallPolicy.ClockContext(metadata!), timeout.Token);
+            logger.LogInformation("Bantera AI session opened: resumed={Resumed}; mode={Mode}; historyInSetup={HistoryInSetup}.",
+                resumeHandle is not null, voiceMessage ? "voice_message" : "call", resumeHandle is null && history.Count > 0);
             return socket;
         }
         catch (Exception ex)
@@ -281,7 +300,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         var metadata = await input.Committed.WaitAsync(ct);
         await SendAsync(socket, new { clientContent = new {
             turns = new[] { new { role = "user", parts = new[] {
-                new { text = "[A completed voice message is transcribed below. Answer it aloud once; do not discuss this delivery instruction.]" + metadata.TimePrompt + AiConversationTiming.Prompt(history ?? [], metadata.Clock) + AiConversationTiming.VoiceReplyDirective(history ?? [], metadata.Clock, DateTimeOffset.UtcNow) },
+                new { text = "[A completed voice message is transcribed below. Answer it aloud once; do not discuss this delivery instruction.]" + AiConversationTiming.CurrentVoiceContext(history ?? [], metadata) },
                 new { text = transcript }
             } } }, turnComplete = true
         } }, ct);
@@ -294,7 +313,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         // Commit carries the current device timezone; trusted server time is sampled now.
         var metadata = await input.Committed.WaitAsync(ct);
         await SendAsync(socket, new { realtimeInput = new {
-            text = "[Time context for this voice message; do not respond separately.]" + metadata.TimePrompt + AiConversationTiming.Prompt(history ?? [], metadata.Clock) + AiConversationTiming.VoiceReplyDirective(history ?? [], metadata.Clock, DateTimeOffset.UtcNow)
+            text = "[Time context for this voice message; do not respond separately.]" + AiConversationTiming.CurrentVoiceContext(history ?? [], metadata)
         } }, ct);
         await SendAsync(socket, new { realtimeInput = new { activityEnd = new { } } }, ct);
         // A fresh recovery session can otherwise make the same silent decision.

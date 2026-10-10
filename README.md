@@ -305,7 +305,7 @@ Verified against [Google session management](https://ai.google.dev/gemini-api/do
 
 `POST /api/admin/ai-settings/search-test` is admin-only and limited to five tests per minute per admin. It accepts a 3–1,000 character `query`, calls the configured primary/fallback search models with the same provider routing as lesson generation, and returns elapsed time, the actual model, sources and a diagnostic reference. A completed answer alone is not success: Gemini must return search queries and safe HTTP(S) grounding sources; ChatGPT must complete an actual web-search tool call. Streamed search events count even when the final response omits its output array. Each provider attempt has a 30-second deadline and the overall diagnostic has a 75-second deadline, leaving room for fallback. Operational events record outcome, model and test ID, not the query, response text or credentials. The dashboard presents verified, unverified, failed and timed-out outcomes; this test does not change models or publish a lesson. ChatGPT uses the connected subscription account; Gemini uses the configured search keys.
 
-Fresh Live sessions now receive dated history as one labelled, uncompleted background user turn rather than replayed assistant speech. This avoids feeding internal timestamps into assistant transcript prefill, while retaining context across provider resumption. Old timing markers are removed from historical model text. The app also suppresses that exact legacy marker in restored/streamed model transcripts. Existing audio files are not rewritten. A real Gemini test verifies recall from fresh background context and again after resuming without history replay.
+Fresh Live sessions receive the device summary and dated recent history once as labelled private reference in the initial system instruction. History is never an unfinished user turn or assistant prefill. It contains completed conversations, not pending requests. Resumed sessions omit that entire system instruction and history; committed voice turns send only current time/continuity metadata and the new recording. Old timing markers are removed from historical model text. The app also suppresses that exact legacy marker in restored/streamed model transcripts. Existing audio files are not rewritten. A real Gemini test verifies recall from fresh background context and again after resuming without history replay.
 
 ### ChatGPT subscription connection (admin OAuth)
 
@@ -361,3 +361,34 @@ Settings use existing `app_settings` rows (`ai.textReasoning`, `ai.fallbackTextR
 Voice-message sessions now receive reply-opening rules separate from audio-call greetings. Every committed voice turn refreshes the current gap directive, including resumed sessions. Recent or unknown gaps do not trigger a return greeting; long gaps allow one naturally. Prompt revision 3 invalidates older resumption checkpoints once so their stale call-opening instructions are not retained.
 
 GPT attempts use a saved `ai.gptTimeoutSeconds` setting (default 180; admin range 30–300 seconds), shared by GPT text, search, and subscription tests. Missing update fields preserve the saved value; null restores the default. No migration or environment variable is needed. Each fallback gets its own attempt budget, while caller cancellation, the 20-second conversation-summary budget, and the 10-minute overall lesson limit remain authoritative. Gemini request limits and on-device app search are unchanged.
+
+### Live history punctuation (1.12.2)
+
+Private history JSON embedded in the Live prompt now retains readable Unicode
+and apostrophes, instead of HTML-oriented escapes such as `\u0027`. The outer
+WebSocket JSON remains normally encoded. This encoder applies only to private
+model context, never HTML output. Compatible with existing apps; no migration,
+configuration or new secret is required. Verify a voice reply with an apostrophe
+and a non-English history entry after deployment.
+
+### Non-interrupting live clock updates (1.12.3)
+
+Older apps' `clock` messages update callback/time-tool metadata only. They are not
+forwarded to Gemini: any mid-call `clientContent` packet interrupts generation,
+including packets with `turnComplete: false`. Reconnection time context is still
+sent before conversation restarts. `get_current_time` computes fresh server time
+in the latest device timezone; reminder scheduling remains time-aware. This is
+backward compatible and requires no migration or environment change.
+
+
+## Latest-message continuity and explicit device search
+
+Live coaching answers only the newest learner utterance. Historical questions and tool requests are completed background reference, never tasks to execute again. Session checkpoint matching uses a separate optional `resumeText` speech field, ignoring app-added image labels and known punctuation display repairs. Older clients remain supported through the same normalisation. Model/profile changes, missing or changed replies and expired checkpoints still require fresh context. Prompt revision 4 replaces older checkpoint policy.
+
+Device `search_web` requires an explicit search, lookup, browsing or image-finding request in the current utterance. Ordinary questions, including questions about current events, do not authorise browsing; the coach should ask before searching. Search HTTP requests still run on the phone. The model must not claim vocabulary or other data was saved without confirmation from a write tool. Operational logs report only checkpoint reason, session mode and whether setup included history, never transcripts, summaries, queries, handles or keys.
+
+### Dated memory and current-turn focus (1.12.5)
+
+Fresh Live setup explicitly distinguishes SUMMARY items and COMPLETED_MESSAGE records from the current recording, which arrives separately. Every committed voice message supplies the trusted current server date/time and current device timezone, plus an instruction to answer the latest choice/correction/constraint without repeating a question already answered. Resumed sessions still receive no summary/history replay. Checkpoints must be observed at or after reply completion; a handle from before the reply cannot be paired with that reply's hash.
+
+New rolling summaries use a version-2 JSON string inside the existing `summary` response field. Each fact references a source-message index or a previous-summary item; the backend copies that source's exact timestamp, timezone and UTC offset rather than accepting a generated timestamp. Planned event time is kept separately from when the user mentioned it. Incremental merges retain the original timestamps. Legacy undated memory stays explicitly unknown; it is never assigned the current date. The endpoint stays backward compatible and chat/summary data remains device-owned.

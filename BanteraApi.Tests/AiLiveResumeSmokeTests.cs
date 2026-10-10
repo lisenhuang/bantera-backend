@@ -12,6 +12,56 @@ namespace BanteraApi.Tests;
 public class AiLiveResumeSmokeTests
 {
     [AiLiveFact]
+    public async Task VoiceFollowupsAnswerLatestAndOnlySearchWhenExplicitlyAsked()
+    {
+        using var config = JsonDocument.Parse(await File.ReadAllTextAsync(Environment.GetEnvironmentVariable("BANTERA_AI_LIVE_CONFIG")!));
+        var keys = config.RootElement.GetProperty("Gemini").GetProperty("ApiKeys").EnumerateArray().Select(x => x.GetString()!).ToArray();
+        var services = new ServiceCollection();
+        services.AddDbContext<AppDbContext>(o => o.UseNpgsql(Environment.GetEnvironmentVariable("BANTERA_AI_TEST_DB")));
+        using var provider = services.BuildServiceProvider();
+        using var cache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+        var options = Options.Create(new GeminiSettings { ApiKeys = keys });
+        var health = new GeminiKeyHealthService(provider.GetRequiredService<IServiceScopeFactory>(), cache, options, NullLogger<GeminiKeyHealthService>.Instance);
+        var live = new GeminiLiveService(options, health, NullLogger<GeminiLiveService>.Instance);
+        var model = Environment.GetEnvironmentVariable("BANTERA_AI_TEST_MODEL") ?? "gemini-3.8-live";
+        var user = new User { Id = Guid.NewGuid(), Name = "Test learner", LearningLanguage = "en-NZ", NativeLanguage = "zh-CN" };
+        var metadata = new AiClientMetadata(new("Pacific/Auckland", 780), null, true, DeviceWebSearch: true, ConversationId: Guid.NewGuid().ToString());
+        var history = new List<AiContextTurn> {
+            new("user", "Search the Asian food festival for lunch.", DateTimeOffset.UtcNow.AddMinutes(-3)),
+            new("model", "I searched and found the festival. What food would you like?", DateTimeOffset.UtcNow.AddMinutes(-2))
+        };
+        string[] requests = ["What does skewer mean? Explain in one short sentence.",
+            "What is broth? Explain in one short sentence.",
+            "Please search the internet for the official New Zealand tourism website and tell me its name."];
+        string[] expected = ["skewer", "broth", "New Zealand"];
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(150));
+        for (var i = 0; i < requests.Length; i++) {
+            var background = history.Concat([new AiContextTurn("user", "Device capability: pictures use search_web images: prefix. Wait for current speech.")]).ToArray();
+            using var socket = await live.ConnectAsync(model, user, true, background, timeout.Token, metadata);
+            if (i > 0) Assert.True(AiLiveResumeCache.WasResumed(socket), "Follow-up must resume the provider session.");
+            var input = new AiVoiceInput(); input.Add(new byte[16000]); input.Commit(metadata);
+            await GeminiLiveService.UploadTranscriptAsync(socket, input, requests[i], timeout.Token, background);
+            var searches = 0;
+            var reply = await GeminiLiveService.ReadReplyAsync(socket, default, call => {
+                if (call.GetProperty("name").GetString() == "search_web") searches++;
+                return Task.FromResult<object>(new { results = new[] { new { title = "Official New Zealand tourism", url = "https://www.newzealand.com/", excerpt = "Tourism New Zealand's official travel website." } } });
+            }, timeout.Token, requiresInteractionIdle: AiLiveModelPolicy.RequiresInteractionIdle(model));
+            Assert.Contains(expected[i], reply.OutputText, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("festival", reply.OutputText, StringComparison.OrdinalIgnoreCase);
+            if (i < 2) Assert.Equal(0, searches); else Assert.True(searches > 0, "Explicit search must invoke the device tool.");
+            using (var checkpoint = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token)) {
+                checkpoint.CancelAfter(TimeSpan.FromSeconds(5));
+                while (!AiLiveResumeCache.HasCheckpoint(socket)) { using var update = await GeminiLiveService.ReceiveJsonAsync(socket, checkpoint.Token); }
+            }
+            AiLiveResumeCache.Release(socket); socket.Abort();
+            history.Add(new("user", requests[i], DateTimeOffset.UtcNow));
+            // Simulate an image caption appended only by the app. It must not lose reuse.
+            history.Add(new("model", reply.OutputText.Trim() + "\n[Shared image: skewer; source: https://example.com]", DateTimeOffset.UtcNow, ResumeText: reply.OutputText.Trim()));
+            Console.WriteLine($"Live continuity round {i + 1}: resumed={i > 0}; searchCalls={searches}; audioBytes={reply.Pcm.Length}; latestTopicVerified=true.");
+        }
+    }
+
+    [AiLiveFact]
     public async Task ProviderResumesWithoutReplayingHistory()
     {
         using var config=JsonDocument.Parse(await File.ReadAllTextAsync(Environment.GetEnvironmentVariable("BANTERA_AI_LIVE_CONFIG")!));

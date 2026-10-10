@@ -248,7 +248,7 @@ public static class BanteraAiEndpoints
                     await client.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Call ended", end.Token); } catch { }
         }
     }
-    private sealed class CallState(AiClientMetadata metadata, Func<AiClientMetadata, System.Text.Json.JsonElement, Task<object>> executeTool)
+    internal sealed class CallState(AiClientMetadata metadata, Func<AiClientMetadata, System.Text.Json.JsonElement, Task<object>> executeTool)
     {
         public volatile bool Ending;
         public readonly AiPendingTools Tools = new();
@@ -262,7 +262,7 @@ public static class BanteraAiEndpoints
         }
     }
 
-    private static async Task ForwardMicrophoneAsync(WebSocket client, WebSocket upstream, CallState state, CancellationToken ct)
+    internal static async Task ForwardMicrophoneAsync(WebSocket client, WebSocket upstream, CallState state, CancellationToken ct)
     {
         long bytes = 0;
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
@@ -287,7 +287,9 @@ public static class BanteraAiEndpoints
                     if (elapsed.Elapsed.TotalSeconds - lastClock < 1) continue;
                     lastClock = elapsed.Elapsed.TotalSeconds;
                     state.Metadata = state.Metadata with { Clock = AiClientMetadata.ReadClock(response.RootElement.GetProperty("clock")) };
-                    await state.SendAsync(upstream, AiCallPolicy.ClockContext(state.Metadata), ct);
+                    // Older apps send clock packets when a microphone peak looks like speech.
+                    // Keep them as tool metadata: any clientContent interrupts generation,
+                    // even with turnComplete=false, and realtime text also counts as activity.
                     continue;
                 }
                 if (!response.RootElement.TryGetProperty("type", out var messageType) || messageType.GetString() != "toolResponse" ||

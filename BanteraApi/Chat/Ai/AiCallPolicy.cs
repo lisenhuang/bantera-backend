@@ -8,9 +8,10 @@ public static class AiCallPolicy
     public const int FarewellSeconds = DurationSeconds - 30;
     public const string TurnTaking = " During a live call, speak first only for the opening greeting or requested reminder. After each short response, stop and wait quietly for the learner to speak. Silence, background noise and time-context updates are not requests. Chewing, crunching food, breathing, coughing and utensil noises are not speech: stay silent, do not comment on them and do not infer a new message from the previous topic. Do not fill pauses with follow-up questions, repeated check-ins or encouragement. Never answer your own question. The explicit end-of-call farewell is the only exception to waiting.";
 
-    // Realtime text is conversational input and can trigger a reply, even when
-    // its text says not to respond. Clock updates must not complete a user turn.
-    public static object ClockContext(AiClientMetadata metadata) => new {
+    // Only send while reconnecting, before starting the resumed conversation.
+    // Every clientContent interrupts current generation, even with turnComplete=false.
+    // Mid-call clock packets belong in tool metadata and must never use this message.
+    public static object ResumeClockContext(AiClientMetadata metadata) => new {
         clientContent = new {
             turns = new[] { new { role = "user", parts = new[] { new {
                 text = "[Background time context only; wait for spoken input.]" + metadata.TimePrompt
@@ -18,7 +19,7 @@ public static class AiCallPolicy
             turnComplete = false
         }
     };
-    public const string VoiceMessage = " This session handles one voice message, not an open microphone call. After the learner sends the completed recording, give one short spoken reply in their current learning language and accent. Do not wait for another utterance or remain silent because it was not phrased as a question. If the recording has no intelligible speech, briefly ask them to record it again. Time metadata is background context, not a separate question. ";
+    public const string VoiceMessage = " This is voice-message mode, not an open microphone call. Each completed recording is a new learner turn, even when the session is resumed. After the learner sends the current completed recording, give one short spoken reply in their current learning language and accent. Do not wait for another utterance or remain silent because it was not phrased as a question. If the recording has no intelligible speech, briefly ask them to record it again. Time metadata is background context, not a separate question. ";
     public const string VoiceMessageCommit = "I have finished recording this voice message. Reply to what I just said in one short spoken turn, in my current learning language and accent. Do not respond to this control instruction separately. If no speech was intelligible, ask me briefly to record it again. Do not repeat any reminder or callback that a tool has already confirmed.";
     public const string Greeting = "Begin this new audio call by speaking first. Give a brief, warm greeting in my learning language and regional accent, then ask one easy, natural question. Follow the system first-meeting rule: introduce yourself only if we have never met; otherwise welcome me back without repeating your name or role. Use my preferred name when known, and vary the wording like a familiar friend and language coach. Refer to a prior topic only when it is present in the supplied context.";
     public static string Opening(bool resuming, string? reminder = null) => resuming
@@ -43,7 +44,7 @@ public static class AiCallPolicy
         if (string.IsNullOrWhiteSpace(json)) return [];
         if (json.Length > 100000) throw new InvalidDataException("History too large.");
         var turns = JsonSerializer.Deserialize<AiContextTurn[]>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
-        if (turns.Length > 100 || turns.Any(t => t is null || t.Role is not ("user" or "model") || string.IsNullOrWhiteSpace(t.Text) || t.Text.Length > 4000 || t.TimeZone?.Length > 100 || t.UtcOffsetMinutes is < -840 or > 840))
+        if (turns.Length > 100 || turns.Any(t => t is null || t.Role is not ("user" or "model") || string.IsNullOrWhiteSpace(t.Text) || t.Text.Length > 4000 || t.ResumeText?.Length > 2000 || t.ContextKind is not (null or "summary" or "message") || t.TimeZone?.Length > 100 || t.UtcOffsetMinutes is < -840 or > 840))
             throw new InvalidDataException("Invalid history.");
         return turns;
     }

@@ -17,9 +17,10 @@ public sealed class AiChatDiagnostics(AiPipelineEventRecorder events)
     private static readonly HashSet<string> ClientCodes = [
         "connect_failed", "socket_error", "socket_closed", "server_error", "invalid_frame",
         "reply_audio_limit", "playback_failed", "ready_timeout", "reply_timeout",
-        "send_failed", "save_failed", "playback_drain_failed", "cleanup_failed"
+        "send_failed", "save_failed", "playback_drain_failed", "cleanup_failed",
+        "callback_accept_failed", "callback_activation_timeout", "callback_audio_failed"
     ];
-    private static readonly HashSet<string> Phases = ["recording", "send", "reply", "save", "playback", "cleanup"];
+    private static readonly HashSet<string> Phases = ["recording", "send", "reply", "save", "playback", "cleanup", "callback"];
 
     public static bool Valid(ClientReport r) => r.RequestId != Guid.Empty && ClientCodes.Contains(r.Code ?? "") &&
         Phases.Contains(r.Phase ?? "") && r.InputBytes is >= 0 and <= 5760000 &&

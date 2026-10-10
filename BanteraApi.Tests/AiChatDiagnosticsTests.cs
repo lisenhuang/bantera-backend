@@ -11,6 +11,17 @@ namespace BanteraApi.Tests;
 
 public class AiChatDiagnosticsTests
 {
+    [Theory]
+    [InlineData("callback_accept_failed")]
+    [InlineData("callback_activation_timeout")]
+    [InlineData("callback_audio_failed")]
+    public void CallbackStartupDiagnosticsAcceptOnlyTechnicalMetadata(string code)
+    {
+        var report = new AiChatDiagnostics.ClientReport(Guid.NewGuid(), code, "callback", 0, 0, 0, false);
+        Assert.True(AiChatDiagnostics.Valid(report));
+        Assert.False(AiChatDiagnostics.Valid(report with { NativeCode = "private reminder text" }));
+    }
+
     [Fact]
     public void OnlyBoundedTechnicalClientMetadataIsAccepted()
     {

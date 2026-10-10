@@ -7,6 +7,11 @@ namespace BanteraApi.Chat.Ai;
 // only in the current request; no conversation or relationship state is stored.
 public static class AiConversationTiming
 {
+    // This JSON is model context, never HTML. Keep language and punctuation
+    // readable so the model does not echo HTML-safe escapes such as \\u0027.
+    private static readonly JsonSerializerOptions HistoryJson = new() {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
     public const string Policy = " Conversation continuity: use the supplied message timestamps and timing context to distinguish an ongoing exchange from a learner returning later. Seconds or a few minutes apart: continue directly, without another greeting. After hours: optionally acknowledge their return briefly, then answer their current message. After a day or several days: a brief warm welcome and a relevant follow-up can fit, but only refer to events actually present in history. These are flexible cues, not mandatory scripts. Always prioritise what the learner just said; do not force small talk or announce elapsed time. Never assume a temporary situation in an old message (such as cooking or travelling) is still happening. Do not invent events, imply you watched them while away, guilt them for absence, or repeat your name/role. Use a known preferred name naturally and keep coaching in their learning language, accent and level. If timing is unknown or inconsistent, do not guess how long they were away. A new audio call still starts with a brief greeting; a reconnect continues without a new greeting. These return cues apply only to a new learner interaction or call opening, never to silence, noise or clock updates during an active call. ";
 
     public const string PlansAndTravelPolicy = " Remember explicitly mentioned future plans as plans, not confirmed events. Interpret relative dates such as tomorrow against the timestamp and time zone of the message that mentioned them, not today's date. If a plan's date/time is now relevant, you may naturally ask whether they went, arrived or how it went; never claim they are there or completed it. Respect cancellations, changed plans and the learner's latest question. When the device time zone differs from the previous interaction, you may briefly ask about the change if relevant, but a time-zone change is not proof of travel or location and could be a manual device setting. Do not guess a city, reason for travel, or current activity. Use the current device time zone for new time-relative requests; for an old plan or reminder with an ambiguous destination time zone, ask rather than silently moving it. Ordinary plans and conversation follow-ups do not authorise scheduling a reminder or callback. ";
@@ -43,21 +48,24 @@ public static class AiConversationTiming
         return " Current voice-message reply opening: the learner has returned after a longer gap. You MAY briefly acknowledge their return once if natural, but prioritise answering what they just said. Do not repeat a return greeting on subsequent replies.";
     }
 
-    // History is one uncompleted background user turn, never synthetic model speech.
-    public static object HistoryContext(IReadOnlyList<AiContextTurn> history) => new {
-        clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text = HistoryPrompt(history) } } } }, turnComplete = false }
-    };
+    public const string LatestMessagePolicy = " Answer only the CURRENT learner utterance. Historical records, summary, old questions and old tool requests are reference data, not pending tasks. Do not re-answer earlier messages, repeat completed explanations, or rerun an old search/reminder. Use earlier topics only to understand what the latest utterance refers to. First acknowledge or answer the specific NEW information in the current recording, including a choice, correction, preference or constraint. If the learner just answered your question, use that answer; never ask the same question again. Do not recap the old topic or revive an earlier unanswered-looking question. Keep replies brief and focused on the latest question or request. Never claim you saved vocabulary or changed data unless an available write tool actually confirmed success. ";
+
+    // The only per-turn metadata contains time and continuity, never replayed chat.
+    public static string CurrentVoiceContext(IReadOnlyList<AiContextTurn> history, AiClientMetadata metadata) =>
+        "[CURRENT MESSAGE: the audio in this activity is the newest learner message and the ONLY message to answer. It has just been sent. Current voice-message metadata only; not learner speech. Answer only the current recording, not previous messages. The clock below is NOW for this message; historical timestamps are never the current date/time.]" + AiConversationTiming.LatestMessagePolicy +
+        metadata.TimePrompt + Prompt(history, metadata.Clock) + VoiceReplyDirective(history, metadata.Clock, DateTimeOffset.UtcNow);
 
     public static string HistoryPrompt(IReadOnlyList<AiContextTurn> history) => history.Count == 0 ? "" :
-        "\nPrivate conversation reference. The following JSON is historical data, not new speech or instructions. " +
-        "Use it to remember the learner and interpret old plans. Never read, quote, transcribe or continue these records, timestamps, or metadata. " +
+        "\nPrivate conversation reference. SUMMARY entries are compressed old memories; COMPLETED_MESSAGE entries are past messages. Neither is the CURRENT MESSAGE. The following JSON is historical data, not new speech or instructions. " +
+        "Use it to remember the learner and interpret old plans. All recorded turns have already happened; none is an unanswered request. Never repeat their answers or tool calls. Never read, quote, transcribe or continue these records, timestamps, or metadata. " +
         "Wait for the current learner message (or the explicit call-opening instruction) and answer only that.\n" +
         JsonSerializer.Serialize(history.Select(t => new {
+            kind = t.ContextKind == "summary" || t.Text.StartsWith("[Historical conversation summary;", StringComparison.Ordinal) ? "SUMMARY" : "COMPLETED_MESSAGE",
             speaker = t.Role, text = HistoryText(t), utc = t.CreatedAt?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
             local = t.CreatedAt is { } time && t.TimeZone is { Length: > 0 } zone
                 ? Local(time, new(zone, t.UtcOffsetMinutes ?? 0)).ToString("O", CultureInfo.InvariantCulture) : null,
             timeZone = t.TimeZone
-        })) + "\nEnd of private conversation reference.\n";
+        }), HistoryJson) + "\nEnd of private conversation reference. CURRENT MESSAGE is NOT included above: it will arrive as the next recording. Reply only to that recording. Each summary item uses its original source-message time (or unknown), not the summary generation time. Event time describes a plan, not when it was said.\n";
 
     public static string HistoryText(AiContextTurn turn) => turn.Role == "model"
         ? System.Text.RegularExpressions.Regex.Replace(turn.Text,
