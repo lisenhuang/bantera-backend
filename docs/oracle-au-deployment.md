@@ -1233,3 +1233,37 @@ python3 /home/ubuntu/releases/bantera-20261012-2/deploy.py rollback
 
 This restores `cloudflared-20261012-1`, backend **1.12.7**, website **0.7.0**,
 and the previous active release record without restoring the database.
+
+## 12 October 2026: fresh sessions for all new audio calls
+
+User-authorised release **`bantera-20261012-3`** completed at **2026-10-11
+23:22:14 UTC (12 October, 12:22:14 NZDT)**. Backend **1.13.1** is live;
+the website remains **0.8.0**, with an updated deployment marker. Every initial
+in-app or CallKit call ignores previous Live checkpoints and supplies the saved
+device summary/recent history once. Reconnects preserve the ongoing call's
+remaining duration. Voice-message resumption is unchanged.
+
+**GO for existing apps:** no API shape, database migration, new configuration or
+secret change. Validation: **771 backend tests passed**, **11 external tests
+skipped**, backend build and **17 app history/memory tests** passed. Staged and
+public authenticated dashboard/API checks passed, as did **130/130 HTTP samples**
+during handover and the stability window. A client disconnect produced two log
+entries for the same close-handshake exception in the unchanged general chat
+WebSocket handler; the pre-existing missing GSSAPI library notice also remains.
+HTTP checks do not prove uninterrupted WebSockets or a physical nine-minute call.
+
+Runtime environments, mounts and unrelated tunnel routes were retained. The
+release directory contains source archive hashes, working-tree manifest, verified
+**3,439,789-byte** database backup, scripts and verification logs. Ports are API
+**18109**, website **13021**, connector readiness **12031**. Prior application
+containers and connector are retained. Rollback preserves subsequent DB writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261012-3/deploy.py rollback
+```
+
+Rollback restores `cloudflared-20261012-2`, backend **1.13.0**, website **0.8.0**
+and the prior release marker. Deployment used the reviewed working tree without
+a Git commit or push. The unchanged signed app **2.10.4 (348)** was reinstalled on
+the requested iPhone and its installed version verified with CoreDevice. The app
+was not launched or physically tested; this session-policy fix is server-side.

@@ -44,7 +44,7 @@ public class AiConversationMemoryTests
         state.Observe(Json("""{"serverContent":{"outputTranscription":{"text":"partial"}},"sessionResumptionUpdate":{"resumable":false}}"""));
         Assert.False(state.Idle); Assert.Null(state.Handle);
     }
-    [Fact] public void NewCallbackIgnoresEvenAValidPreviousCheckpointButReconnectCanResume()
+    [Fact] public void NewCallIgnoresEvenAValidPreviousCheckpointButReconnectCanResume()
     {
         var identity = Guid.NewGuid().ToString();
         void Seed() {
@@ -57,7 +57,7 @@ public class AiConversationMemoryTests
         Seed();
         var reasons = new List<string>();
         Assert.Null(AiLiveResumeCache.Take(identity, "key", history, reasons.Add, forceFreshSession: true));
-        Assert.Equal(new[] { "new_callback" }, reasons);
+        Assert.Equal(new[] { "new_call" }, reasons);
         Assert.Null(AiLiveResumeCache.Preferred(identity));
         Seed();
         Assert.NotNull(AiLiveResumeCache.Take(identity, "key", history));
@@ -112,6 +112,36 @@ public class AiConversationMemoryTests
         Assert.Equal(fact, Assert.Single(AiConversationSummary.PreviousItems(merged)));
         Assert.Null(Assert.Single(AiConversationSummary.PreviousItems("Old undated memory")).SaidAtUtc);
         Assert.Throws<InvalidDataException>(() => AiConversationSummary.BuildMemory(answer.Replace("\"sourceIndex\":0", "\"sourceIndex\":99"), request));
+    }
+
+    [Theory]
+    [InlineData("gemini-3.8-live")]
+    [InlineData("gemini-3.1-flash-live-preview")]
+    public void FreshCallIncludesSummaryAndRecentTurnsAsReferenceWhileReconnectDoesNotReplayThem(string model)
+    {
+        var at = DateTimeOffset.Parse("2026-10-11T22:00:00Z");
+        AiContextTurn[] history = [
+            new("user", "Learner enjoys cooking", ContextKind: "summary"),
+            new("user", "I made mild barbecue", at, "Pacific/Auckland", 780),
+            new("model", "What did you cook?", at.AddSeconds(10), "Pacific/Auckland", 780)
+        ];
+        var metadata = new AiClientMetadata(new("Pacific/Auckland", 780), null, HasMetBanteraAi: true);
+        var setup = GeminiLiveService.SessionSetup(model, new() { LearningLanguage = "en-NZ" }, false,
+            history, metadata, "Puck", null, "call", null)["setup"]!;
+        Assert.Null(setup["sessionResumption"]!["handle"]);
+        var prompt = setup["systemInstruction"]!["parts"]![0]!["text"]!.GetValue<string>();
+        Assert.Contains("SUMMARY", prompt);
+        Assert.Contains("Learner enjoys cooking", prompt);
+        Assert.Contains("I made mild barbecue", prompt);
+        Assert.Contains("What did you cook?", prompt);
+        Assert.Contains("2026-10-11T22:00:00", prompt);
+        Assert.Contains("Pacific/Auckland", prompt);
+        Assert.Contains("none is an unanswered request", prompt);
+        Assert.False(setup.AsObject().ContainsKey("clientContent"));
+        var resumed = GeminiLiveService.SessionSetup(model, new(), false, history, metadata, "Puck", null, "call", "checkpoint")["setup"]!;
+        Assert.Equal("checkpoint", resumed["sessionResumption"]!["handle"]!.GetValue<string>());
+        Assert.Null(resumed["systemInstruction"]);
+        Assert.DoesNotContain("barbecue", resumed.ToJsonString());
     }
 
     private static JsonElement Json(string json)=>JsonDocument.Parse(json).RootElement.Clone();

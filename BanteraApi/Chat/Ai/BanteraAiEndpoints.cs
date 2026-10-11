@@ -163,12 +163,10 @@ public static class BanteraAiEndpoints
             var duration = resuming && start.RootElement.TryGetProperty("remainingSeconds", out var seconds) && seconds.TryGetInt32(out var requested)
                 ? Math.Clamp(requested, 1, AiCallPolicy.DurationSeconds) : AiCallPolicy.DurationSeconds;
             string? reminder = null;
-            var isCallback = false;
             if (start.RootElement.TryGetProperty("callbackId", out var callbackValue) && callbackValue.ValueKind == System.Text.Json.JsonValueKind.String &&
                 Guid.TryParse(callbackValue.GetString(), out var callbackId))
             {
                 reminder = await AiCallbackService.ReminderForCallAsync(db, userId, callbackId, timeout.Token);
-                isCallback = true;
                 // A scheduled call has its own conversation identity, distinct
                 // from a previous callback, in-app call, or voice-message turn.
                 metadata = metadata with { ConversationId = callbackId.ToString() };
@@ -177,8 +175,11 @@ public static class BanteraAiEndpoints
             var model = await settings.GetModelAsync(timeout.Token);
             var voice = await settings.GetVoiceAsync(timeout.Token);
             var reasoning = await settings.GetReasoningAsync(model, timeout.Token);
+            // Every new call gets its own full session and the supplied memory.
+            // Only reconnecting this ongoing call may reuse a checkpoint;
+            // its remaining duration above prevents restarting the countdown.
             using var upstream = await live.ConnectAsync(model, user, false, history, timeout.Token, metadata, voice, reasoning,
-                forceFreshSession: isCallback && !resuming);
+                forceFreshSession: !resuming);
             timeout.CancelAfter(TimeSpan.FromSeconds(duration));
             await GeminiLiveService.SendAsync(client, new { type = "ready", maxCallSeconds = AiCallPolicy.DurationSeconds }, timeout.Token);
             await GeminiLiveService.SendAsync(upstream, new { clientContent = new {

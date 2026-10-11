@@ -40,7 +40,7 @@ public static class AiLiveResumeCache
     {
         Entry? Reject(string reason) { observe?.Invoke(reason); return null; }
         if (identity is null) return Reject("legacy_client");
-        if (forceFreshSession) { Entries.TryRemove(identity, out _); return Reject("new_callback"); }
+        if (forceFreshSession) { Entries.TryRemove(identity, out _); return Reject("new_call"); }
         if (!Entries.TryRemove(identity, out var value)) return Reject("no_checkpoint");
         if (value.ExpiresAt <= DateTimeOffset.UtcNow) return Reject("expired");
         if (value.KeyHash != Hash(key)) return Reject("different_key");
