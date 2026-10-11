@@ -1173,3 +1173,63 @@ python3 /home/ubuntu/releases/bantera-20261012-1/deploy.py rollback
 This restores `cloudflared-20261011-1`, backend **1.12.6** and the previous
 website release marker. Deployment used reviewed working-tree archives; it did
 not create a Git commit, push a branch or submit a store release.
+
+
+## 12 October 2026: model-call generation timeline
+
+User-authorised release **`bantera-20261012-2`** completed at **2026-10-11
+22:16:50 UTC (12 October, 11:16:50 NZDT)**. Backend **1.13.0** and website
+**0.8.0** are live and their source commits are pushed to `main`:
+backend `b7aa93ec6fa089e632c7d610ebc54b291ba1c26f`, website
+`65f1fd383bfec7790496bafe785755a7392de67f`.
+
+- API: `bantera-api-20261012-2`, loopback **18108**.
+- Website: `bantera-website-20261012-2`, loopback **13020**.
+- Connector: `cloudflared-20261012-2`, readiness **12030**.
+- Release directory: `/home/ubuntu/releases/bantera-20261012-2`.
+- Active record: `/home/ubuntu/releases/bantera-current.json`.
+
+The video detail page now groups recorded model requests, GPT progress, retries,
+responses, validation and fallbacks into a numbered timeline. Each new GPT and
+Gemini request has a call ID and recorded outcome. Older runs explicitly disclose
+missing history; current model settings are never used to invent an older run's
+model. Provider response success is distinguished from subsequent validation.
+
+**GO for existing published apps:** existing API/auth contracts remain compatible;
+no migration, new secret or environment setting is required. Runtime environment,
+persistent mounts, Docker networks, encrypted ChatGPT credentials and unrelated
+Cloudflare ingress routes were preserved. Model/voice settings were unchanged.
+
+Validation: **161 focused backend tests**, **4 timeline tests**, **8 existing
+website audio-browsing tests**, backend and website production builds, TypeScript
+and focused lint passed. Authenticated checks verified both requested historical
+video pages before promotion and through the public domains afterwards. One
+synthetic Luna request with low reasoning returned two answer characters in
+**1.554 seconds**; persisted events included start, accepted, created,
+answer-started, answer-streaming and success. This proves a short Luna request and
+its event persistence, not reliability of long dialogue/high-reasoning requests.
+
+The first promotion automatically rolled back because the new public smoke test
+used Python's default User-Agent, which received HTTP 403. The same authenticated
+request passed with `Bantera-release-verification`; the verification script now
+sets that identity for all API and website requests. No application code change
+was needed. Both attempts and their verification scripts/logs are retained.
+The second promotion passed all checks and the two-minute stability window:
+**140/140** public API/homepage availability samples returned HTTP 200
+(**192/192** across both attempts). Candidate logs had no fail/critical entries;
+a missing GSSAPI-library notice also exists in the previous release. Existing
+NuGet package warnings remain. HTTP sampling does not establish uninterrupted
+individual long-lived connections.
+
+The release retains source hashes, private runtime snapshots, a validated
+**3,428,931-byte** PostgreSQL backup, `timeline-proof.json`,
+`timeline-live-proof.json`, `model-trace-proof.json`, and build/promotion logs.
+Previous application containers remain running; the old connector is stopped
+and retained. Rollback preserves new database writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261012-2/deploy.py rollback
+```
+
+This restores `cloudflared-20261012-1`, backend **1.12.7**, website **0.7.0**,
+and the previous active release record without restoring the database.
