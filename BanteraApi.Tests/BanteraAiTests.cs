@@ -44,7 +44,8 @@ public class BanteraAiTests
         Assert.False(manual.TryGetProperty("startOfSpeechSensitivity", out _));
         var messagePrompt = message.GetProperty("systemInstruction").GetProperty("parts")[0].GetProperty("text").GetString();
         Assert.StartsWith("prompt", messagePrompt);
-        Assert.Contains("Each completed recording is a new learner turn", messagePrompt);
+        Assert.Contains("Each completed recording with intelligible speech is a new learner turn", messagePrompt);
+        Assert.Contains("do not invent words", messagePrompt);
         Assert.Contains("give one short spoken reply", messagePrompt);
     }
 

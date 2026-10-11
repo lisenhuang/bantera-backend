@@ -11,9 +11,12 @@ public sealed class AiVoiceInput
     private readonly List<byte[]> chunks = [];
     private TaskCompletionSource changed = NewSignal();
     private readonly TaskCompletionSource<AiClientMetadata> committed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> speechDetected = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly AiVoiceActivity activity = new();
     private int length;
     private bool complete;
     public Task<AiClientMetadata> Committed => committed.Task;
+    public Task<bool> SpeechDetected => speechDetected.Task;
     public int ByteCount { get { lock (gate) return length; } }
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     public void Add(byte[] pcm)
@@ -22,14 +25,18 @@ public sealed class AiVoiceInput
             if (complete || pcm.Length == 0 || pcm.Length > 32000 || pcm.Length % 2 != 0 || length + pcm.Length > MaxBytes)
                 throw new InvalidDataException("Invalid recording audio.");
             chunks.Add(pcm); length += pcm.Length;
+            activity.Add(pcm);
+            if (activity.HasSpeech) speechDetected.TrySetResult(true);
             var previous = changed; changed = NewSignal(); previous.TrySetResult();
         }
     }
     public void Commit(AiClientMetadata metadata)
     {
         lock (gate) {
-            if (complete || length < 320) throw new InvalidDataException("Invalid recording length.");
-            complete = true; committed.TrySetResult(metadata); changed.TrySetResult();
+            if (complete) throw new InvalidDataException("Recording already committed.");
+            complete = true; committed.TrySetResult(metadata);
+            speechDetected.TrySetResult(activity.HasSpeech);
+            changed.TrySetResult();
         }
     }
     public async IAsyncEnumerable<byte[]> ReadAsync([EnumeratorCancellation] CancellationToken ct)

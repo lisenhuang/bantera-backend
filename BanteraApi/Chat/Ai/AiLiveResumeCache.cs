@@ -36,10 +36,11 @@ public static class AiLiveResumeCache
         text = AiConversationTiming.HistoryText(new("model", text));
         return Hash(text.Trim()[..Math.Min(text.Trim().Length, 2000)]);
     }
-    public static Entry? Take(string? identity, string key, IReadOnlyList<AiContextTurn> history, Action<string>? observe = null)
+    public static Entry? Take(string? identity, string key, IReadOnlyList<AiContextTurn> history, Action<string>? observe = null, bool forceFreshSession = false)
     {
         Entry? Reject(string reason) { observe?.Invoke(reason); return null; }
         if (identity is null) return Reject("legacy_client");
+        if (forceFreshSession) { Entries.TryRemove(identity, out _); return Reject("new_callback"); }
         if (!Entries.TryRemove(identity, out var value)) return Reject("no_checkpoint");
         if (value.ExpiresAt <= DateTimeOffset.UtcNow) return Reject("expired");
         if (value.KeyHash != Hash(key)) return Reject("different_key");

@@ -89,16 +89,16 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
     }
 
     public async Task<ClientWebSocket> ConnectAsync(string model, User user, bool voiceMessage,
-        IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata = null, string voice = BanteraAiVoices.Default, string? reasoning = null)
+        IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata = null, string voice = BanteraAiVoices.Default, string? reasoning = null, bool forceFreshSession = false)
     {
         return await WithKeysAsync(model, async (key, token) => {
-            var socket = await ConnectKeyAsync(key, model, user, voiceMessage, history, token, metadata, voice, reasoning);
+            var socket = await ConnectKeyAsync(key, model, user, voiceMessage, history, token, metadata, voice, reasoning, forceFreshSession);
             quotaHandlers.Add(socket, () => {
                 health.CoolDown(key, model);
                 logger.LogWarning("Bantera AI active call quota reached; key cooled down before reconnection.");
             });
             return socket;
-        }, ct, AiLiveResumeCache.Preferred(AiLiveResumeCache.Identity(model, user, voiceMessage, metadata, voice, reasoning)));
+        }, ct, forceFreshSession ? null : AiLiveResumeCache.Preferred(AiLiveResumeCache.Identity(model, user, voiceMessage, metadata, voice, reasoning)));
     }
 
     // Retry only explicit provider quota failures. Every eligible key gets at most one attempt.
@@ -135,11 +135,11 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
     }
 
     private async Task<ClientWebSocket> ConnectKeyAsync(string key, string model, User user, bool voiceMessage,
-        IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata, string voice, string? reasoning)
+        IReadOnlyList<AiContextTurn> history, CancellationToken ct, AiClientMetadata? metadata, string voice, string? reasoning, bool forceFreshSession = false)
     {
         var identity = AiLiveResumeCache.Identity(model, user, voiceMessage, metadata, voice, reasoning);
         var resume = AiLiveResumeCache.Take(identity, key, history, reason =>
-            logger.LogInformation("Bantera AI session checkpoint: {Reason}; mode={Mode}.", reason, voiceMessage ? "voice_message" : "call"));
+            logger.LogInformation("Bantera AI session checkpoint: {Reason}; mode={Mode}.", reason, voiceMessage ? "voice_message" : "call"), forceFreshSession);
         try {
             return await OpenKeyAsync(key, model, user, voiceMessage, history, ct, metadata, voice, reasoning, identity, resume?.Handle);
         } catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests) { throw; }
@@ -219,6 +219,10 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         Func<JsonElement, Task<object>>? executeTool, Func<byte[]?, Task> output, CancellationToken ct,
         Func<string, string, Task>? transcript = null, string? reasoning = null)
     {
+        // Wait only until speech is detected, not until Send: genuine recordings
+        // still stream while the user talks. Empty/noise-only recordings cannot
+        // open/resume a Live turn or manufacture a transcript/tool action.
+        if (!await input.SpeechDetected.WaitAsync(ct)) throw new AiNoSpeechException();
         var tools = MemoizeTools(executeTool);
         var attempts = 0;
         string? capturedInput = null;

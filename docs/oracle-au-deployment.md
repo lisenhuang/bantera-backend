@@ -1119,3 +1119,57 @@ website source is unchanged; its release marker identifies this deployment.
 Private runtime snapshots, source hashes, verified database backup, stage and
 promotion logs are retained in the release directory. Automatic rollback covers
 failed promotion; it does not restore an old database or discard new user writes.
+
+## 12 October 2026: silent voice messages and fresh callback sessions
+
+User-authorised release **`bantera-20261012-1`** completed at **2026-10-11
+21:42:13 UTC (12 October, 10:42:13 NZDT)**. Public API **1.12.7** and
+website **0.7.0** were verified through both Cloudflare Tunnel domains. Website
+source is unchanged; its release marker identifies this deployment.
+
+- API: `bantera-api-20261012-1`, loopback port **18107**.
+- Website: `bantera-website-20261012-1`, loopback port **13019**.
+- Connector: `cloudflared-20261012-1`, readiness port **12029**.
+- Release directory: `/home/ubuntu/releases/bantera-20261012-1`.
+- Active record: `/home/ubuntu/releases/bantera-current.json`.
+
+**GO for existing published clients:** no migrations, new secrets or changed
+model/voice configuration. Speech detection runs on streamed PCM before Gemini
+connection, avoiding fabricated replies to empty recordings and tested noise.
+New clients explicitly opt into the `no_speech` WebSocket frame and HTTP
+`{ "noSpeech": true }` result; older clients receive the existing error shape.
+Each initial scheduled callback starts a fresh Gemini session, while a reconnect
+within that callback can resume. Shared keys, encrypted ChatGPT credentials,
+database contents, Docker networks and unrelated tunnel routes were preserved.
+
+Validation: **762 backend tests passed**, **11** external/provider tests skipped;
+.NET build succeeded. Candidate and post-switch authenticated admin checks
+verified model catalogues, reasoning validation, search restrictions and timeout
+configuration. The staged server rejected empty, 20 ms and three-second silent
+WebSocket inputs without audio/transcripts; legacy WebSocket compatibility and
+an empty WAV HTTP upload also passed. These synthetic tests did not contact
+Gemini or read user conversations. Speech-like background audio can still pass
+voice activity detection; it is not an intelligibility guarantee.
+
+All **130/130** public HTTP samples returned **200** during handover and the
+two-minute stability window. Public API version, website release marker,
+home/download/login pages, public lessons and authentication gates passed.
+Candidate API logs contained zero fail/critical entries and website logs zero
+error lines. This records observed HTTP availability, not uninterrupted existing
+WebSocket calls or physical iPhone acoustic/CallKit behaviour.
+
+Source archive hashes, reviewed working-tree manifest, controller scripts,
+`voice-proof.json`, build/stage/promotion logs and a validated **3,400,226-byte**
+PostgreSQL backup are retained in the release directory. Prior application
+containers remain running and the previous connector is stopped but retained.
+Automatic rollback was armed throughout promotion and was not needed.
+
+Rollback for this release preserves subsequent database writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261012-1/deploy.py rollback
+```
+
+This restores `cloudflared-20261011-1`, backend **1.12.6** and the previous
+website release marker. Deployment used reviewed working-tree archives; it did
+not create a Git commit, push a branch or submit a store release.

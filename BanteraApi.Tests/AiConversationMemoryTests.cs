@@ -44,6 +44,24 @@ public class AiConversationMemoryTests
         state.Observe(Json("""{"serverContent":{"outputTranscription":{"text":"partial"}},"sessionResumptionUpdate":{"resumable":false}}"""));
         Assert.False(state.Idle); Assert.Null(state.Handle);
     }
+    [Fact] public void NewCallbackIgnoresEvenAValidPreviousCheckpointButReconnectCanResume()
+    {
+        var identity = Guid.NewGuid().ToString();
+        void Seed() {
+            using var socket = new ClientWebSocket();
+            AiLiveResumeCache.Attach(socket, identity, "key", "gemini-3.8-live");
+            AiLiveResumeCache.Observe(socket, Json("""{"serverContent":{"outputTranscription":{"text":"Hello"},"turnComplete":true},"sessionResumptionUpdate":{"resumable":true,"newHandle":"token"}}"""));
+            AiLiveResumeCache.Release(socket);
+        }
+        AiContextTurn[] history = [new("model", "Hello", DateTimeOffset.UtcNow)];
+        Seed();
+        var reasons = new List<string>();
+        Assert.Null(AiLiveResumeCache.Take(identity, "key", history, reasons.Add, forceFreshSession: true));
+        Assert.Equal(new[] { "new_callback" }, reasons);
+        Assert.Null(AiLiveResumeCache.Preferred(identity));
+        Seed();
+        Assert.NotNull(AiLiveResumeCache.Take(identity, "key", history));
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

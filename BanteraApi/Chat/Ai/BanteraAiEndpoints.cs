@@ -94,12 +94,14 @@ public static class BanteraAiEndpoints
         string? model = null;
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         var inputBytes = 0;
+        var acceptNoSpeech = false;
         try
         {
             var form = await context.Request.ReadFormAsync(new Microsoft.AspNetCore.Http.Features.FormOptions {
                 MultipartBodyLengthLimit = 10 * 1024 * 1024, ValueLengthLimit = 100000
             }, timeout.Token);
             var history = AiCallPolicy.ReadHistory(form["history"]);
+            acceptNoSpeech = string.Equals(form["acceptNoSpeech"], "true", StringComparison.Ordinal);
             var snapshot = AiDeviceTools.ReadSnapshot(form["deviceData"]);
             var metadata = AiClientMetadata.Read(form["metadata"]) with { DeviceWebSearch = false };
             if (!Guid.TryParse(form["requestId"], out var requestId)) return Results.BadRequest();
@@ -108,13 +110,18 @@ public static class BanteraAiEndpoints
             var file = form.Files.GetFile("audio");
             if (text.Length > 4000 || (file is null && text.Length == 0) || (file is not null && (text.Length > 0 || file.Length > 10 * 1024 * 1024)))
                 return Results.BadRequest();
-            var pcm = file is null ? Array.Empty<byte>() : await AiAudioCodec.ReadPcmAsync(file, timeout.Token);
+            var pcm = file is null ? Array.Empty<byte>() : await AiAudioCodec.ReadPcmAsync(file, timeout.Token, allowEmptyRecording: acceptNoSpeech);
             inputBytes = pcm.Length;
             model = await settings.GetModelAsync(timeout.Token);
             var reply = await live.ReplyAsync(model, user, pcm, history, timeout.Token, text, snapshot, metadata, call => callbacks.ExecuteAsync(userId, metadata, requestId.ToString(), call.GetProperty("name").GetString()!, call.GetProperty("args"), timeout.Token), voice: await settings.GetVoiceAsync(timeout.Token), reasoning: await settings.GetReasoningAsync(model, timeout.Token));
             // No database/R2 write: the client owns all history and audio persistence.
             return Results.Ok(new { audio = Convert.ToBase64String(AiAudioCodec.Wave(reply.Pcm)),
                 inputText = text.Length > 0 ? text : reply.InputText, outputText = reply.OutputText });
+        }
+        catch (AiNoSpeechException)
+        {
+            if (acceptNoSpeech) return Results.Ok(new { noSpeech = true });
+            return Results.BadRequest(new { message = "No speech detected. Please record a voice message.", code = "no_speech" });
         }
         catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
         {
@@ -156,14 +163,22 @@ public static class BanteraAiEndpoints
             var duration = resuming && start.RootElement.TryGetProperty("remainingSeconds", out var seconds) && seconds.TryGetInt32(out var requested)
                 ? Math.Clamp(requested, 1, AiCallPolicy.DurationSeconds) : AiCallPolicy.DurationSeconds;
             string? reminder = null;
+            var isCallback = false;
             if (start.RootElement.TryGetProperty("callbackId", out var callbackValue) && callbackValue.ValueKind == System.Text.Json.JsonValueKind.String &&
                 Guid.TryParse(callbackValue.GetString(), out var callbackId))
+            {
                 reminder = await AiCallbackService.ReminderForCallAsync(db, userId, callbackId, timeout.Token);
+                isCallback = true;
+                // A scheduled call has its own conversation identity, distinct
+                // from a previous callback, in-app call, or voice-message turn.
+                metadata = metadata with { ConversationId = callbackId.ToString() };
+            }
             var callKey = Guid.NewGuid().ToString();
             var model = await settings.GetModelAsync(timeout.Token);
             var voice = await settings.GetVoiceAsync(timeout.Token);
             var reasoning = await settings.GetReasoningAsync(model, timeout.Token);
-            using var upstream = await live.ConnectAsync(model, user, false, history, timeout.Token, metadata, voice, reasoning);
+            using var upstream = await live.ConnectAsync(model, user, false, history, timeout.Token, metadata, voice, reasoning,
+                forceFreshSession: isCallback && !resuming);
             timeout.CancelAfter(TimeSpan.FromSeconds(duration));
             await GeminiLiveService.SendAsync(client, new { type = "ready", maxCallSeconds = AiCallPolicy.DurationSeconds }, timeout.Token);
             await GeminiLiveService.SendAsync(upstream, new { clientContent = new {

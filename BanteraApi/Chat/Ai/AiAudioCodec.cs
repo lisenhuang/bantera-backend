@@ -9,7 +9,7 @@ public static class AiAudioCodec
     private const int MaxPcmBytes = BytesPerSecond * 181;
     private const int MaxWaveBytes = MaxPcmBytes + 65536;
 
-    public static async Task<byte[]> ReadPcmAsync(IFormFile file, CancellationToken ct)
+    public static async Task<byte[]> ReadPcmAsync(IFormFile file, CancellationToken ct, bool allowEmptyRecording = false)
     {
         if (file.Length < 44 || file.Length > MaxWaveBytes)
             throw new InvalidDataException("Invalid audio length.");
@@ -17,10 +17,10 @@ public static class AiAudioCodec
         await using var input = file.OpenReadStream();
         try { await input.ReadExactlyAsync(wave, ct); }
         catch (EndOfStreamException) { throw new InvalidDataException("Incomplete audio."); }
-        return ReadWave(wave);
+        return ReadWave(wave, allowEmptyRecording);
     }
 
-    private static byte[] ReadWave(ReadOnlySpan<byte> wave)
+    private static byte[] ReadWave(ReadOnlySpan<byte> wave, bool allowEmptyRecording)
     {
         if (!wave[..4].SequenceEqual("RIFF"u8) || !wave.Slice(8, 4).SequenceEqual("WAVE"u8)
             || BinaryPrimitives.ReadUInt32LittleEndian(wave[4..]) != wave.Length - 8)
@@ -52,7 +52,7 @@ public static class AiAudioCodec
             }
             else if (id.SequenceEqual("data"u8))
             {
-                if (dataOffset >= 0 || length < 320 || length > MaxPcmBytes || (length & 1) != 0)
+                if (dataOffset >= 0 || (!allowEmptyRecording && length < 320) || length > MaxPcmBytes || (length & 1) != 0)
                     throw new InvalidDataException("Invalid audio length.");
                 dataOffset = offset;
                 dataLength = (int)length;

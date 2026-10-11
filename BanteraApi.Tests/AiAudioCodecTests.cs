@@ -78,6 +78,18 @@ public class AiAudioCodecTests
         await Assert.ThrowsAsync<InvalidDataException>(() => Read(AiAudioCodec.Wave(new byte[length], 16000)));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    [InlineData(318)]
+    public async Task NoSpeechCapableClientCanSubmitAValidEmptyOrVeryShortWave(int length)
+    {
+        var pcm = new byte[length];
+        using var file = new MemoryStream(AiAudioCodec.Wave(pcm, 16000));
+        var result = await AiAudioCodec.ReadPcmAsync(new FormFile(file, 0, file.Length, "audio", "empty.wav"), default, allowEmptyRecording: true);
+        Assert.Equal(pcm, result);
+    }
+
     [Fact]
     public async Task PreservesFullThreeMinuteMessage()
     {

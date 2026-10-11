@@ -27,6 +27,7 @@ public static class AiVoiceMessageEndpoint
         Guid? correlationId = null;
         string? model = null, voice = null;
         var phase = "start";
+        var acceptNoSpeech = false;
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         try {
             using var start = await GeminiLiveService.ReceiveJsonAsync(client, lifetime.Token);
@@ -37,6 +38,7 @@ public static class AiVoiceMessageEndpoint
             var snapshot = AiDeviceTools.ReadSnapshot(root.TryGetProperty("deviceData", out var d) ? d.GetRawText() : null);
             var metadata = AiClientMetadata.Read(root.TryGetProperty("metadata", out var m) ? m.GetRawText() : null);
             var streamTranscripts = WantsTranscripts(root);
+            acceptNoSpeech = WantsNoSpeech(root);
             input = new AiVoiceInput();
             lifetime.CancelAfter(TimeSpan.FromSeconds(190));
             await GeminiLiveService.SendAsync(client, new { type = "ready" }, lifetime.Token);
@@ -65,6 +67,15 @@ public static class AiVoiceMessageEndpoint
             var reply = await replyTask;
             phase = "complete";
             await GeminiLiveService.SendAsync(client, new { type = "complete", inputText = reply.InputText, outputText = reply.OutputText }, lifetime.Token);
+        }
+        catch (AiNoSpeechException) {
+            // A quiet/accidental recording is a normal outcome, not a provider
+            // failure. Never emit an invented caption, reply audio, or tool call.
+            logs.CreateLogger("BanteraAI").LogInformation("AI voice recording ignored: no speech; inputBytes={InputBytes}.", input?.ByteCount ?? 0);
+            if (client.State == WebSocketState.Open) {
+                using var end = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await GeminiLiveService.SendAsync(client, NoSpeechFrame(acceptNoSpeech), end.Token);
+            }
         }
         catch (Exception ex) {
             var reason = AiChatDiagnostics.Reason(ex, context.RequestAborted.IsCancellationRequested);
@@ -108,6 +119,13 @@ public static class AiVoiceMessageEndpoint
     // Old released clients reject unknown frame types, so this is opt-in.
     public static bool WantsTranscripts(JsonElement start) =>
         start.TryGetProperty("streamTranscripts", out var value) && value.ValueKind == JsonValueKind.True;
+
+    public static bool WantsNoSpeech(JsonElement start) =>
+        start.TryGetProperty("acceptNoSpeech", out var value) && value.ValueKind == JsonValueKind.True;
+
+    public static object NoSpeechFrame(bool supported) => supported
+        ? new { type = "no_speech", message = "No speech detected." }
+        : new { type = "error", message = "No speech detected. Please record a voice message." };
 
     public static async Task ReceiveRecordingAsync(WebSocket client, AiVoiceInput input, CancellationTokenSource lifetime, AiVoiceDeviceTools? deviceTools = null)
     {

@@ -19,5 +19,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BanteraApi\BanteraApi.csproj" />
+    <EmbeddedResource Include="Fixtures/Voice/*.pcm" />
   </ItemGroup>
 </Project>
