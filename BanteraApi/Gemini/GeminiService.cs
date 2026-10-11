@@ -1606,7 +1606,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
 
         try
         {
-            if (IsChatGpt(primaryModel)) return await fn(primaryModel, "");
+            if (IsChatGpt(primaryModel)) return await WithChatGptAttemptAsync(operation, primaryModel, () => fn(primaryModel, ""));
             return await WithGeminiKeyAsync(operation, key => fn(primaryModel, key), cancellationToken,
                 webSearch: webSearch, model: primaryModel, fallbackAvailable: fallbackModel is not null, singleAttempt: singleAttempt);
         }
@@ -1622,7 +1622,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
                 "Primary model failed; trying the configured fallback model.",
                 new { primaryModel, fallbackModel }, primaryModel);
 
-            var result = IsChatGpt(fallbackModel) ? await fn(fallbackModel, "")
+            var result = IsChatGpt(fallbackModel) ? await WithChatGptAttemptAsync(operation, fallbackModel, () => fn(fallbackModel, ""))
                 : await WithGeminiKeyAsync(operation, key => fn(fallbackModel, key), cancellationToken,
                     webSearch: webSearch, model: fallbackModel);
             logger.LogInformation("AI {Operation} succeeded on fallback model {FallbackModel}.", operation, fallbackModel);
@@ -1630,6 +1630,28 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
                 "Generation continued with the configured fallback model.",
                 new { primaryModel, fallbackModel }, fallbackModel);
             return result;
+        }
+    }
+
+    private async Task<T> WithChatGptAttemptAsync<T>(string operation, string model, Func<Task<T>> run)
+    {
+        using var scope = events.BeginOperation(operation, model);
+        var stage = events.CurrentOperation!.Value.Operation;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        await events.RecordAsync("info", stage, "model_attempt_started", "Model operation started.", model: model);
+        try
+        {
+            var result = await run();
+            await events.RecordAsync("info", stage, "model_attempt_succeeded", "Model output passed pipeline validation.",
+                model: model, durationMs: (int)Math.Min(clock.ElapsedMilliseconds, int.MaxValue));
+            return result;
+        }
+        catch (Exception ex)
+        {
+            await events.RecordAsync("warning", stage, "model_attempt_failed", "Model operation did not complete successfully.",
+                new { reason = ex is TimeoutException ? "timeout" : ex is OperationCanceledException ? "cancelled_or_deadline" : "provider_or_validation_error" },
+                model, durationMs: (int)Math.Min(clock.ElapsedMilliseconds, int.MaxValue));
+            throw;
         }
     }
 
@@ -1663,6 +1685,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
             var key = keys[attempt];
             var keyHint = MaskKey(key);
             var clock = System.Diagnostics.Stopwatch.StartNew();
+            using var operationScope = events.BeginOperation(operation, model ?? "unknown");
             try
             {
                 await events.RecordAsync(AiPipelineSeverity.Info, stage, "model_attempt_started",

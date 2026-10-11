@@ -101,11 +101,12 @@ builder.Services.AddHttpClient("cloudflare", c =>
 builder.Services.AddScoped<CloudflareImageService>();
 
 builder.Services.Configure<GeminiSettings>(builder.Configuration.GetSection("Gemini"));
+builder.Services.AddTransient<BanteraApi.Diagnostics.GeminiModelCallHandler>();
 builder.Services.AddHttpClient("gemini", c =>
 {
     c.BaseAddress = new Uri("https://generativelanguage.googleapis.com");
     c.Timeout = TimeSpan.FromSeconds(180);
-});
+}).AddHttpMessageHandler<BanteraApi.Diagnostics.GeminiModelCallHandler>();
 builder.Services.AddScoped<GeminiService>();
 builder.Services.AddSingleton<IDialogueDurationPlanner, HistoricalDialogueDurationPlanner>();
 builder.Services.AddSingleton<GeminiVoiceCatalog>();

@@ -73,16 +73,44 @@ public sealed class ChatGptSubscriptionClient(HttpClient http, ChatGptConnection
         timeout.CancelAfter(TimeSpan.FromSeconds(seconds));
         var progress = new ResponseProgress();
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        var attempt = 0;
         try {
             return await RetryTransientAsync(async token => {
                 progress = new ResponseProgress();
-                try { return await CompleteCoreAsync(model, effort, prompt, instructions, search, progress, token); }
+                attempt++;
+                var callId = Guid.NewGuid().ToString("N");
+                var operation = events.CurrentOperation?.Operation ?? "chatgpt_response";
+                var callClock = System.Diagnostics.Stopwatch.StartNew();
+                var recordedStages = new HashSet<string>();
+                Task RecordProgress(string stage) => recordedStages.Add(stage)
+                    ? events.RecordAsync("info", operation, "model_call_progress", "Provider response progressed.",
+                        new { callId, attempt, stage }, "chatgpt/" + model,
+                        durationMs: (int)Math.Min(callClock.ElapsedMilliseconds, int.MaxValue))
+                    : Task.CompletedTask;
+                await events.RecordAsync("info", operation, "model_call_started", attempt == 1 ? "GPT request started." : "Retrying GPT after a transient provider failure.",
+                    new { callId, provider = "chatgpt", attempt, reasoning = effort ?? "default", webSearch = search, timeoutSeconds = seconds }, "chatgpt/" + model);
+                try {
+                    var result = await CompleteCoreAsync(model, effort, prompt, instructions, search, progress, token, RecordProgress);
+                    await events.RecordAsync("info", operation, "model_call_succeeded", "GPT response completed.",
+                        new { callId, attempt, searchCompleted = result.SearchVerified, answerCharacters = result.Answer.Length, sourceCount = result.Sources.Count },
+                        "chatgpt/" + model, durationMs: (int)Math.Min(callClock.ElapsedMilliseconds, int.MaxValue));
+                    return result;
+                }
                 catch (ChatGptConnectionException ex) {
                     await events.RecordAsync(AiPipelineSeverity.Warning, "chatgpt_response", "provider_response_failed",
-                        "GPT could not complete its response.", new { ex.Code, ex.ProviderCode, ex.HttpStatus,
+                        "GPT could not complete its response.", new { callId, attempt, ex.Code, ex.ProviderCode, ex.HttpStatus,
                             stage = ex.Stage ?? progress.Stage, searchCompleted = ex.SearchCompleted || progress.SearchCompleted,
                             answerCharacters = Math.Max(ex.AnswerCharacters, progress.AnswerCharacters) },
-                        "chatgpt/" + model, durationMs: (int)elapsed.ElapsedMilliseconds);
+                        "chatgpt/" + model, durationMs: (int)Math.Min(callClock.ElapsedMilliseconds, int.MaxValue));
+                    throw;
+                }
+                catch (Exception ex) {
+                    await events.RecordAsync("warning", operation, "model_call_failed", "GPT request did not complete.",
+                        new { callId, attempt, reason = ex is OperationCanceledException
+                            ? (!ct.IsCancellationRequested && timeout.IsCancellationRequested ? "timeout" : "cancelled_or_deadline")
+                            : ex is JsonException ? "invalid_response" : "transport_error",
+                            stage = progress.Stage, progress.SearchCompleted, progress.AnswerCharacters },
+                        "chatgpt/" + model, durationMs: (int)Math.Min(callClock.ElapsedMilliseconds, int.MaxValue));
                     throw;
                 }
             }, timeout.Token);
@@ -112,7 +140,7 @@ public sealed class ChatGptSubscriptionClient(HttpClient http, ChatGptConnection
         public bool SearchCompleted { get; set; }
         public int AnswerCharacters { get; set; }
     }
-    private async Task<ChatGptTestResult> CompleteCoreAsync(string model, string? effort, string prompt, string instructions, bool search, ResponseProgress progress, CancellationToken ct)
+    private async Task<ChatGptTestResult> CompleteCoreAsync(string model, string? effort, string prompt, string instructions, bool search, ResponseProgress progress, CancellationToken ct, Func<string, Task> onProgress)
     {
         var selected = (await ModelsAsync(ct)).FirstOrDefault(m => m.Id == model)
             ?? throw new ChatGptConnectionException("invalid_model");
@@ -129,11 +157,12 @@ public sealed class ChatGptSubscriptionClient(HttpClient http, ChatGptConnection
         request.Content = JsonContent.Create(body);
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         await EnsureSuccessAsync(response, ct);
+        await onProgress("accepted");
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        return await ParseResponseCoreAsync(stream, progress, ct);
+        return await ParseResponseCoreAsync(stream, progress, ct, onProgress);
     }
-    public static Task<ChatGptTestResult> ParseResponseAsync(Stream stream, CancellationToken ct) => ParseResponseCoreAsync(stream, new ResponseProgress(), ct);
-    private static async Task<ChatGptTestResult> ParseResponseCoreAsync(Stream stream, ResponseProgress progress, CancellationToken ct)
+    public static Task<ChatGptTestResult> ParseResponseAsync(Stream stream, CancellationToken ct, Func<string, Task>? onProgress = null) => ParseResponseCoreAsync(stream, new ResponseProgress(), ct, onProgress);
+    private static async Task<ChatGptTestResult> ParseResponseCoreAsync(Stream stream, ResponseProgress progress, CancellationToken ct, Func<string, Task>? onProgress = null)
     {
         using var reader = new StreamReader(stream);
         var answer = new StringBuilder(); var sources = new List<ChatGptSource>(); bool searched = false;
@@ -158,6 +187,7 @@ public sealed class ChatGptSubscriptionClient(HttpClient http, ChatGptConnection
             using var doc = JsonDocument.Parse(line.AsSpan(6).ToString()); var data = doc.RootElement; var type = Text(data, "type");
             // A fixed stage vocabulary only: never persist raw events, prompts, text or credentials.
             if (type == "response.created") progress.Stage = "created";
+            if (type == "response.output_item.added" && data.TryGetProperty("item", out var addedItem) && Text(addedItem, "type") == "reasoning") progress.Stage = "reasoning";
             if (type == "response.web_search_call.searching") progress.Stage = "searching";
             if (type == "response.web_search_call.completed") { searched = true; progress.Stage = "search_completed"; }
             if (type == "response.content_part.added") progress.Stage = "answer_started";
@@ -165,6 +195,8 @@ public sealed class ChatGptSubscriptionClient(HttpClient http, ChatGptConnection
             if (type == "response.output_text.annotation.added" && data.TryGetProperty("annotation", out var annotation) && Text(annotation, "type") == "url_citation") Source(annotation);
             if (type == "response.output_text.delta") { answer.Append(Text(data, "delta")); progress.Stage = "answer_streaming"; }
             progress.SearchCompleted = searched; progress.AnswerCharacters = answer.Length;
+            if (onProgress is not null && type is "response.created" or "response.output_item.added" or "response.web_search_call.searching" or "response.web_search_call.completed" or "response.content_part.added" or "response.output_text.delta")
+                await onProgress(progress.Stage);
             if (answer.Length > 100000) throw new ChatGptConnectionException("response_too_large");
             if (type is "error" or "response.failed" or "response.incomplete") {
                 var envelope = data.TryGetProperty("response", out var failed) ? failed : data;

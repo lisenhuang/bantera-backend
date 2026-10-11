@@ -22,6 +22,15 @@ public sealed class AiPipelineEventRecorder(IServiceScopeFactory scopeFactory, I
     private sealed record Context(Guid? UserId, Guid? JobId, string? LanguageCode, string Endpoint);
 
     private static readonly AsyncLocal<Context?> Current = new();
+    private static readonly AsyncLocal<(string Operation, string Model)?> Operation = new();
+    public (string Operation, string Model)? CurrentOperation => Operation.Value;
+
+    public IDisposable BeginOperation(string operation, string model)
+    {
+        var previous = Operation.Value;
+        Operation.Value = (operation.Replace(' ', '_').Replace("(", "").Replace(")", ""), model);
+        return new RestoreOperation(previous);
+    }
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
     public IDisposable BeginContext(Guid? userId, Guid? jobId, string? languageCode, string endpoint)
@@ -85,6 +94,11 @@ public sealed class AiPipelineEventRecorder(IServiceScopeFactory scopeFactory, I
     private sealed class Restore(Context? previous) : IDisposable
     {
         public void Dispose() => Current.Value = previous;
+    }
+
+    private sealed class RestoreOperation((string Operation, string Model)? previous) : IDisposable
+    {
+        public void Dispose() => Operation.Value = previous;
     }
 }
 
