@@ -16,19 +16,19 @@ public static class AiWebSearchTool
 }
 
 // A bounded request/response bridge for the voice-message WebSocket. No search
-// provider credentials, queries or results are stored in the database.
+// provider credentials, vocabulary, queries or results are stored in the database.
 public sealed class AiVoiceDeviceTools
 {
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> pending = new();
+    private readonly ConcurrentDictionary<string, (string Name, TaskCompletionSource<JsonElement> Completion)> pending = new();
     private int count;
     public async Task<object> InvokeAsync(JsonElement call, Func<object, Task> send, CancellationToken ct)
     {
-        if (call.GetProperty("name").GetString() != AiWebSearchTool.Name || Interlocked.Increment(ref count) > 4)
+        if (call.GetProperty("name").GetString() is not (AiWebSearchTool.Name or AiVocabularyTool.Name) || Interlocked.Increment(ref count) > 16)
             return new { unavailable = true };
         var id = call.GetProperty("id").GetString() ?? "";
         if (id.Length is 0 or > 200) throw new InvalidDataException();
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!pending.TryAdd(id, completion)) throw new InvalidDataException();
+        if (!pending.TryAdd(id, (call.GetProperty("name").GetString()!, completion))) throw new InvalidDataException();
         try {
             await send(new { type = "toolCall", calls = new[] { call } });
             return await completion.Task.WaitAsync(TimeSpan.FromSeconds(12), ct);
@@ -38,13 +38,16 @@ public sealed class AiVoiceDeviceTools
     }
     public bool Accept(JsonElement responses)
     {
-        if (responses.ValueKind != JsonValueKind.Array || responses.GetArrayLength() > 4 || responses.GetRawText().Length > 24000) return false;
+        if (responses.ValueKind != JsonValueKind.Array || responses.GetArrayLength() > 4 || responses.GetRawText().Length > 100000) return false;
         foreach (var item in responses.EnumerateArray()) {
-            if (!item.TryGetProperty("name", out var name) || name.GetString() != AiWebSearchTool.Name ||
+            if (!item.TryGetProperty("name", out var name) || name.GetString() is not (AiWebSearchTool.Name or AiVocabularyTool.Name) ||
                 !item.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String ||
                 !item.TryGetProperty("response", out var response) || !response.TryGetProperty("result", out var result)) return false;
             // A late result from a timed-out device must not kill the reply.
-            if (pending.TryRemove(id.GetString()!, out var completion)) completion.TrySetResult(result.Clone());
+            if (pending.TryGetValue(id.GetString()!, out var entry)) {
+                if (entry.Name != name.GetString()) return false;
+                if (pending.TryRemove(id.GetString()!, out _)) entry.Completion.TrySetResult(result.Clone());
+            }
         }
         return true;
     }

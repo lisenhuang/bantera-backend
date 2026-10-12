@@ -402,3 +402,16 @@ Clients opt in with `acceptNoSpeech: true` on WebSocket `start`. A quiet/empty r
 Each initially answered scheduled callback forces a fresh Gemini session, even if a matching old checkpoint exists. Its resumption identity uses the callback ID so reconnects within that call can resume without mixing another call or voice-message session. The initial greeting/reminder and device context are supplied once; a reconnection uses the existing continuation policy.
 
 As of 1.13.1, every new in-app audio call also ignores any previous Live checkpoint. New calls receive the device's saved summary and recent dated messages once as private background reference, then the explicit opening greeting. The nine-minute countdown starts after provider setup; reconnecting an ongoing call preserves its remaining time and may resume that call's session. Voice-message resumption is unchanged. This is enforced server-side for existing app clients, with no database migration or new configuration.
+
+### On-device AI vocabulary
+
+Clients opt in with `metadata.deviceVocabulary=true`. The Live setup then declares
+`manage_vocabulary` for list/add/update/remove/review/review_suggestions. Both
+voice-message and realtime WebSockets relay calls and correlate device responses;
+all reads and writes execute in the app. HTTP upload fallback disables this
+capability because that transport has no device tool response channel. Old clients
+omit the flag and retain their existing declarations. Resumption identities include
+the capability so an older session cannot hide the newly available tool. No database
+migration or new environment setting is required. Word content is not logged or
+persisted by the relay. The app enforces account isolation, bounded fields,
+deduplicated adds, atomic storage and the review-suggestion cooldown.

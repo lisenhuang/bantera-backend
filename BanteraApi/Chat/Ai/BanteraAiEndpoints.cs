@@ -103,7 +103,7 @@ public static class BanteraAiEndpoints
             var history = AiCallPolicy.ReadHistory(form["history"]);
             acceptNoSpeech = string.Equals(form["acceptNoSpeech"], "true", StringComparison.Ordinal);
             var snapshot = AiDeviceTools.ReadSnapshot(form["deviceData"]);
-            var metadata = AiClientMetadata.Read(form["metadata"]) with { DeviceWebSearch = false };
+            var metadata = AiClientMetadata.Read(form["metadata"]) with { DeviceWebSearch = false, DeviceVocabulary = false };
             if (!Guid.TryParse(form["requestId"], out var requestId)) return Results.BadRequest();
             correlationId = requestId;
             var text = form["text"].ToString().Trim();

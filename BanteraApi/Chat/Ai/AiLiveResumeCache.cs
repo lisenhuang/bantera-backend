@@ -19,7 +19,7 @@ public static class AiLiveResumeCache
     public static string? Identity(string model, User user, bool voiceMessage, AiClientMetadata? metadata, string voice, string? reasoning) =>
         Guid.TryParse(metadata?.ConversationId, out var conversation) ? Hash(JsonSerializer.Serialize(new {
             contextVersion = 5, user.Id, conversation, model, voiceMessage, voice, reasoning, user.LearningLanguage, user.NativeLanguage,
-            user.Name, metadata.LearningLevel, metadata.DeviceWebSearch
+            user.Name, metadata.LearningLevel, metadata.DeviceWebSearch, metadata.DeviceVocabulary
         })) : null;
     public static string? Preferred(string? identity) => identity is not null && Entries.TryGetValue(identity, out var value) && value.ExpiresAt > DateTimeOffset.UtcNow ? value.KeyHash : null;
     // Match provider speech, not the app's attachment annotations. Old clients

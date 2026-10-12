@@ -26,7 +26,7 @@ public static class AiDeviceTools
     }
 }
 
-// Only responses to pending read-only calls can be forwarded to Gemini.
+// Only responses to pending device calls can be forwarded to Gemini.
 public sealed class AiPendingTools
 {
     private readonly ConcurrentDictionary<string, string> pending = new();
@@ -41,7 +41,7 @@ public sealed class AiPendingTools
         foreach (var call in calls.EnumerateArray()) {
             var name = call.GetProperty("name").GetString()!;
             var id = call.GetProperty("id").GetString()!;
-            if ((!AiDeviceTools.Names.Contains(name) && name != AiWebSearchTool.Name) || id.Length > 200 || pending.Count >= 10) throw new InvalidDataException();
+            if ((!AiDeviceTools.Names.Contains(name) && name != AiWebSearchTool.Name && name != AiVocabularyTool.Name) || id.Length > 200 || pending.Count >= 10) throw new InvalidDataException();
             if (!pending.TryAdd(id, name)) throw new InvalidDataException();
         }
     }
