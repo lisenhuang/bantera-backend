@@ -1267,3 +1267,48 @@ and the prior release marker. Deployment used the reviewed working tree without
 a Git commit or push. The unchanged signed app **2.10.4 (348)** was reinstalled on
 the requested iPhone and its installed version verified with CoreDevice. The app
 was not launched or physically tested; this session-policy fix is server-side.
+
+## 12 October 2026: on-device AI vocabulary
+
+User-authorised release **`bantera-20261012-4`** completed at **2026-10-12
+00:53:57 UTC**. Backend **1.14.0** is live; website source remains unchanged at
+**0.8.0**, with an updated release marker. The new `manage_vocabulary` tool is
+relayed to opted-in app clients during voice messages and realtime calls.
+Vocabulary is stored on the device; requested tool results are returned to AI.
+App web/image searches continue to execute on the device.
+
+**GO for existing apps:** the capability defaults off, preserving older clients.
+No database migration, new secret or environment setting is required. Runtime
+environment, persistent mounts, Docker networks, encrypted provider credentials
+and unrelated Cloudflare ingress routes were preserved.
+
+Validation: **777 backend tests passed**, **11 external/environment tests skipped**;
+the final focused vocabulary/search suite passed **12 tests**. App analysis,
+vocabulary persistence, both tool transports, UI/localisation and voice lifecycle
+tests passed, along with debug and signed release iOS builds. Synthetic requests
+to the configured **gemini-3.1-flash-live-preview** model successfully exercised
+add, list/latest/count, update and remove with spoken responses. This verifies
+provider tool behaviour, not physical microphone performance. Evidence is in
+`vocabulary-provider-proof.json` in the release directory.
+
+Staged and public authenticated checks passed. **132/132** public API/homepage
+availability samples returned HTTP 200 during promotion and the two-minute
+stability window. Both public release markers were verified. HTTP sampling does
+not establish uninterrupted individual WebSockets. A validated **3,451,515-byte**
+database backup, source hashes, runtime snapshots and promotion logs are retained.
+Ports are API **18110**, website **13022**, connector readiness **12032**.
+
+Previous application containers and the stopped connector remain available.
+Rollback preserves subsequent database writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261012-4/deploy.py rollback
+```
+
+This restores `cloudflared-20261012-3`, backend **1.13.1**, website **0.8.0** and
+the previous active release record without restoring the database.
+
+Signed app **2.11.0 (351)** was installed on the requested iPhone and verified
+through CoreDevice. It includes the local vocabulary notebook and the previously
+accepted call echo protection changes. The app was not launched or physically
+tested during installation.
