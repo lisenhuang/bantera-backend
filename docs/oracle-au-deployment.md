@@ -1312,3 +1312,78 @@ Signed app **2.11.0 (351)** was installed on the requested iPhone and verified
 through CoreDevice. It includes the local vocabulary notebook and the previously
 accepted call echo protection changes. The app was not launched or physically
 tested during installation.
+
+## 12 October 2026: live call readiness and silent-response recovery
+
+User-authorised release **`bantera-20261012-5`** completed at **2026-10-12
+01:38:04 UTC**. Backend **1.14.1** is live; unchanged website source **0.8.0**
+was staged with the new release marker. **GO for existing apps:** no wire-format
+break, migration, new environment setting or secret is required.
+
+Calls now monitor recognised input awaiting a reply and stalled response audio,
+with bounded recovery and generic user-facing failures. Quiet learner pauses do
+not cause a timeout. Technical diagnostics record counts, timing, model and a
+call correlation ID, never audio, transcripts or tool arguments. These remain
+account-linked operational records under the existing 90-day retention policy.
+The reported 136-second call ended with a normal client close; logs contained no
+quota event and did not establish the cause of its earlier silence.
+
+New-call countdown and farewell timing begin with the first forwarded AI audio;
+renewals retain the remaining budget. App **2.11.1 (352)** shows Connecting until
+that audio arrives. Native VoiceProcessingIO readiness still precedes the Gemini
+connection; a regression test verifies that the controller awaits native start.
+
+Validation: the backend full suite passed **788 tests**, with **11 environment or
+external-service skips**; final focused checks passed **18**, with **1 DB skip**.
+App focused checks passed **9 tests**, followed by **2 passing transport tests**
+including the added startup-order assertion. Targeted analysis, debug and signed
+release builds passed. Existing unrelated analyzer/NuGet warnings remain.
+
+Staged and public authenticated checks passed. **132/132** availability samples
+returned HTTP 200, and both public release markers were verified. HTTP sampling
+does not establish uninterrupted individual WebSockets or physical acoustics.
+A validated **3,456,303-byte** database backup, source hashes, runtime snapshots
+and promotion logs remain in the release directory. Runtime environments,
+mounts, credentials and unrelated Cloudflare routes were retained. Ports are API
+**18111**, website **13023**, connector readiness **12033**.
+
+Previous containers and connector are retained. Rollback preserves new DB writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261012-5/deploy.py rollback
+```
+
+This restores release **bantera-20261012-4**, backend **1.14.0**, website **0.8.0**
+and its connector. Signed app **2.11.1 (352)** was installed on the requested
+iPhone; it was not launched or physically tested. Deployment used the working
+tree without committing or pushing it.
+
+## 12 October 2026: per-user paid Gemini key routing
+
+Release `bantera-20261012-6` deployed backend **1.15.0** and website **0.9.0** from the reviewed working trees. The app was unchanged and needs no reinstall. The AI dashboard now supports an encrypted paid key, explicit user access, regular-then-paid fallback, and paid-only testing. Default access remains regular keys only. No paid key or user access was enabled by deployment.
+
+Compatibility: **GO for published app versions**. The admin API additions are additive; no database migration or new environment variable was required. The existing `ChatGptConnection__EncryptionKey` was verified and preserved, along with container mounts and all tunnel routes. Backup `database-before.dump` was verified readable (3,470,653 bytes).
+
+Validation: full backend suite 802 passed / 11 skipped; final Gemini-focused suite 180 passed; website TypeScript, targeted ESLint and production build passed. Staged and public checks verified encrypted-storage readiness, masked admin responses, 401/403 access control, invalid-setting rejection, dashboard rendering and existing generation timelines. Public version and deployment marker matched; the handover and stability sampler recorded 132/132 HTTP-200 checks. Paid provider calls remain untested until an admin supplies a key and allows a user.
+
+Runtime: `bantera-api-20261012-6` (loopback 18112), `bantera-website-20261012-6` (13024), and `cloudflared-20261012-6` (readiness 12034). The prior release 5 applications and connector remain available for rollback. Controller, hashes, protected runtime snapshots and smoke-test proofs are in `/home/ubuntu/releases/bantera-20261012-6`. If rollback becomes necessary, run its `deploy.py rollback`; do not restore the database. A rollback to release 5 also removes paid-key routing support.
+
+## 12 October 2026: paid AQ key save correction
+
+Release `bantera-20261012-7` successfully deployed backend **1.15.1** and website **0.9.1**. Corrected paid-key validation to accept AQ. authorization keys and lengths up to 4096; the password field retains the typed value on failed saves and clears it only after successful persistence. Static admin errors now distinguish malformed keys from invalid users and conflicting remove/replace choices. No mobile changes or installation.
+
+Compatibility: **GO for published apps**. Migration `20261012025341_ExpandEncryptedAppSettings` widens `app_settings.Value` from varchar(2000) to text; the database confirmed the new type and migration entry. Existing values and old applications remain compatible. No new secrets or environment configuration. Database backup was verified readable (3,471,869 bytes); application rollback must not reverse the migration or restore the database.
+
+Validation: 809 backend tests passed, 11 optional tests skipped. A disposable local PostgreSQL test saved/read a 3003-character synthetic AQ. key encrypted, verified blank-key updates preserve it, and verified explicit removal. Website TypeScript, targeted ESLint and production build passed. Staged and public admin checks verified specific invalid-key errors, authentication gates and the 4096-character form. Public release markers matched and the availability sampler recorded 132/132 HTTP-200 checks. No real user key was copied, logged or used for a provider request.
+
+Runtime: `bantera-api-20261012-7` (18113), `bantera-website-20261012-7` (13025), `cloudflared-20261012-7` (12035). Release 6 containers/connector remain for rollback. Controller, source hashes, protected backup and verification artifacts: `/home/ubuntu/releases/bantera-20261012-7`; use its `deploy.py rollback` only when needed.
+
+## 12 October 2026: voice-message callback capability correction
+
+Release `bantera-20261012-8` deployed backend **1.15.2** with unchanged website **0.9.1**. Voice-message and live-call prompts explicitly support scheduling CallKit callbacks; reminder-only requests remain messages. Missing notification registration returns delivery-specific guidance, and idempotency cannot report a previously scheduled message as a successful call. Callback tool attempts/outcomes now produce privacy-safe technical diagnostics. The session context revision invalidates older restored instructions.
+
+Compatibility: **GO for published apps**. No mobile changes, new migration or configuration; no reinstall needed. Backend build and 814 tests passed (9 optional tests skipped). Synthetic Gemini 3.1 Live tests using the configured paid credential invoked `schedule_callback` and produced audio, including a recorded-audio test with an earlier refusal in history. Arguments were validated and tool results were simulated: no actual callback was scheduled or phone tested. Existing logs did not establish the precise reason for the original refusal.
+
+The initial staged startup reached the host inotify instance limit. Ten unrouted API/website containers for releases `20261012-1` through `20261012-5` were stopped after checking active tunnel routes; containers/images remain recoverable. Release 7 stayed live and release 6 stayed available during recovery. The candidate then passed startup, authenticated callback-service resolution, admin and public checks. Backup was verified readable (3,483,920 bytes). The promotion recorded **132/132 HTTP-200** availability checks and public markers confirmed the new release.
+
+Runtime: `bantera-api-20261012-8` (18114), `bantera-website-20261012-8` (13026), `cloudflared-20261012-8` (12036). Release 7 remains the immediate rollback. Deployment controller, source hashes, backup and proofs are under `/home/ubuntu/releases/bantera-20261012-8`; its `deploy.py rollback` restores release 7 without restoring the database. Source was deployed from the working tree; no commit or push.

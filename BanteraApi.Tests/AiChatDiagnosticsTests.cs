@@ -72,12 +72,17 @@ public class AiChatDiagnosticsTests
             await service.FailureAsync(user, "en-NZ", "/ws/chat/ai/voice", request, error,
                 new { outputBytes = 48000, committed = true }, 800, "test-model");
             await service.ClientAsync(user, new(request, "socket_closed", "reply", 32000, 48000, 900, true));
+            await service.CallbackToolAsync(user, request.ToString(), "schedule_callback", "call_notifications_unavailable", false, true);
             var rows = await db.AiPipelineEvents.Where(e => e.UserId == user).ToListAsync();
-            Assert.Equal(2, rows.Count);
+            Assert.Equal(3, rows.Count);
             Assert.All(rows, row => {
                 Assert.Contains(request.ToString(), row.DetailJson);
                 Assert.DoesNotContain("secret", row.DetailJson);
             });
+            var callback = Assert.Single(rows, row => row.Stage == "ai_callback_tool");
+            using var callbackDetail = JsonDocument.Parse(callback.DetailJson!);
+            Assert.Equal(new[] { "hasCallToken", "hasMessageToken", "requestId", "tool" }, callbackDetail.RootElement.EnumerateObject().Select(p => p.Name).Order());
+            Assert.Equal("call_notifications_unavailable", callback.Code);
             var server = Assert.Single(rows, row => row.Stage == "ai_voice_server");
             Assert.Equal("provider_request_failed", server.Code);
             Assert.Equal(503, JsonDocument.Parse(server.DetailJson!).RootElement.GetProperty("providerCode").GetInt32());

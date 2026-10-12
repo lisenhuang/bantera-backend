@@ -23,6 +23,7 @@ public sealed class AiPipelineEventRecorder(IServiceScopeFactory scopeFactory, I
 
     private static readonly AsyncLocal<Context?> Current = new();
     private static readonly AsyncLocal<(string Operation, string Model)?> Operation = new();
+    public Guid? CurrentUserId => Current.Value?.UserId;
     public (string Operation, string Model)? CurrentOperation => Operation.Value;
 
     public IDisposable BeginOperation(string operation, string model)

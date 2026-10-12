@@ -49,7 +49,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             model = "models/" + model,
             contextWindowCompression = new { slidingWindow = new { } },
             generationConfig = AiLiveModelPolicy.GenerationConfig(model, voice, reasoning),
-            systemInstruction = new { parts = new[] { new { text = prompt + AiConversationTiming.LatestMessagePolicy + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (deviceVocabulary ? AiVocabularyTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
+            systemInstruction = new { parts = new[] { new { text = prompt + AiCallbackService.CapabilityPolicy + AiConversationTiming.LatestMessagePolicy + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (deviceVocabulary ? AiVocabularyTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
             tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model, deviceWebSearch, deviceVocabulary) } },
             inputAudioTranscription = new { }, outputAudioTranscription = new { },
             realtimeInputConfig = new { automaticActivityDetection = voiceMessage
@@ -98,13 +98,14 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 logger.LogWarning("Bantera AI active call quota reached; key cooled down before reconnection.");
             });
             return socket;
-        }, ct, forceFreshSession ? null : AiLiveResumeCache.Preferred(AiLiveResumeCache.Identity(model, user, voiceMessage, metadata, voice, reasoning)));
+        }, ct, forceFreshSession ? null : AiLiveResumeCache.Preferred(AiLiveResumeCache.Identity(model, user, voiceMessage, metadata, voice, reasoning)), user.Id);
     }
 
     // Retry only explicit provider quota failures. Every eligible key gets at most one attempt.
     public static async Task<T> TryKeysAsync<T>(IEnumerable<string> keys, Func<string, CancellationToken, Task<T>> attempt,
-        Action<string> coolDown, CancellationToken ct)
+        Action<string> coolDown, CancellationToken ct, bool retryProviderFailures = false, Func<string, Task>? invalidKey = null)
     {
+        Exception? lastFailure = null;
         foreach (var key in keys.Distinct(StringComparer.Ordinal))
         {
             ct.ThrowIfCancellationRequested();
@@ -119,19 +120,28 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 }
             }
             catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests && !ct.IsCancellationRequested)
-            { coolDown(key); }
+            { lastFailure = ex; coolDown(key); }
+            catch (HttpRequestException ex) when (GeminiKeyHealthService.Classify(ex) == GeminiKeyFailureKind.InvalidKey && !ct.IsCancellationRequested)
+            { lastFailure = ex; if (invalidKey is not null) await invalidKey(key); }
+            catch (Exception ex) when (retryProviderFailures && !ct.IsCancellationRequested &&
+                !ex.Data.Contains("partialAudio") && (GeminiKeyHealthService.RetryableProviderFailure(ex) || ex is AiLiveResponseTimeoutException { CanReplay: true }))
+            { lastFailure = ex; }
         }
+        if (lastFailure is not null && lastFailure is not HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests }) throw lastFailure;
         throw new AiLiveQuotaUnavailableException();
     }
 
-    private async Task<T> WithKeysAsync<T>(string model, Func<string, CancellationToken, Task<T>> attempt, CancellationToken ct, string? preferredKeyHash = null)
+    private async Task<T> WithKeysAsync<T>(string model, Func<string, CancellationToken, Task<T>> attempt, CancellationToken ct, string? preferredKeyHash = null, Guid? userId = null)
     {
-        var keys = await health.EligibleKeysAsync(GeminiService.SelectKeys(options.Value.ApiKeys, false, ""), model, ct);
-        if (preferredKeyHash is not null) keys = keys.OrderByDescending(key => AiLiveResumeCache.Hash(key) == preferredKeyHash).ToArray();
-        return await TryKeysAsync(keys, attempt, key => {
+        var plan = await health.PlanAsync(model, userId, ct, preferredHash: preferredKeyHash);
+        return await TryKeysAsync(plan.Keys, async (key, token) => {
+            if (key == plan.PaidKey && !await health.StillAllowedAsync(key, userId, token)) throw new InvalidOperationException("AI capacity unavailable.");
+            return await attempt(key, token);
+        }, key => {
             health.CoolDown(key, model);
             logger.LogWarning("Bantera AI quota reached for {Model}; trying another eligible key.", model);
-        }, ct);
+        }, ct, retryProviderFailures: plan.PaidKey is not null,
+            invalidKey: key => health.MarkInvalidAsync(key, "Invalid, revoked, or blocked key", ct));
     }
 
     private async Task<ClientWebSocket> ConnectKeyAsync(string key, string model, User user, bool voiceMessage,
@@ -172,12 +182,17 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         }
         catch (Exception ex)
         {
-            var quota = (int)socket.HttpStatusCode == 429 || ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests };
+            var statusCode = socket.HttpStatusCode;
+            var quota = (int)statusCode == 429 || ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests };
             AiLiveResumeCache.Release(socket, false);
             socket.Dispose();
             ct.ThrowIfCancellationRequested();
             if (quota) throw new HttpRequestException("Live quota unavailable.", null, System.Net.HttpStatusCode.TooManyRequests);
             if (ex is AiLiveSessionExpiredException) throw;
+            if (ex is HttpRequestException http) throw new HttpRequestException("AI connection unavailable.", null, http.StatusCode);
+            if ((int)statusCode >= 400) throw new HttpRequestException("AI connection unavailable.", null, statusCode);
+            if (ex is OperationCanceledException) throw new TimeoutException("AI connection timed out.");
+            if (ex is WebSocketException) throw new HttpRequestException("AI connection unavailable.");
             // Never propagate provider exception text: it can contain the API key URL.
             throw new InvalidOperationException($"AI connection unavailable ({ex.GetType().Name}).");
         }
@@ -199,7 +214,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             using var socket = await ConnectKeyAsync(key, model, user, true, history, token, metadata, voice, reasoning);
             await SendAsync(socket, new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text } } } }, turnComplete = true } }, token);
             return await ReadReplyAsync(socket, snapshot, tools, token, requiresInteractionIdle: AiLiveModelPolicy.RequiresInteractionIdle(model));
-        }, ct, AiLiveResumeCache.Preferred(AiLiveResumeCache.Identity(model, user, true, metadata, voice, reasoning)));
+        }, ct, AiLiveResumeCache.Preferred(AiLiveResumeCache.Identity(model, user, true, metadata, voice, reasoning)), user.Id);
     }
 
     private static Func<JsonElement, Task<object>>? MemoizeTools(Func<JsonElement, Task<object>>? execute)
@@ -288,7 +303,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 Annotate(failure);
                 throw failure;
             }
-            catch (Exception ex) { Annotate(ex); throw; }
+            catch (Exception ex) { if (receivedAudio) ex.Data["partialAudio"] = true; Annotate(ex); throw; }
             finally {
                 AiLiveResumeCache.Release(socket, succeeded);
                 await attempt.CancelAsync();
@@ -296,7 +311,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 try { await upload; } catch { }
                 try { await reply; } catch { }
             }
-        }, ct, AiLiveResumeCache.Preferred(AiLiveResumeCache.Identity(model, user, true, metadata, voice, reasoning)));
+        }, ct, AiLiveResumeCache.Preferred(AiLiveResumeCache.Identity(model, user, true, metadata, voice, reasoning)), user.Id);
     }
 
     public static async Task UploadTranscriptAsync(WebSocket socket, AiVoiceInput input, string transcript, CancellationToken ct, IReadOnlyList<AiContextTurn>? history = null)

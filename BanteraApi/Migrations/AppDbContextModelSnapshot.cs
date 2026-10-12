@@ -335,8 +335,7 @@ namespace BanteraApi.Migrations
 
                     b.Property<string>("Value")
                         .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
+                        .HasColumnType("text");
 
                     b.HasKey("Key");
 

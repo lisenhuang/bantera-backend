@@ -10,6 +10,24 @@ namespace BanteraApi.Chat.Ai;
 // provider messages/URLs, tokens, or device learning data in diagnostics.
 public sealed class AiChatDiagnostics(AiPipelineEventRecorder events)
 {
+    internal async Task CallbackToolAsync(Guid userId, string requestKey, string tool, string outcome,
+        bool hasCallToken, bool hasMessageToken)
+    {
+        using var scope = events.BeginContext(userId, null, null, "ai_callback_tool");
+        await events.RecordAsync(outcome is "attempt_started" or "scheduled" ? "info" : "warning",
+            "ai_callback_tool", outcome, "AI reminder scheduling tool status.", new {
+                requestId = Guid.TryParse(requestKey, out var id) ? id : (Guid?)null,
+                tool, hasCallToken, hasMessageToken
+            });
+    }
+    internal async Task CallAsync(Guid userId, Guid requestId, string? model,
+        string code, AiLiveCallHealth health, int elapsedMs)
+    {
+        using var scope = events.BeginContext(userId, null, null, "/ws/chat/ai");
+        await events.RecordAsync(code == "call_failed" ? "error" : "info", "ai_live_call", code,
+            "Live call technical status.", new { requestId, progress = health.Snapshot() },
+            model: model, durationMs: elapsedMs);
+    }
     public sealed record ClientReport(Guid RequestId, string Code, string Phase,
         int InputBytes, int OutputBytes, int ElapsedMs, bool Committed,
         int? CloseCode = null, string? AppVersion = null, string? ErrorType = null, string? NativeCode = null);

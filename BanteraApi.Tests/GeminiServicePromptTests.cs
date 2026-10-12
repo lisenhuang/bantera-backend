@@ -903,9 +903,57 @@ public class GeminiServicePromptTests
         }
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task PaidKeyRoutingAppliesToTextAndAudio(bool audio, bool paidOnly)
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var scope = provider.GetRequiredService<IServiceScopeFactory>();
+        var user = Guid.NewGuid();
+        const string paid = "AIzaSy-paid-test-secret";
+        var policy = new PaidFallbackPolicy(paid, [user], paidOnly ? [user] : []);
+        var store = new PaidTestStore(scope, policy);
+        var events = new BanteraApi.Diagnostics.AiPipelineEventRecorder(scope, NullLogger<BanteraApi.Diagnostics.AiPipelineEventRecorder>.Instance);
+        var handler = new PaidRoutingHandler(paid, audio);
+        var service = CreateService(handler, new("text", "tts", null, null), ["regular-one", paid, "regular-two"], paidFallback: store);
+        async Task Run() {
+            if (audio) await service.GenerateAudioAsync(new GeneratedDialogue("Chat", "Kore", "Puck", [new("Speaker1", "Hello")], []), "en-NZ");
+            else await service.GenerateDialogueAsync("English", "en-NZ", "coffee", 60);
+        }
+        // A missing/unknown identity must never reach the paid provider credential.
+        await Assert.ThrowsAsync<InvalidOperationException>(Run);
+        Assert.DoesNotContain(paid, handler.Keys);
+        handler.Keys.Clear();
+        using (events.BeginContext(user, null, "en-NZ", "test")) await Run();
+        Assert.Equal(paid, handler.Keys.Last());
+        // Regular keys were cooled above; paid remains reachable only for this user.
+        Assert.All(handler.Keys, key => Assert.Equal(paid, key));
+    }
+    private sealed class PaidTestStore(IServiceScopeFactory scopes, PaidFallbackPolicy policy)
+        : GeminiPaidFallback(scopes, Options.Create(new BanteraApi.OpenAi.ChatGptConnectionOptions()))
+    {
+        public override Task<PaidFallbackPolicy> ReadAsync(CancellationToken ct) => Task.FromResult(policy);
+        public override Task<PaidFallbackPolicy> ForUserAsync(Guid? user, CancellationToken ct) => Task.FromResult(policy);
+    }
+    private sealed class PaidRoutingHandler(string paid, bool audio) : DelegatingHandler(new FallbackHandler(audio))
+    {
+        public List<string> Keys { get; } = [];
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var key = request.Headers.TryGetValues("x-goog-api-key", out var values) ? values.Single() :
+                Uri.UnescapeDataString(request.RequestUri!.Query.Split("key=").Last().Split('&')[0]);
+            Keys.Add(key);
+            if (key != paid) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Content = new StringContent("quota") });
+            return base.SendAsync(request, ct);
+        }
+    }
+
     private static GeminiService CreateService(
         HttpMessageHandler handler, AiModelSelection? selection = null, string[]? apiKeys = null,
-        IDialogueDurationPlanner? durationPlanner = null)
+        IDialogueDurationPlanner? durationPlanner = null, GeminiPaidFallback? paidFallback = null)
     {
         var client = new HttpClient(handler)
         {
@@ -931,7 +979,7 @@ public class GeminiServicePromptTests
             services.GetRequiredService<IServiceScopeFactory>(),
             cache,
             settings,
-            NullLogger<GeminiKeyHealthService>.Instance);
+            NullLogger<GeminiKeyHealthService>.Instance, paidFallback);
 
         return new GeminiService(
             new StaticHttpClientFactory(client),

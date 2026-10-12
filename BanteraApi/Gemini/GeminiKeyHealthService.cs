@@ -28,7 +28,8 @@ public sealed class GeminiKeyHealthService(
     IServiceScopeFactory scopeFactory,
     IMemoryCache cache,
     IOptions<GeminiSettings> options,
-    ILogger<GeminiKeyHealthService> logger)
+    ILogger<GeminiKeyHealthService> logger,
+    GeminiPaidFallback? paidFallback = null)
 {
     private const string InvalidPrefix = "ai.gemini.invalidKey.";
     private const string InvalidCacheKey = "gemini-invalid-keys";
@@ -75,6 +76,25 @@ public sealed class GeminiKeyHealthService(
             .ToArray();
     }
 
+    public sealed record KeyPlan(string[] Keys, string? PaidKey);
+    public async Task<KeyPlan> PlanAsync(string? model, Guid? user, CancellationToken ct, bool webSearch = false, string? preferredHash = null)
+    {
+        var policy = paidFallback is null ? new PaidFallbackPolicy(null, []) : await paidFallback.ForUserAsync(user, ct);
+        var regular = GeminiService.SelectKeys(options.Value.ApiKeys, webSearch, AiSearchPolicy.GeminiKeyPrefix);
+        var ordered = GeminiPaidFallback.Order(regular, policy, user, preferredHash, webSearch);
+        var eligible = await EligibleKeysAsync(ordered, model, ct);
+        return new(eligible, policy.Key is { } paid && eligible.Contains(paid) ? paid : null);
+    }
+    public async Task<bool> StillAllowedAsync(string paidKey, Guid? user, CancellationToken ct)
+    {
+        if (paidFallback is null || user is null) return false;
+        var policy = await paidFallback.ForUserAsync(user, ct);
+        return policy.Key == paidKey && policy.AllowedUserIds.Contains(user.Value);
+    }
+    internal static bool RetryableProviderFailure(Exception ex) => ex is HttpRequestException h &&
+        (h.StatusCode is null || h.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.Forbidden || (int)h.StatusCode >= 500) ||
+        ex is TimeoutException or TaskCanceledException;
+
     public DateTimeOffset CoolDown(string key, string? model)
     {
         var now = DateTimeOffset.UtcNow;
@@ -120,7 +140,8 @@ public sealed class GeminiKeyHealthService(
     public async Task<GeminiKeyHealthSnapshot> GetSnapshotAsync(CancellationToken ct)
     {
         var invalid = await GetInvalidAsync(ct);
-        var keys = GeminiService.SelectKeys(options.Value.ApiKeys, false, options.Value.WebSearchKeyPrefix);
+        var paid = paidFallback is null ? null : (await paidFallback.ReadAsync(ct)).Key;
+        var keys = GeminiService.SelectKeys(options.Value.ApiKeys.Concat(paid is null ? [] : new[] { paid }), false, options.Value.WebSearchKeyPrefix);
         var now = DateTimeOffset.UtcNow;
         var items = new List<GeminiKeyHealthItem>();
         var affected = 0;
@@ -153,7 +174,8 @@ public sealed class GeminiKeyHealthService(
 
     public async Task<bool> ReenableAsync(string id, CancellationToken ct)
     {
-        var keys = GeminiService.SelectKeys(options.Value.ApiKeys, false, options.Value.WebSearchKeyPrefix);
+        var paid = paidFallback is null ? null : (await paidFallback.ReadAsync(ct)).Key;
+        var keys = GeminiService.SelectKeys(options.Value.ApiKeys.Concat(paid is null ? [] : new[] { paid }), false, options.Value.WebSearchKeyPrefix);
         if (!keys.Any(key => KeyId(key) == id)) return false;
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

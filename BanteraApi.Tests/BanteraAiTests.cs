@@ -398,6 +398,22 @@ public class BanteraAiTests
         Assert.False(string.IsNullOrWhiteSpace(response.OutputText));
     }
 
+    [Theory]
+    [InlineData("gemini-3.1-flash-live-preview", true)]
+    [InlineData("gemini-3.1-flash-live-preview", false)]
+    [InlineData("gemini-3.8-live", true)]
+    public void CallbackCapabilityIsExplicitInBothVoiceModes(string model, bool voiceMessage)
+    {
+        var setup = JsonSerializer.SerializeToElement(GeminiLiveService.Setup(model, "Test learner", voiceMessage)).GetProperty("setup");
+        var prompt = setup.GetProperty("systemInstruction").GetProperty("parts")[0].GetProperty("text").GetString()!;
+        Assert.Contains("Bantera CAN schedule", prompt);
+        Assert.Contains("recorded voice message", prompt);
+        Assert.Contains("do not downgrade", prompt);
+        var tools = setup.GetProperty("tools")[0].GetProperty("functionDeclarations").EnumerateArray().Select(t => t.GetProperty("name").GetString());
+        Assert.Contains("schedule_callback", tools);
+        Assert.Contains("schedule_reminder", tools);
+    }
+
     [AiDatabaseFact] public async Task SchedulingIsDurableIdempotentAndAccountScoped()
     {
         var connection = Environment.GetEnvironmentVariable("BANTERA_AI_TEST_DB")!;
@@ -410,6 +426,9 @@ public class BanteraAiTests
         try {
             var service = new AiCallbackService(db, Options.Create(new ApnsSettings { KeyId="test", TeamId="test", BundleId="test", PrivateKeyPem="test" }));
             var meta = new AiClientMetadata(new("Pacific/Auckland", 780), token.Token);
+            var missingToken = JsonSerializer.SerializeToElement(await service.ExecuteAsync(user.Id, meta with { PushToken = null }, "missing-token", "schedule_callback", Json("{\"delaySeconds\":60,\"reminder\":\"Stretch\",\"explicitCallRequested\":true}"), default));
+            Assert.Equal("call_notifications_unavailable", missingToken.GetProperty("code").GetString());
+            Assert.Contains("Bantera supports callbacks", missingToken.GetProperty("error").GetString());
             var missing = JsonSerializer.SerializeToElement(await service.ExecuteAsync(user.Id, meta, "missing", "schedule_callback", Json("{\"delaySeconds\":60,\"explicitCallRequested\":true}"), default));
             Assert.True(missing.GetProperty("needsReminder").GetBoolean());
             Assert.False(await db.AiCallbacks.AnyAsync(c => c.UserId == user.Id));
@@ -442,6 +461,9 @@ public class BanteraAiTests
             await service.ExecuteAsync(user.Id, messageMeta, "voice-reminder", "schedule_reminder", args, default);
             await service.ExecuteAsync(user.Id, messageMeta, "voice-reminder", "schedule_reminder", args, default);
             var reminder = await db.AiCallbacks.AsNoTracking().SingleAsync(c => c.UserId == user.Id && c.Delivery == "message");
+            var conflict = JsonSerializer.SerializeToElement(await service.ExecuteAsync(user.Id, messageMeta, "voice-reminder", "schedule_callback", Json("{\"delaySeconds\":60,\"reminder\":\"Stretch\",\"explicitCallRequested\":true}"), default));
+            Assert.Equal("delivery_conflict", conflict.GetProperty("code").GetString());
+            Assert.False(conflict.TryGetProperty("status", out _));
             Assert.Equal("queued", reminder.Status); // Legacy call workers only select scheduled/ringing.
             Assert.Equal(alert.Id, reminder.PushTokenId);
             await db.AiCallbacks.Where(c => c.Id == reminder.Id).ExecuteUpdateAsync(u => u.SetProperty(c => c.Status, "ready").SetProperty(c => c.Audio, new byte[]{1,2}).SetProperty(c => c.Transcript, "Stretch"));

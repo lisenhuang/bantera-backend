@@ -1656,8 +1656,9 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
     }
 
     /// <summary>
-    /// Rotates shuffled keys only on quota failures. Other failures stop key rotation,
-    /// and content rejections remain final after the content retry limit.
+    /// Regular keys rotate on quota failures. Allowlisted paid-fallback requests also
+    /// exhaust keys on credential and transient transport/provider failures.
+    /// Content rejections remain final after the content retry limit.
     /// </summary>
     private async Task<T> WithGeminiKeyAsync<T>(string operation, Func<string, Task<T>> fn, CancellationToken cancellationToken, bool webSearch = false, string? model = null, bool fallbackAvailable = false, bool singleAttempt = false)
     {
@@ -1665,8 +1666,8 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
         if (webSearch && model != AiSearchPolicy.GeminiModel)
             throw new InvalidOperationException("This Gemini model is not allowed for web search.");
         var configuredKeys = SelectKeys(Settings.ApiKeys, webSearch, AiSearchPolicy.GeminiKeyPrefix);
-        if (configuredKeys.Length == 0) throw new InvalidOperationException("No Gemini API keys configured.");
-        var keys = await keyHealth.EligibleKeysAsync(configuredKeys, model, cancellationToken);
+        var plan = await keyHealth.PlanAsync(model, events.CurrentUserId, cancellationToken, webSearch);
+        var keys = plan.Keys;
         if (keys.Length == 0)
         {
             await events.RecordAsync(
@@ -1683,6 +1684,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
         {
             cancellationToken.ThrowIfCancellationRequested();
             var key = keys[attempt];
+            if (key == plan.PaidKey && !await keyHealth.StillAllowedAsync(key, events.CurrentUserId, cancellationToken)) break;
             var keyHint = MaskKey(key);
             var clock = System.Diagnostics.Stopwatch.StartNew();
             using var operationScope = events.BeginOperation(operation, model ?? "unknown");
@@ -1703,17 +1705,17 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 // Includes HttpClient timeouts (TaskCanceledException without our token cancelled).
-                lastEx = ex;
+                lastEx = ex is HttpRequestException h ? new HttpRequestException("Gemini request failed.", null, h.StatusCode) : new InvalidOperationException("Gemini request failed (" + ex.GetType().Name + ").");
                 var failureKind = GeminiKeyHealthService.Classify(ex);
                 logger.LogWarning(
                     "Gemini {Operation} failed with key {Key} (attempt {Attempt}/{Total}). {Error}",
-                    operation, keyHint, attempt + 1, keys.Length, TruncateForLog(ex.Message, 400));
+                    operation, keyHint, attempt + 1, keys.Length, TruncateForLog(ex.Message.Replace(key, "[redacted]"), 400));
                 await events.RecordAsync(
                     AiPipelineSeverity.Warning, stage, "key_failed",
-                    TruncateForLog(ex.Message, 1000),
+                    TruncateForLog(ex.Message.Replace(key, "[redacted]"), 1000),
                     new { attempt = attempt + 1, total = keys.Length, status = (ex as HttpRequestException)?.StatusCode is { } code ? (int)code : (int?)null, exception = ex.GetType().Name, failureKind = failureKind.ToString() },
                     model, keyHint);
-                if (failureKind == GeminiKeyFailureKind.ModelUnavailable)
+                if (failureKind == GeminiKeyFailureKind.ModelUnavailable && plan.PaidKey is null)
                 {
                     await events.RecordAsync(
                         fallbackAvailable ? AiPipelineSeverity.Warning : AiPipelineSeverity.Error,
@@ -1724,7 +1726,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
                     // Do not disable or cool down a healthy key for model-level overload.
                     throw new InvalidOperationException(singleAttempt
                         ? $"The selected Gemini model failed for {operation}; no retry or fallback was attempted."
-                        : $"Gemini model is temporarily unavailable for {operation}.", ex);
+                        : $"Gemini model is temporarily unavailable for {operation}.", lastEx);
                 }
                 if (failureKind == GeminiKeyFailureKind.QuotaLimited)
                 {
@@ -1740,7 +1742,8 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
                         "A confirmed invalid key was disabled until an admin retries it.",
                         new { model }, model, keyHint);
                 }
-                if (failureKind != GeminiKeyFailureKind.QuotaLimited)
+                if (failureKind != GeminiKeyFailureKind.QuotaLimited &&
+                    !(plan.PaidKey is not null && (failureKind == GeminiKeyFailureKind.InvalidKey || GeminiKeyHealthService.RetryableProviderFailure(ex))))
                 {
                     await events.RecordAsync(
                         fallbackAvailable ? AiPipelineSeverity.Warning : AiPipelineSeverity.Error,
@@ -1749,13 +1752,13 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
                         new { skippedKeys = keys.Length - attempt - 1, fallbackAvailable, failureKind = failureKind.ToString() }, model);
                     throw new InvalidOperationException(singleAttempt
                         ? $"The selected Gemini model failed for {operation}; no retry or fallback was attempted."
-                        : $"Gemini model failed for {operation}; only quota errors permit key rotation.", ex);
+                        : $"Gemini model failed for {operation}; key rotation was not applicable.", lastEx);
                 }
             }
         }
         await events.RecordAsync(
             fallbackAvailable ? AiPipelineSeverity.Warning : AiPipelineSeverity.Error, stage, "all_keys_failed",
-            TruncateForLog(lastEx?.Message, 1000),
+            lastEx is null ? null : "Gemini attempts exhausted (" + lastEx.GetType().Name + ").",
             new { keys = keys.Length, webSearch },
             model);
         throw new InvalidOperationException(singleAttempt

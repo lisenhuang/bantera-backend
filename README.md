@@ -401,7 +401,31 @@ Clients opt in with `acceptNoSpeech: true` on WebSocket `start`. A quiet/empty r
 
 Each initially answered scheduled callback forces a fresh Gemini session, even if a matching old checkpoint exists. Its resumption identity uses the callback ID so reconnects within that call can resume without mixing another call or voice-message session. The initial greeting/reminder and device context are supplied once; a reconnection uses the existing continuation policy.
 
-As of 1.13.1, every new in-app audio call also ignores any previous Live checkpoint. New calls receive the device's saved summary and recent dated messages once as private background reference, then the explicit opening greeting. The nine-minute countdown starts after provider setup; reconnecting an ongoing call preserves its remaining time and may resume that call's session. Voice-message resumption is unchanged. This is enforced server-side for existing app clients, with no database migration or new configuration.
+As of 1.13.1, every new in-app audio call also ignores any previous Live checkpoint. New calls receive the device's saved summary and recent dated messages once as private background reference, then the explicit opening greeting. As of 1.14.1 and app 2.11.1, the nine-minute countdown starts with the first streamed reply audio, while setup displays Connecting; reconnecting an ongoing call preserves its remaining time and may resume that call's session. Voice-message resumption is unchanged. No database migration or new configuration is required.
+
+### Live-call silence diagnostics (1.14.1)
+
+`ai_pipeline_events` now includes bounded `ai_live_call` start, one-minute progress
+and end records: a random call correlation ID, selected model, audio byte/frame
+counts, transcript event counts, completion/interruption/tool counts, last-activity
+ages and fixed recovery categories. These records are account-linked operational
+metadata, **not anonymous**. Existing 90-day retention applies. They contain no
+audio, transcript text, vocabulary entries, tool arguments, provider error text,
+credentials or raw provider response. Normal phone hang-up (1000) is recorded as
+`client_closed`, separately from provider failures.
+
+Initial greeting waits up to 20 seconds. After recognised input or partial reply
+audio, 45 seconds without further progress requests a session reconnection;
+device tools have a 60-second wait. Completed replies followed by learner silence
+do not trigger recovery. Empty/text-only completions cannot hide missing audio.
+Existing clients already handle `reconnect/response_timeout`, preserving the
+remaining call duration and bounding renewals. Explicit quota/expiry recovery is
+separate; only quota signals cool down a key. Provider details never become
+user-visible messages: failed recovery ends with the existing generic error.
+
+This does not establish whether an individual silent call was caused by capture,
+network or provider problems. Missing/zero microphone frames and absent input
+transcriptions remain diagnostic evidence, not proof of speech or a quota error.
 
 ### On-device AI vocabulary
 
@@ -415,3 +439,19 @@ the capability so an older session cannot hide the newly available tool. No data
 migration or new environment setting is required. Word content is not logged or
 persisted by the relay. The app enforces account isolation, bounded fields,
 deduplicated adds, atomic storage and the review-suggestion cooldown.
+
+## Paid Gemini key access
+
+The AI dashboard provides a separate paid Gemini key and an explicit per-user access list. Everyone uses regular keys by default. Selected users can use either **Regular keys, then paid fallback** or **Paid key only (testing)**. Fallback mode tries eligible regular keys first; paid-only mode never falls back to regular keys. Removing a user revokes future paid attempts; already connected calls are not terminated.
+
+This routing covers Gemini dialogue generation, audio/TTS, transcription and word timings, voice-message replies, and Live calls. Job requests use the job owner's identity; Live requests use the authenticated caller. Missing identity cannot use the paid key. Existing model selection remains independent. On-device app search remains on the device.
+
+The paid key and user policy are stored together as an encrypted `app_settings` value, using the existing 32-byte `ChatGptConnection__EncryptionKey`. All backend containers must retain that same encryption key. No database migration is required. Admin responses expose only a masked hint; keys never reach mobile clients. Saving a key does not enable billing at Google: use a key from the intended paid Google project. The access list starts empty.
+
+Paid-key entry accepts legacy AIza keys and longer AQ. authorization keys (up to 4096 characters). Invalid saves identify key-format versus user-selection errors and keep the typed key in the password field for correction; successful saves clear the field and display only a masked saved-key hint. Backend 1.15.1 widens `app_settings.Value` to PostgreSQL text so encrypted credentials and access lists are not constrained by the old 2000-character column.
+
+### Callback capability and scheduling diagnostics (1.15.2)
+
+Both voice messages and live calls expose `schedule_callback`. The prompt explicitly distinguishes the current voice-message input mode from the ability to schedule a later CallKit call. An explicit call request with a reminder topic and time uses that tool; a reminder-only request still uses `schedule_reminder`. Missing details require clarification. A fresh context identity prevents old resumed instructions from retaining a false capability limitation.
+
+Scheduling records `ai_callback_tool` attempts and bounded outcome codes in `ai_pipeline_events`. Details contain only the request UUID, tool name and booleans for call/message token presence, never token values, audio, conversation text or reminder arguments. Notification registration failures distinguish calls from messages. Idempotent retries cannot silently return a message reminder as a successfully scheduled call (or vice versa).

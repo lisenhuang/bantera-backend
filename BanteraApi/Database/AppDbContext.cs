@@ -216,7 +216,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("app_settings");
             e.HasKey(x => x.Key);
             e.Property(x => x.Key).HasMaxLength(100);
-            e.Property(x => x.Value).HasMaxLength(2000).IsRequired();
+            e.Property(x => x.Value).HasColumnType("text").IsRequired();
             e.Property(x => x.UpdatedAt).IsRequired();
         });
 
