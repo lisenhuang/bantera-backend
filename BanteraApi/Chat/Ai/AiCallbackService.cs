@@ -12,7 +12,11 @@ public sealed class AiCallbackService(AppDbContext db, IOptions<ApnsSettings> ap
         "Voice-message mode describes the current input, not a restriction on scheduling a later call. Do not say you cannot call or can only send messages without a tool failure establishing that limitation. " +
         "When the learner explicitly says call me or call me back, use schedule_callback once the reminder topic and time are known; do not downgrade that request to schedule_reminder. " +
         "If the topic or time is missing, ask for that missing detail, not whether callbacks are possible. A reminder without an explicit call request uses schedule_reminder instead. " +
+        "Execute the scheduling tool BEFORE speaking a confirmation; saying that you will call does not create a schedule. " +
+        "A new explicit request is a new action even if the topic and delay match an earlier completed reminder. Do not treat an old tool result or your earlier promise as success for this request. " +
+        "If the learner reports that a call did not arrive, use list_callbacks to check pending schedules; never claim to have checked without calling it. If they explicitly ask you to schedule another call with a known topic and time, use schedule_callback again. " +
         "Only confirm success after the corresponding tool succeeds. On failure explain the specific actionable limitation briefly, never invent success or silently change delivery type. ";
+    public const string CurrentTurnPolicy = " Scheduling for THIS voice message is confirmed only by a scheduling-tool result for THIS recording. If the CURRENT recording requests one, call the matching scheduling tool before confirming; an older promise or tool success is not a receipt for this message. Repeated requests in new recordings are new requests. Ask for missing time or topic; never invent them. Mere discussion of calls does not authorise scheduling. ";
     public const string Identity = "ba07e2a0-a100-4000-8000-000000000001";
     public static readonly string[] ToolNames = ["get_current_time", "schedule_callback", "schedule_reminder", "list_callbacks", "cancel_callback"];
     public static object[] Declarations => [

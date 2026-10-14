@@ -28,6 +28,14 @@ public sealed class AiChatDiagnostics(AiPipelineEventRecorder events)
             "Live call technical status.", new { requestId, progress = health.Snapshot() },
             model: model, durationMs: elapsedMs);
     }
+    internal async Task VoiceCompletedAsync(Guid userId, Guid requestId, string model,
+        int schedulingAttempts, long inputBytes, long outputBytes, int elapsedMs)
+    {
+        using var scope = events.BeginContext(userId, null, null, "/ws/chat/ai/voice");
+        await events.RecordAsync("info", "ai_voice_server", "reply_completed",
+            "AI voice reply completed.", new { requestId, schedulingAttempts, inputBytes, outputBytes },
+            model: model, durationMs: elapsedMs);
+    }
     public sealed record ClientReport(Guid RequestId, string Code, string Phase,
         int InputBytes, int OutputBytes, int ElapsedMs, bool Committed,
         int? CloseCode = null, string? AppVersion = null, string? ErrorType = null, string? NativeCode = null);

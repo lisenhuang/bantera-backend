@@ -409,6 +409,8 @@ public class BanteraAiTests
         Assert.Contains("Bantera CAN schedule", prompt);
         Assert.Contains("recorded voice message", prompt);
         Assert.Contains("do not downgrade", prompt);
+        Assert.Contains("BEFORE speaking a confirmation", prompt);
+        Assert.Contains("new explicit request is a new action", prompt);
         var tools = setup.GetProperty("tools")[0].GetProperty("functionDeclarations").EnumerateArray().Select(t => t.GetProperty("name").GetString());
         Assert.Contains("schedule_callback", tools);
         Assert.Contains("schedule_reminder", tools);
@@ -470,6 +472,15 @@ public class BanteraAiTests
             await service.ExecuteAsync(user.Id, messageMeta, "cancel-voice", "cancel_callback", JsonSerializer.SerializeToElement(new {id=reminder.Id}), default);
             var cancelled = await db.AiCallbacks.AsNoTracking().SingleAsync(c => c.Id == reminder.Id);
             Assert.Equal("cancelled", cancelled.Status); Assert.Null(cancelled.Audio); Assert.Null(cancelled.Transcript);
+            // A later, identical spoken request must create a fresh call even
+            // after the earlier call was answered/cancelled. Transport retries
+            // of that later request must still create exactly one new row.
+            var repeatedArgs = Json("{\"delaySeconds\":60,\"reminder\":\"Practise English\",\"explicitCallRequested\":true}");
+            var repeated = JsonSerializer.SerializeToElement(await service.ExecuteAsync(user.Id, meta, "new-recording", "schedule_callback", repeatedArgs, default));
+            var retry = JsonSerializer.SerializeToElement(await service.ExecuteAsync(user.Id, meta, "new-recording", "schedule_callback", repeatedArgs, default));
+            Assert.NotEqual(scheduled.Id, repeated.GetProperty("id").GetGuid());
+            Assert.Equal(repeated.GetProperty("id").GetGuid(), retry.GetProperty("id").GetGuid());
+            Assert.Equal(2, await db.AiCallbacks.CountAsync(c => c.UserId == user.Id && c.Delivery == "call"));
         } finally { await db.Users.Where(u => u.Id == user.Id).ExecuteDeleteAsync(); }
     }
 }

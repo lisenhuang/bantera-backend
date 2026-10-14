@@ -75,6 +75,11 @@ public class AiChatDiagnosticsTests
             await service.CallbackToolAsync(user, request.ToString(), "schedule_callback", "call_notifications_unavailable", false, true);
             var rows = await db.AiPipelineEvents.Where(e => e.UserId == user).ToListAsync();
             Assert.Equal(3, rows.Count);
+            await service.VoiceCompletedAsync(user, request, "test-model", 0, 32000, 48000, 1000);
+            var completed = await db.AiPipelineEvents.SingleAsync(e => e.UserId == user && e.Code == "reply_completed");
+            using var completedDetail = JsonDocument.Parse(completed.DetailJson!);
+            Assert.Equal(new[] { "inputBytes", "outputBytes", "requestId", "schedulingAttempts" }, completedDetail.RootElement.EnumerateObject().Select(p => p.Name).Order());
+            Assert.Equal(0, completedDetail.RootElement.GetProperty("schedulingAttempts").GetInt32());
             Assert.All(rows, row => {
                 Assert.Contains(request.ToString(), row.DetailJson);
                 Assert.DoesNotContain("secret", row.DetailJson);

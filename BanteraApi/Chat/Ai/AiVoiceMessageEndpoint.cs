@@ -22,7 +22,7 @@ public static class AiVoiceMessageEndpoint
         Task? receive = null, generate = null;
         AiVoiceInput? input = null;
         long outputBytes = 0;
-        int inputChars = 0, outputChars = 0, resets = 0;
+        int inputChars = 0, outputChars = 0, resets = 0, schedulingAttempts = 0;
         long? firstAudioMs = null;
         Guid? correlationId = null;
         string? model = null, voice = null;
@@ -50,11 +50,15 @@ public static class AiVoiceMessageEndpoint
             phase = "stream";
             var replyTask = live.StreamReplyAsync(model, user, input, history, snapshot,
                 metadata, voice,
-                async call => call.GetProperty("name").GetString() is AiWebSearchTool.Name or AiVocabularyTool.Name or AiEmojiTool.Name
-                    ? deviceTools is null ? new { unavailable = true } : await deviceTools.InvokeAsync(call,
-                        frame => GeminiLiveService.SendAsync(client, frame, lifetime.Token), lifetime.Token)
-                    : await callbacks.ExecuteAsync(userId, await input.Committed, requestId.ToString(),
-                        call.GetProperty("name").GetString()!, call.GetProperty("args"), lifetime.Token),
+                async call => {
+                    var name = call.GetProperty("name").GetString()!;
+                    if (name is AiWebSearchTool.Name or AiVocabularyTool.Name or AiEmojiTool.Name)
+                        return deviceTools is null ? new { unavailable = true } : await deviceTools.InvokeAsync(call,
+                            frame => GeminiLiveService.SendAsync(client, frame, lifetime.Token), lifetime.Token);
+                    if (name is "schedule_callback" or "schedule_reminder") schedulingAttempts++;
+                    return await callbacks.ExecuteAsync(userId, await input.Committed, requestId.ToString(),
+                        name, call.GetProperty("args"), lifetime.Token);
+                },
                 async bytes => {
                     if (bytes is null) { resets++; await GeminiLiveService.SendAsync(client, new { type = "reset" }, lifetime.Token); }
                     else { firstAudioMs ??= elapsed.ElapsedMilliseconds; outputBytes += bytes.Length; await client.SendAsync(bytes.AsMemory(), WebSocketMessageType.Binary, true, lifetime.Token); }
@@ -67,6 +71,8 @@ public static class AiVoiceMessageEndpoint
             var reply = await replyTask;
             phase = "complete";
             await GeminiLiveService.SendAsync(client, new { type = "complete", inputText = reply.InputText, outputText = reply.OutputText }, lifetime.Token);
+            await diagnostics.VoiceCompletedAsync(userId, requestId, model, schedulingAttempts,
+                input.ByteCount, outputBytes, (int)elapsed.ElapsedMilliseconds);
         }
         catch (AiNoSpeechException) {
             // A quiet/accidental recording is a normal outcome, not a provider
