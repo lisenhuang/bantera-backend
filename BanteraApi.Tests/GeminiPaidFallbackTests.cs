@@ -67,6 +67,25 @@ public class GeminiPaidFallbackTests
             Assert.True(row.Value.Length > 2000);
             Assert.DoesNotContain(key, row.Value);
         }
+        // App preferences retain permission while changing only this user's mode.
+        Assert.True((await store.PreferenceAsync(user, default)).CanConfigure);
+        foreach (var mode in new[] { "regular_only", "fallback", "paid_only" }) {
+            Assert.True(await store.SavePreferenceAsync(user, mode, default));
+            var preference = await store.PreferenceAsync(user, default);
+            Assert.True(preference.CanConfigure);
+            Assert.Equal(mode, preference.Mode);
+            Assert.Equal(key, (await store.ReadAsync(default)).Key);
+        }
+        Assert.False(await store.SavePreferenceAsync(Guid.NewGuid(), "paid_only", default));
+        Assert.False((await store.PreferenceAsync(Guid.NewGuid(), default)).CanConfigure);
+        await store.SavePreferenceAsync(user, "regular_only", default);
+        Assert.Empty((await store.ForUserAsync(user, default)).AllowedUserIds);
+        // Legacy admin payloads preserve a user's regular-only preference.
+        await store.SaveAsync(null, false, [user], [], user, default);
+        Assert.Equal("regular_only", (await store.PreferenceAsync(user, default)).Mode);
+        await store.SaveAsync(null, false, [], [], user, default);
+        Assert.False(await store.SavePreferenceAsync(user, "paid_only", default));
+        Assert.False((await store.PreferenceAsync(user, default)).CanConfigure);
         await store.SaveAsync(null, true, [], [], user, default);
         Assert.False((await store.StatusAsync(default)).Configured);
     }
@@ -93,6 +112,15 @@ public class GeminiPaidFallbackTests
         Assert.Equal([Paid], GeminiPaidFallback.Order(["a", "b"], policy, Allowed));
         Assert.Empty(GeminiPaidFallback.Order(["a", "b"], policy with { Key = null }, Allowed));
         Assert.Equal(["a", "b"], GeminiPaidFallback.Order([Paid, "a", "b"], policy, Guid.NewGuid()));
+    }
+    [Fact]
+    public void RegularOnlyKeepsPermissionButExcludesPaidKeyEvenWhenDuplicated()
+    {
+        var policy = Policy with { RegularOnlyUserIds = [Allowed] };
+        Assert.Equal("regular_only", GeminiPaidFallback.Mode(policy, Allowed));
+        Assert.Contains(Allowed, policy.AllowedUserIds);
+        Assert.Equal(["a", "b"], GeminiPaidFallback.Order([Paid, "a", "b"], policy, Allowed));
+        Assert.NotNull(GeminiPaidFallbackEndpoints.Validate(new(null, false, [Allowed], [Allowed], [Allowed])));
     }
     [Fact]
     public void SearchStillRequiresApprovedKeyPrefix()

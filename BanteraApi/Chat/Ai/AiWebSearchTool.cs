@@ -23,7 +23,7 @@ public sealed class AiVoiceDeviceTools
     private int count;
     public async Task<object> InvokeAsync(JsonElement call, Func<object, Task> send, CancellationToken ct)
     {
-        if (call.GetProperty("name").GetString() is not (AiWebSearchTool.Name or AiVocabularyTool.Name) || Interlocked.Increment(ref count) > 16)
+        if (call.GetProperty("name").GetString() is not (AiWebSearchTool.Name or AiVocabularyTool.Name or AiEmojiTool.Name) || Interlocked.Increment(ref count) > 16)
             return new { unavailable = true };
         var id = call.GetProperty("id").GetString() ?? "";
         if (id.Length is 0 or > 200) throw new InvalidDataException();
@@ -40,7 +40,7 @@ public sealed class AiVoiceDeviceTools
     {
         if (responses.ValueKind != JsonValueKind.Array || responses.GetArrayLength() > 4 || responses.GetRawText().Length > 100000) return false;
         foreach (var item in responses.EnumerateArray()) {
-            if (!item.TryGetProperty("name", out var name) || name.GetString() is not (AiWebSearchTool.Name or AiVocabularyTool.Name) ||
+            if (!item.TryGetProperty("name", out var name) || name.GetString() is not (AiWebSearchTool.Name or AiVocabularyTool.Name or AiEmojiTool.Name) ||
                 !item.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String ||
                 !item.TryGetProperty("response", out var response) || !response.TryGetProperty("result", out var result)) return false;
             // A late result from a timed-out device must not kill the reply.

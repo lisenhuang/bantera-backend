@@ -442,7 +442,7 @@ deduplicated adds, atomic storage and the review-suggestion cooldown.
 
 ## Paid Gemini key access
 
-The AI dashboard provides a separate paid Gemini key and an explicit per-user access list. Everyone uses regular keys by default. Selected users can use either **Regular keys, then paid fallback** or **Paid key only (testing)**. Fallback mode tries eligible regular keys first; paid-only mode never falls back to regular keys. Removing a user revokes future paid attempts; already connected calls are not terminated.
+The **Bantera AI dashboard** (`/dashboard/bantera-ai`) manages a separate paid Gemini key and an explicit per-user access list. Everyone uses regular keys by default. Selected users can choose **Regular keys only**, **Use paid key as fallback**, or **Paid key only**, from either the admin dashboard or their app Settings. The authenticated `/api/me/ai-key-preference` GET/PUT endpoint exposes only permission and mode, never the key. Users cannot grant themselves access; revoked or inactive users cannot change modes. Updates to the encrypted setting are serialized to preserve concurrent users’ preferences. Fallback mode tries eligible regular keys first; paid-only mode never falls back to regular keys. Removing a user revokes future paid attempts; already connected calls are not terminated.
 
 This routing covers Gemini dialogue generation, audio/TTS, transcription and word timings, voice-message replies, and Live calls. Job requests use the job owner's identity; Live requests use the authenticated caller. Missing identity cannot use the paid key. Existing model selection remains independent. On-device app search remains on the device.
 
@@ -455,3 +455,17 @@ Paid-key entry accepts legacy AIza keys and longer AQ. authorization keys (up to
 Both voice messages and live calls expose `schedule_callback`. The prompt explicitly distinguishes the current voice-message input mode from the ability to schedule a later CallKit call. An explicit call request with a reminder topic and time uses that tool; a reminder-only request still uses `schedule_reminder`. Missing details require clarification. A fresh context identity prevents old resumed instructions from retaining a false capability limitation.
 
 Scheduling records `ai_callback_tool` attempts and bounded outcome codes in `ai_pipeline_events`. Details contain only the request UUID, tool name and booleans for call/message token presence, never token values, audio, conversation text or reminder arguments. Notification registration failures distinguish calls from messages. Idempotent retries cannot silently return a message reminder as a successfully scheduled call (or vice versa).
+
+### Device emoji delivery (1.16.0)
+
+New app clients opt into `send_emojis` using `metadata.deviceEmojis`. Both Live-call
+and voice-message WebSockets relay the tool to the authenticated learner's device,
+which displays and saves Unicode emojis alongside the reply. The prompt explicitly
+directs current emoji/flag requests to this tool without searching the web.
+Declarations use the existing model-specific blocking/nonblocking behaviour.
+Session identities include the capability so an old checkpoint without the tool
+cannot be resumed after upgrading. Legacy multipart replies and older clients
+never advertise the tool. No schema migration, environment variable or provider
+credential is required.
+
+Paid-key routing covers all Gemini operations, including lesson text/audio, transcription, conversation summaries, transcript corrections, model catalogue requests and owner-attributed background tests. Explicit generation-job ownership takes precedence over the authenticated request user. Other providers (ChatGPT and Cloudflare) retain their own authentication. Server Gemini web search still requires `gemini-2.5-flash` and an `AIzaSy` key; app searches remain on the device. Existing clients need no changes.

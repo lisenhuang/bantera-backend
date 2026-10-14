@@ -20,8 +20,13 @@ public partial class GeminiService(
     AiPipelineEventRecorder events,
     IDialogueDurationPlanner durationPlanner,
     ILogger<GeminiService> logger,
-    ChatGptSubscriptionClient? chatGpt = null)
+    ChatGptSubscriptionClient? chatGpt = null,
+    IHttpContextAccessor? requestContext = null)
 {
+    // Generation jobs set an explicit owner; other authenticated AI endpoints
+    // (summary, correction and admin tools) use the requesting account.
+    internal Guid? RequestUserId => events.CurrentUserId ??
+        (Guid.TryParse(requestContext?.HttpContext?.User.FindFirst("sub")?.Value, out var id) ? id : null);
     private const string LatestNewsScenarioId = "latest_news";
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private static readonly Regex TokenRegex = new(@"[\p{L}\p{N}']+", RegexOptions.Compiled);
@@ -1666,7 +1671,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
         if (webSearch && model != AiSearchPolicy.GeminiModel)
             throw new InvalidOperationException("This Gemini model is not allowed for web search.");
         var configuredKeys = SelectKeys(Settings.ApiKeys, webSearch, AiSearchPolicy.GeminiKeyPrefix);
-        var plan = await keyHealth.PlanAsync(model, events.CurrentUserId, cancellationToken, webSearch);
+        var plan = await keyHealth.PlanAsync(model, RequestUserId, cancellationToken, webSearch);
         var keys = plan.Keys;
         if (keys.Length == 0)
         {
@@ -1684,7 +1689,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
         {
             cancellationToken.ThrowIfCancellationRequested();
             var key = keys[attempt];
-            if (key == plan.PaidKey && !await keyHealth.StillAllowedAsync(key, events.CurrentUserId, cancellationToken)) break;
+            if (key == plan.PaidKey && !await keyHealth.StillAllowedAsync(key, RequestUserId, cancellationToken)) break;
             var keyHint = MaskKey(key);
             var clock = System.Diagnostics.Stopwatch.StartNew();
             using var operationScope = events.BeginOperation(operation, model ?? "unknown");

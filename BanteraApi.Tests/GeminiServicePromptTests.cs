@@ -951,9 +951,25 @@ public class GeminiServicePromptTests
         }
     }
 
+    [Fact]
+    public void AuthenticatedRequestsSupplyOwnerWhenNoGenerationJobIsActive()
+    {
+        var user = Guid.NewGuid();
+        var context = new Microsoft.AspNetCore.Http.HttpContextAccessor {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext {
+                User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                    [new System.Security.Claims.Claim("sub", user.ToString())], "test"))
+            }
+        };
+        var service = CreateService(new HttpClientHandler(), requestContext: context);
+        Assert.Equal(user, service.RequestUserId);
+        context.HttpContext = null;
+        Assert.Null(service.RequestUserId);
+    }
+
     private static GeminiService CreateService(
         HttpMessageHandler handler, AiModelSelection? selection = null, string[]? apiKeys = null,
-        IDialogueDurationPlanner? durationPlanner = null, GeminiPaidFallback? paidFallback = null)
+        IDialogueDurationPlanner? durationPlanner = null, GeminiPaidFallback? paidFallback = null, Microsoft.AspNetCore.Http.IHttpContextAccessor? requestContext = null)
     {
         var client = new HttpClient(handler)
         {
@@ -994,7 +1010,7 @@ public class GeminiServicePromptTests
             durationPlanner ?? new HistoricalDialogueDurationPlanner(
                 services.GetRequiredService<IServiceScopeFactory>(), cache,
                 NullLogger<HistoricalDialogueDurationPlanner>.Instance),
-            NullLogger<GeminiService>.Instance);
+            NullLogger<GeminiService>.Instance, requestContext: requestContext);
     }
 
     private sealed class StaticHttpClientFactory(HttpClient client) : IHttpClientFactory

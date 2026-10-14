@@ -281,19 +281,21 @@ public class AiVoiceStreamingTests
         await Assert.ThrowsAsync<AiLiveSessionExpiredException>(() => GeminiLiveService.ReceiveJsonAsync(socket, default));
     }
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ToolTurnCompletionWaitsForSpokenConfirmation(bool preamble)
+    [InlineData(false, "schedule_callback")]
+    [InlineData(true, "schedule_callback")]
+    [InlineData(false, "send_emojis")]
+    [InlineData(true, "send_emojis")]
+    public async Task ToolTurnCompletionWaitsForSpokenConfirmation(bool preamble, string toolName)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         using var socket = new Socket();
         const string audio = "{\"serverContent\":{\"modelTurn\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"audio/pcm;rate=24000\",\"data\":\"AQI=\"}}]}}}";
         if (preamble) socket.Incoming.Writer.TryWrite(audio);
-        socket.Incoming.Writer.TryWrite("{\"toolCall\":{\"functionCalls\":[{\"id\":\"schedule\",\"name\":\"schedule_callback\",\"args\":{\"delaySeconds\":60}}]}}");
+        socket.Incoming.Writer.TryWrite(JsonSerializer.Serialize(new { toolCall = new { functionCalls = new[] { new { id = "tool", name = toolName, args = new { } } } } }));
         socket.Incoming.Writer.TryWrite("{\"serverContent\":{\"turnComplete\":true}}");
         var invoked = 0;
         var task = GeminiLiveService.ReadReplyAsync(socket, default, _ => {
-            invoked++; return Task.FromResult<object>(new {status = "scheduled"});
+            invoked++; return Task.FromResult<object>(new {status = "scheduled", delivered = true});
         }, timeout.Token);
         Assert.Contains("functionResponses", await socket.Sent.Reader.ReadAsync(timeout.Token));
         Assert.False(task.IsCompleted);

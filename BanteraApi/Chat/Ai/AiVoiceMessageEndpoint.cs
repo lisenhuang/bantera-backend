@@ -42,7 +42,7 @@ public static class AiVoiceMessageEndpoint
             input = new AiVoiceInput();
             lifetime.CancelAfter(TimeSpan.FromSeconds(190));
             await GeminiLiveService.SendAsync(client, new { type = "ready" }, lifetime.Token);
-            var deviceTools = (metadata.DeviceWebSearch || metadata.DeviceVocabulary) ? new AiVoiceDeviceTools() : null;
+            var deviceTools = (metadata.DeviceWebSearch || metadata.DeviceVocabulary || metadata.DeviceEmojis) ? new AiVoiceDeviceTools() : null;
             receive = ReceiveRecordingAsync(client, input, lifetime, deviceTools);
             model = await settings.GetModelAsync(lifetime.Token);
             voice = await settings.GetVoiceAsync(lifetime.Token);
@@ -50,7 +50,7 @@ public static class AiVoiceMessageEndpoint
             phase = "stream";
             var replyTask = live.StreamReplyAsync(model, user, input, history, snapshot,
                 metadata, voice,
-                async call => call.GetProperty("name").GetString() is AiWebSearchTool.Name or AiVocabularyTool.Name
+                async call => call.GetProperty("name").GetString() is AiWebSearchTool.Name or AiVocabularyTool.Name or AiEmojiTool.Name
                     ? deviceTools is null ? new { unavailable = true } : await deviceTools.InvokeAsync(call,
                         frame => GeminiLiveService.SendAsync(client, frame, lifetime.Token), lifetime.Token)
                     : await callbacks.ExecuteAsync(userId, await input.Committed, requestId.ToString(),
