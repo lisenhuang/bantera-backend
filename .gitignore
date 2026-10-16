@@ -26,3 +26,6 @@ Thumbs.db
 .idea/
 
 NOTES.local.md
+
+# CI reports
+/TestResults/

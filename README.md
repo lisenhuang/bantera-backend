@@ -1,5 +1,9 @@
 # ⚙️ Bantera — Backend API
 
+[![CI](https://github.com/lisenhuang/bantera-backend/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lisenhuang/bantera-backend/actions/workflows/ci.yml)
+[![Contributing](https://img.shields.io/badge/Contributing-guide-blue)](CONTRIBUTING.md)
+[![Security policy](https://img.shields.io/badge/Security-reporting-blue)](SECURITY.md)
+
 > **.NET 10 REST API** powering authentication, video management, AI audio generation, and admin operations for the Bantera language learning platform.
 
 ![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)
@@ -7,13 +11,27 @@
 ![Docker](https://img.shields.io/badge/Docker-deployed-2496ED?logo=docker)
 ![EF Core](https://img.shields.io/badge/EF_Core-10-purple)
 
+## Engineering quality
+
+Maintained by [@lisenhuang](https://github.com/lisenhuang), with reproducible local checks, regression tests, and documented review expectations.
+
+CI restores locked NuGet dependencies with the SDK in `global.json`, builds Release, runs the xUnit regression suite, uploads TRX results, and builds the production Docker image. Tests requiring a disposable PostgreSQL database or live provider credentials are explicitly skipped when those prerequisites are absent; a green badge does not claim live-provider or database integration coverage.
+
+| Repository | Latest `main` CI |
+| --- | --- |
+| [app](https://github.com/lisenhuang/bantera-app) | [![CI](https://github.com/lisenhuang/bantera-app/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lisenhuang/bantera-app/actions/workflows/ci.yml) |
+| [backend](https://github.com/lisenhuang/bantera-backend) | [![CI](https://github.com/lisenhuang/bantera-backend/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lisenhuang/bantera-backend/actions/workflows/ci.yml) |
+| [website](https://github.com/lisenhuang/bantera-website) | [![CI](https://github.com/lisenhuang/bantera-website/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lisenhuang/bantera-website/actions/workflows/ci.yml) |
+
+The badges show real workflow results, including failures. Test reports are retained for 14 days. [Contribution guidance](CONTRIBUTING.md), [maintainer ownership](.github/CODEOWNERS), [dependency update configuration](.github/dependabot.yml), and [private security reporting](SECURITY.md) describe how changes are maintained. CI does not deploy production releases.
+
 ---
 
 ## 🔗 Related Repositories
 
 | Repo | Description |
 |---|---|
-| [**bantera**](https://github.com/lisenhuang/bantera) | Flutter iOS app |
+| [**bantera**](https://github.com/lisenhuang/bantera-app) | Flutter iOS app |
 | **This repo** | .NET REST API backend (you are here) |
 | [**bantera-website**](https://github.com/lisenhuang/bantera-website) | Next.js website + admin dashboard |
 

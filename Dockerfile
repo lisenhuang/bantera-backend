@@ -2,8 +2,9 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-COPY BanteraApi/BanteraApi.csproj BanteraApi/
-RUN dotnet restore BanteraApi/BanteraApi.csproj
+COPY Directory.Build.props ./
+COPY BanteraApi/BanteraApi.csproj BanteraApi/packages.lock.json BanteraApi/
+RUN dotnet restore BanteraApi/BanteraApi.csproj --locked-mode
 
 COPY BanteraApi/ BanteraApi/
 RUN dotnet publish BanteraApi/BanteraApi.csproj \
