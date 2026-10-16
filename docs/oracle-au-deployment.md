@@ -1424,3 +1424,93 @@ Compatibility: **GO for existing published apps**. No endpoint/wire change, data
 The verified database backup is **3,596,301 bytes**. Staged and public smoke checks passed; availability sampling recorded **144/144 HTTP-200** responses. API: `bantera-api-20261014-2` on loopback **18117**; unchanged website on **13027**; connector `cloudflared-20261014-2` on readiness **12039**. Release artifacts are under `/home/ubuntu/releases/bantera-20261014-2`. Its `deploy.py rollback` starts and checks the retained previous API before restoring the previous connector; it does not restore the database. The idle unrouted previous API was stopped after verifying no active non-database connections or claimed background audio jobs. Its container and image remain retained.
 
 No mobile source changes were needed. At the user's explicit request, signed **2.13.0 (355)** was reinstalled on the iPhone and launched, with installed version and launch confirmed by CoreDevice. No physical callback test was performed. These changes remain uncommitted pending explicit push authorization.
+
+## Verified DM delivery: 16 October 2026
+
+Release **`bantera-20261016-1`** completed at **02:44:21 UTC** on 16 October.
+Backend **1.18.0** is live at `https://api.bantera.app/version`; the website remains
+on `bantera-20261015-1` (0.11.1). The active release record is
+`/home/ubuntu/releases/bantera-current.json`.
+
+- API: `bantera-api-20261016-1`, loopback **18118**.
+- Connector: `cloudflared-20261016-1`, readiness **12041**.
+- Website: unchanged `bantera-website-20261015-1`, loopback **13028**.
+- A verified pre-migration PostgreSQL custom-format backup, private runtime
+  snapshots, reviewed source archive/checksum and working-tree manifest are in
+  `/home/ubuntu/releases/bantera-20261016-1`.
+- Migration `20261016022900_AddChatAudioIntegrity` adds nullable hash/byte-count
+  fields only. **Compatibility GO**: old API contracts remain available; old
+  unverified receipts retain seven days, and v3 verified receipts trigger immediate
+  R2-then-database cleanup. No new environment variables or secrets are required.
+- Local backend suite: **823 passed, 12 skipped** (external/provider or separately
+  configured integrations). A real isolated PostgreSQL test exercised failure and
+  pagination behavior with fake storage. Staged and public API checks each passed
+  11 HTTP checks plus migration verification, including authenticated receipt
+  validation and synthetic missing-message idempotency. No real user message or R2
+  object was used for deployment tests. Startup had no observed unhandled
+  exceptions or failed database commands.
+- Promotion preserved all shared connector networks and unrelated ingress. Both
+  public domains passed the two-minute stability window (128 sampled HTTP responses,
+  all 200). The previous idle API
+  was stopped after active connection/background-work checks; its container and
+  previous connector remain available for rollback.
+
+Rollback, if needed, uses the release-specific controller:
+`python3 /home/ubuntu/releases/bantera-20261016-1/deploy.py rollback`.
+It restores API **1.17.1** and `cloudflared-20261015-1`, retaining the additive
+columns and subsequent user writes. It does not restore the backup. Delivered
+messages already removed from R2/live PostgreSQL cannot be recreated by an
+application rollback.
+
+See [verified DM delivery](direct-message-delivery.md) for the receipt boundary,
+legacy clients, retries, local-history behavior and infrastructure-backup scope.
+
+App **2.15.0 (359)** was subsequently installed on the iPhone 17 Pro, confirmed
+through CoreDevice's installed-app inventory. It was not launched or physically
+tested. App verification included 12 passing delivery/history/API tests, clean
+analysis, unsigned debug and signed release builds, and strict code-signature
+verification. A cached local recording remains playable if the receipt response
+is lost and metadata cannot be fetched again; this fallback sends no unverified
+receipt. Changes remain uncommitted pending an explicit push request.
+
+## October 16, 2026: AI voice image attachments
+
+Release `bantera-20261016-2` deployed backend **1.19.0** and retained website **0.11.1** (`bantera-website-20261015-1`). Promotion completed at **03:18:16 UTC**. Candidate and public authentication/DM smoke checks passed, followed by the two-minute public stability window. The previous API/connector remain available for rollback.
+
+- API: `bantera-api-20261016-2`, loopback **18119**.
+- Connector: `cloudflared-20261016-2`, readiness **12042**.
+- Previous connector: `cloudflared-20261016-1`.
+- Release snapshot and database backup: `/home/ubuntu/releases/bantera-20261016-2`.
+- Compatibility: **GO**. Optional image start payload and additive ready capability; old voice-only clients continue unchanged. No new migration or required configuration. The prior additive DM integrity migration remains included.
+- Verification: 98 focused backend tests passed (three unrelated opt-in tests skipped); a separate real Gemini Live 3.1 test recognized four synthetic images with streamed audio. See [image protocol](ai-voice-images.md).
+- Mobile **2.16.0 (360)** also restores iOS media playback mode before each practice cue after a DM call. Native simulator tests verify the category/mode reset and protection of active call audio; physical route listening is left to the user.
+
+Mobile installation verified: **Bantera 2.16.0, build 360** (`bantera.lisenhuang.com`) installed on the connected iPhone 17 Pro. The app was not launched or physically tested. Both native cue-routing simulator tests passed; 57 focused Flutter tests and the 12-test WSS suite passed. Targeted analysis of the changed AI code/tests found no issues. The production runtime setting was confirmed as `gemini-3.1-flash-live-preview`, matching the successful four-image voice test. The idle previous API was stopped after checking for active connections and background work; its container remains available for rollback. No Git commit or push was performed.
+
+## October 16, 2026: Language-relevant online discovery
+
+Release `bantera-20261016-3` completed at **04:02:15 UTC**, publishing backend
+**1.20.0**. The website remains **0.11.1** (`bantera-website-20261015-1`).
+Discovery now requires a shared learning language or a learner/native match in
+either direction. Existing DM partners retain their chats and online status.
+Mobile adds an account-specific, default-off “Hide people with my native
+language” option under the Chats overflow menu.
+
+- Compatibility: **GO for existing apps**. Unchanged response contracts, no new
+  migration, secrets or runtime configuration.
+- API `bantera-api-20261016-3`: loopback **18120**; connector
+  `cloudflared-20261016-3`: readiness **12043**.
+- Protected release artifacts and verified **3,693,234-byte** database backup:
+  `/home/ubuntu/releases/bantera-20261016-3`.
+- Verification: **33 backend tests** passed, including isolated PostgreSQL
+  discovery/DM-preservation checks; **6 Flutter tests** passed; targeted analysis
+  and unsigned debug/signed release builds passed. Candidate and public smoke
+  checks each passed 13 HTTP checks plus migration verification. Public stability
+  sampling recorded **136/136 HTTP-200** responses. No real messages were changed
+  by smoke tests.
+- The idle previous API was stopped after active-work/connection checks. Its
+  container and previous connector remain available through this release's
+  `deploy.py rollback`, which restores backend **1.19.0** without restoring the DB.
+- Signed **2.18.0 (363)** was installed on the iPhone 17 Pro and independently
+  confirmed through CoreDevice's installed-app inventory. No physical testing or
+  launch was performed. No Git commit or push was performed.

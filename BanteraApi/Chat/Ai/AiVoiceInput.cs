@@ -6,6 +6,8 @@ namespace BanteraApi.Chat.Ai;
 // while new microphone chunks continue arriving. Nothing is persisted on the server.
 public sealed class AiVoiceInput
 {
+    public AiVoiceInput(IReadOnlyList<AiVoiceImage>? images = null) => Images = images?.ToArray() ?? [];
+    public IReadOnlyList<AiVoiceImage> Images { get; }
     public const int MaxBytes = 16000 * 2 * 180;
     private readonly object gate = new();
     private readonly List<byte[]> chunks = [];

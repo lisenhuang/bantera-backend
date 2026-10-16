@@ -375,6 +375,9 @@ namespace BanteraApi.Migrations
                         .HasColumnType("uuid")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<long?>("AudioByteCount")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("AudioContentType")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -384,6 +387,10 @@ namespace BanteraApi.Migrations
                         .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
+
+                    b.Property<string>("AudioSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");

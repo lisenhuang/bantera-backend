@@ -11,6 +11,31 @@ namespace BanteraApi.Tests;
 public class AiVoiceStreamingTests
 {
     [Fact]
+    public async Task ImagesArePacedWhileAudioStreamsAndCommitWaitsForAllImages()
+    {
+        using var socket = new Socket();
+        var input = new AiVoiceInput([new("image/png", "image1"), new("image/jpeg", "image2"), new("image/png", "image3"), new("image/png", "image4")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var upload = GeminiLiveService.UploadVoiceAsync(socket, input, timeout.Token);
+        Assert.Contains("activityStart", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        Assert.Contains("image1", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        input.Add(new byte[320]);
+        Assert.Contains("audio/pcm", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        Assert.True(clock.ElapsedMilliseconds < 900); // Voice is not waiting for remaining images.
+        input.Commit(Metadata);
+        long previous = 0;
+        for (var index = 2; index <= 4; index++) {
+            Assert.Contains("image" + index, await socket.Sent.Reader.ReadAsync(timeout.Token));
+            Assert.True(clock.ElapsedMilliseconds - previous >= 900);
+            previous = clock.ElapsedMilliseconds;
+        }
+        Assert.Contains("attached 4 images", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        Assert.Contains("activityEnd", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        await upload;
+    }
+
+    [Fact]
     public async Task SilentVoiceRecoveryCommitsItsTranscriptWithoutReplayingMicrophoneAudio()
     {
         using var socket = new Socket();

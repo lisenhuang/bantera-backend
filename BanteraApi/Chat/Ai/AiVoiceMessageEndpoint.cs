@@ -30,7 +30,9 @@ public static class AiVoiceMessageEndpoint
         var acceptNoSpeech = false;
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         try {
-            using var start = await GeminiLiveService.ReceiveJsonAsync(client, lifetime.Token);
+            var (startBytes, startType) = await GeminiLiveService.ReceiveAsync(client, 6 * 1024 * 1024, lifetime.Token);
+            if (startType != WebSocketMessageType.Text) throw new InvalidDataException();
+            using var start = JsonDocument.Parse(startBytes);
             var root = start.RootElement;
             if (root.GetProperty("type").GetString() != "start" || !Guid.TryParse(root.GetProperty("requestId").GetString(), out var requestId)) throw new InvalidDataException();
             correlationId = requestId;
@@ -39,9 +41,9 @@ public static class AiVoiceMessageEndpoint
             var metadata = AiClientMetadata.Read(root.TryGetProperty("metadata", out var m) ? m.GetRawText() : null);
             var streamTranscripts = WantsTranscripts(root);
             acceptNoSpeech = WantsNoSpeech(root);
-            input = new AiVoiceInput();
+            input = new AiVoiceInput(AiVoiceImages.Read(root));
             lifetime.CancelAfter(TimeSpan.FromSeconds(190));
-            await GeminiLiveService.SendAsync(client, new { type = "ready" }, lifetime.Token);
+            await GeminiLiveService.SendAsync(client, new { type = "ready", acceptImages = true }, lifetime.Token);
             var deviceTools = (metadata.DeviceWebSearch || metadata.DeviceVocabulary || metadata.DeviceEmojis) ? new AiVoiceDeviceTools() : null;
             receive = ReceiveRecordingAsync(client, input, lifetime, deviceTools);
             model = await settings.GetModelAsync(lifetime.Token);

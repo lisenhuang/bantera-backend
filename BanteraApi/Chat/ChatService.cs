@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
 using BanteraApi.Storage;
@@ -42,10 +44,6 @@ public class ChatService(
             return null;
 
         var groupEntries = await EnsureUserGroupThreadsAsync(user, cancellationToken);
-        var groupKeys = groupEntries
-            .Select(entry => entry.Descriptor.MatchKey)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var hiddenUserIds = await GetHiddenUserIdsAsync(userId, cancellationToken);
         var onlineIds = realtimeService.SnapshotOnlineUserIds();
 
@@ -72,15 +70,6 @@ public class ChatService(
             .Where(u => u.AlwaysOnline || onlineIds.Contains(u.Id))
             .ToListAsync(cancellationToken);
 
-        var filteredOnlineUsers = onlineUsers
-            .Where(u => !hiddenUserIds.Contains(u.Id))
-            .Where(u =>
-                ChatLanguageResolver.Resolve(u.LearningLanguage) is { } learning && groupKeys.Contains(learning.MatchKey)
-                || ChatLanguageResolver.Resolve(u.NativeLanguage) is { } native && groupKeys.Contains(native.MatchKey))
-            .OrderBy(u => u.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .Select(u => BuildUserResponse(u, httpContext, true))
-            .ToList();
-
         var dmMemberships = await db.ChatThreadMemberships
             .AsNoTracking()
             .Include(m => m.Thread)
@@ -106,6 +95,16 @@ public class ChatService(
                 directMessages.Add(summary);
         }
 
+        // Keep existing DM presence even when either person's languages change.
+        var existingContacts = directMessages.Select(t => t.OtherUser!.Id).ToHashSet();
+        var filteredOnlineUsers = onlineUsers
+            .Where(u => !hiddenUserIds.Contains(u.Id))
+            .Where(u => existingContacts.Contains(u.Id) || ChatDiscoveryPolicy.Matches(
+                user.LearningLanguage, user.NativeLanguage, u.LearningLanguage, u.NativeLanguage))
+            .OrderBy(u => u.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .Select(u => BuildUserResponse(u, httpContext, true))
+            .ToList();
+
         var visibleThreadIds = groups.Concat(directMessages).Select(t => t.ThreadId).ToArray();
         var deletedMessageIds = await db.ChatMessageDeletions.AsNoTracking()
             .Where(d => visibleThreadIds.Contains(d.ThreadId))
@@ -126,7 +125,8 @@ public class ChatService(
         int limit,
         int offset,
         CancellationToken cancellationToken = default,
-        bool includeImages = false)
+        bool includeImages = false,
+        DateTime? beforeTime = null, Guid? beforeId = null)
     {
         var thread = await db.ChatThreads
             .AsNoTracking()
@@ -150,7 +150,9 @@ public class ChatService(
             .Where(m => m.ThreadId == threadId)
             .Where(m => includeImages || !m.AudioContentType.StartsWith("image/"))
             .Where(m => m.ExpiresAt == null || m.ExpiresAt > now)
-            .OrderByDescending(m => m.CreatedAt)
+            .Where(m => beforeTime == null || m.CreatedAt < beforeTime ||
+                m.CreatedAt == beforeTime && m.Id.CompareTo(beforeId.GetValueOrDefault()) < 0)
+            .OrderByDescending(m => m.CreatedAt).ThenByDescending(m => m.Id)
             .Skip(safeOffset)
             .Take(safeLimit)
             .ToListAsync(cancellationToken);
@@ -216,6 +218,10 @@ public class ChatService(
             DurationMs = request.DurationMs,
             CreatedAt = now,
         };
+
+        await using (var original = request.File!.OpenReadStream())
+            message.AudioSha256 = Convert.ToHexStringLower(await SHA256.HashDataAsync(original, cancellationToken));
+        message.AudioByteCount = request.File.Length;
 
         await using (var input = request.File!.OpenReadStream())
         {
@@ -426,7 +432,76 @@ public class ChatService(
         if (!await CanAccessMessageAsync(userId, message, cancellationToken))
             return null;
 
-        return await r2StorageService.DownloadObjectAsync(message.AudioObjectKey, cancellationToken);
+        var audio = await r2StorageService.DownloadObjectAsync(message.AudioObjectKey, cancellationToken);
+        if (message.Thread.Type != ChatThreadTypes.DirectMessage) return audio;
+        if (message.AudioSha256 is null || message.AudioByteCount is null)
+        {
+            // Lazily establish integrity for older, still-undelivered messages.
+            await using var source = audio.Stream;
+            if (audio.ContentLength <= 0 || audio.ContentLength > MaxAudioBytes)
+                throw new IOException("Invalid stored chat audio length.");
+            var buffer = new MemoryStream((int)audio.ContentLength);
+            await source.CopyToAsync(buffer, cancellationToken);
+            if (buffer.Length != audio.ContentLength) { buffer.Dispose(); throw new IOException("Incomplete stored chat audio."); }
+            message.AudioSha256 = Convert.ToHexStringLower(SHA256.HashData(buffer.GetBuffer().AsSpan(0, (int)buffer.Length)));
+            message.AudioByteCount = buffer.Length;
+            await db.ChatMessages.Where(m => m.Id == messageId).ExecuteUpdateAsync(u => u
+                .SetProperty(m => m.AudioSha256, message.AudioSha256)
+                .SetProperty(m => m.AudioByteCount, message.AudioByteCount), cancellationToken);
+            buffer.Position = 0;
+            return new StoredObjectResult(buffer, audio.ContentType, buffer.Length, message.AudioSha256);
+        }
+        if (audio.ContentLength != message.AudioByteCount)
+        {
+            await audio.Stream.DisposeAsync();
+            throw new IOException("Stored chat audio length mismatch.");
+        }
+        return audio with { Sha256 = message.AudioSha256 };
+    }
+
+    public async Task<ChatMessagePageResponse?> ListDirectMessagePageAsync(
+        Guid userId, Guid threadId, HttpContext context, int limit, string? cursor, CancellationToken ct = default)
+    {
+        if (!await db.ChatThreads.AnyAsync(t => t.Id == threadId && t.Type == ChatThreadTypes.DirectMessage, ct))
+            return null;
+        DateTime? beforeTime = null; Guid? beforeId = null;
+        if (cursor is not null)
+        {
+            var parts = Encoding.UTF8.GetString(Convert.FromBase64String(cursor)).Split('|');
+            if (parts.Length != 2 || !long.TryParse(parts[0], out var ticks) || !Guid.TryParse(parts[1], out var id))
+                throw new FormatException("Invalid cursor.");
+            beforeTime = new DateTime(ticks, DateTimeKind.Utc); beforeId = id;
+        }
+        var size = Math.Clamp(limit <= 0 ? 100 : limit, 1, 100);
+        var messages = await ListMessagesAsync(userId, threadId, context, size, 0, ct,
+            beforeTime: beforeTime, beforeId: beforeId);
+        if (messages is null) return null;
+        var oldest = messages.FirstOrDefault();
+        var next = messages.Count == size && oldest is not null
+            ? Convert.ToBase64String(Encoding.UTF8.GetBytes($"{oldest.CreatedAt.Ticks}|{oldest.MessageId}")) : null;
+        return new ChatMessagePageResponse(messages, next);
+    }
+
+    public async Task<bool> AcknowledgeVerifiedAsync(Guid userId, Guid messageId,
+        VerifiedChatReceipt receipt, CancellationToken ct = default)
+    {
+        if (receipt.ByteCount <= 0 || receipt.Sha256 is null || receipt.Sha256.Length != 64 ||
+            !receipt.Sha256.All(Uri.IsHexDigit)) return false;
+        var message = await db.ChatMessages.AsNoTracking().Include(m => m.Thread)
+            .SingleOrDefaultAsync(m => m.Id == messageId, ct);
+        // Deletion is idempotent, including a retry after a lost HTTP response.
+        if (message is null) return true;
+        if (message.Thread.Type != ChatThreadTypes.DirectMessage || message.SenderUserId == userId ||
+            !await db.ChatThreadMemberships.AnyAsync(m => m.ThreadId == message.ThreadId && m.UserId == userId, ct))
+            return false;
+        if (message.AudioByteCount != receipt.ByteCount || !string.Equals(message.AudioSha256, receipt.Sha256, StringComparison.OrdinalIgnoreCase))
+            return false;
+        // Persist the retry marker before any irreversible storage operation.
+        await db.ChatMessages.Where(m => m.Id == messageId)
+            .ExecuteUpdateAsync(u => u.SetProperty(m => m.ExpiresAt, DateTime.UtcNow), ct);
+        await ChatMessageRetention.DeleteExpiredAsync(db, r2StorageService.DeleteObjectAsync, realtimeService,
+            logger, [messageId], ct);
+        return true;
     }
 
     public async Task<bool> AcknowledgeReceivedAsync(
@@ -456,8 +531,9 @@ public class ChatService(
                 UserId = userId,
                 ReceivedAt = now,
             });
-            message.ExpiresAt ??= now.AddDays(7);
             await db.SaveChangesAsync(cancellationToken);
+            await db.ChatMessages.Where(m => m.Id == messageId && m.ExpiresAt == null)
+                .ExecuteUpdateAsync(u => u.SetProperty(m => m.ExpiresAt, now.AddDays(7)), cancellationToken);
         }
 
         return true;
@@ -1108,7 +1184,8 @@ public class ChatService(
             linkGenerator.GetUriByName(
                 httpContext,
                 message.AudioContentType.StartsWith("image/") ? "GetChatMessageImage" : "GetChatMessageAudio",
-                values: new { messageId = message.Id }) ?? string.Empty);
+                values: new { messageId = message.Id }) ?? string.Empty,
+            message.AudioSha256, message.AudioByteCount);
     }
 
     private ChatUserResponse BuildUserResponse(User user, HttpContext httpContext, bool isOnline)

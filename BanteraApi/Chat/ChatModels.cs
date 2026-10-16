@@ -46,7 +46,9 @@ public record ChatMessageResponse(
     DateTime CreatedAt,
     DateTime? ExpiresAt,
     bool IsMine,
-    string AudioUrl
+    string AudioUrl,
+    string? AudioSha256 = null,
+    long? AudioByteCount = null
 );
 
 public record ChatThreadSummaryResponse(
@@ -113,3 +115,6 @@ public sealed class RegisterVoipTokenRequest
     public bool IsSandbox { get; set; }
     public string? AlertToken { get; set; }
 }
+
+public record VerifiedChatReceipt(string Sha256, long ByteCount);
+public record ChatMessagePageResponse(IReadOnlyList<ChatMessageResponse> Messages, string? NextCursor);

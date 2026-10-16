@@ -51,7 +51,7 @@ public class R2StorageService
         _logger.LogInformation("Uploaded object: {Key}", key);
     }
 
-    public async Task UploadObjectAsync(
+    public virtual async Task UploadObjectAsync(
         string key,
         Stream content,
         string contentType,
@@ -82,7 +82,7 @@ public class R2StorageService
         return await reader.ReadToEndAsync(ct);
     }
 
-    public async Task DeleteObjectAsync(string key, CancellationToken ct = default)
+    public virtual async Task DeleteObjectAsync(string key, CancellationToken ct = default)
     {
         await _client.DeleteObjectAsync(new DeleteObjectRequest
         {
@@ -93,7 +93,7 @@ public class R2StorageService
         _logger.LogInformation("Deleted object: {Key}", key);
     }
 
-    public async Task<StoredObjectResult> DownloadObjectAsync(string key, CancellationToken ct = default)
+    public virtual async Task<StoredObjectResult> DownloadObjectAsync(string key, CancellationToken ct = default)
     {
         var response = await _client.GetObjectAsync(new GetObjectRequest
         {
@@ -133,4 +133,5 @@ public class R2StorageService
 public sealed record StoredObjectResult(
     Stream Stream,
     string ContentType,
-    long ContentLength);
+    long ContentLength,
+    string? Sha256 = null);

@@ -955,6 +955,31 @@ app.MapGet("/api/v2/chat/threads/{threadId:guid}/messages", async (
 .Produces(404)
 .RequireAuthorization();
 
+app.MapGet("/api/v3/chat/threads/{threadId:guid}/messages", async (
+    Guid threadId, int? limit, string? cursor, HttpContext context, System.Security.Claims.ClaimsPrincipal user,
+    ChatService service, CancellationToken ct) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return UnauthorizedResult();
+    try
+    {
+        var page = await service.ListDirectMessagePageAsync(userId.Value, threadId, context, limit ?? 100, cursor, ct);
+        return page is null ? Results.NotFound() : Results.Ok(page);
+    }
+    catch (Exception ex) when (ex is FormatException or ArgumentOutOfRangeException)
+    { return Results.BadRequest(new { error = "Invalid message page." }); }
+}).RequireAuthorization();
+
+app.MapPost("/api/v3/chat/messages/{messageId:guid}/received", async (
+    Guid messageId, VerifiedChatReceipt receipt, System.Security.Claims.ClaimsPrincipal user,
+    ChatService service, CancellationToken ct) =>
+{
+    var userId = TryGetUserId(user);
+    if (userId is null) return UnauthorizedResult();
+    return await service.AcknowledgeVerifiedAsync(userId.Value, messageId, receipt, ct)
+        ? Results.NoContent() : Results.BadRequest(new { error = "Could not confirm message delivery." });
+}).RequireAuthorization();
+
 app.MapPost("/api/chat/threads/dm/{otherUserId:guid}/messages/audio", async (
     Guid otherUserId,
     [FromForm] SendChatAudioRequest request,
@@ -1019,6 +1044,7 @@ app.MapPost("/api/chat/threads/group/{groupKind}/messages/audio", async (
 
 app.MapGet("/api/chat/messages/{messageId:guid}/audio", async (
     Guid messageId,
+    HttpContext context,
     System.Security.Claims.ClaimsPrincipal user,
     ChatService chatService,
     CancellationToken cancellationToken) =>
@@ -1028,9 +1054,11 @@ app.MapGet("/api/chat/messages/{messageId:guid}/audio", async (
         return UnauthorizedResult();
 
     var audio = await chatService.GetMessageAudioAsync(userId.Value, messageId, cancellationToken);
-    return audio is null
-        ? Results.NotFound()
-        : Results.Stream(audio.Stream, audio.ContentType, enableRangeProcessing: true);
+    if (audio is null) return Results.NotFound();
+    if (audio.Sha256 is not null) context.Response.Headers["X-Bantera-Audio-Sha256"] = audio.Sha256;
+    context.Response.Headers.CacheControl = "private, no-store";
+    context.Response.ContentLength = audio.ContentLength;
+    return Results.Stream(audio.Stream, audio.ContentType, enableRangeProcessing: true);
 })
 .WithName("GetChatMessageAudio")
 .Produces(200)

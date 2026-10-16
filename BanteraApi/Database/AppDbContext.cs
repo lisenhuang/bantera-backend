@@ -333,6 +333,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
             e.Property(x => x.AudioObjectKey).HasMaxLength(255).IsRequired();
             e.Property(x => x.AudioContentType).HasMaxLength(100).IsRequired();
+            e.Property(x => x.AudioSha256).HasMaxLength(64);
             e.Property(x => x.OriginalFileName).HasMaxLength(255).IsRequired();
             e.Property(x => x.SpokenLanguageCode).HasMaxLength(35).IsRequired();
             e.Property(x => x.CreatedAt).IsRequired();
