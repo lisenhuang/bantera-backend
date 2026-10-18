@@ -1514,3 +1514,39 @@ language” option under the Chats overflow menu.
 - Signed **2.18.0 (363)** was installed on the iPhone 17 Pro and independently
   confirmed through CoreDevice's installed-app inventory. No physical testing or
   launch was performed. No Git commit or push was performed.
+
+## October 18, 2026: Explicit dialogue proficiency requirements
+
+Release **`bantera-20261018-2`** completed at **09:00:55 UTC** (22:00:55 NZDT),
+publishing backend **1.20.3**. Generated dialogue prompts explicitly require
+Beginner **A1**, Intermediate **B1**, and Advanced **C2** vocabulary and grammar.
+For a language or regional variety without a formal CEFR mapping, the prompt
+requires complexity comparable to English at the selected level while keeping
+the dialogue in the selected spoken language and regional variety. Existing
+Cantonese wording, regional rules and speech pacing remain in place.
+
+- Compatibility: **GO for published apps**. Shared text-prompt change only; no
+  API/schema changes, new migrations, configuration or secrets. No app changes
+  or iPhone reinstall were needed. The installed app uses the new prompt for new
+  dialogue generation.
+- Verification: backend build and **196 prompt/duration tests** passed, including
+  captured outbound A1/B1/C2 and equivalent-difficulty instructions. Candidate and
+  public smoke checks each passed **13 HTTP checks** plus existing migration
+  verification. The stability window recorded **128/128 HTTP-200** samples across
+  both public domains, with no observed fatal startup/database-command errors.
+- API `bantera-api-20261018-2`: loopback **18122**; connector
+  `cloudflared-20261018-2`: readiness **12045**. Website **0.11.1** remains in
+  `bantera-website-20261015-1` on **13028**. Other tunnel routes were preserved.
+- The protected release directory contains the verified **3,814,503-byte** database
+  backup, runtime snapshots, source manifest, staged/public proofs and rollout
+  logs. Source archive SHA-256:
+  `aa2dc7f74fdb8863799003d92a68bd5cc343a4b02a5a61daf6045929f6ad913d`.
+- The previous idle API was stopped after checking active connections and
+  background work; its container/image and connector remain available. Rollback:
+  `python3 /home/ubuntu/releases/bantera-20261018-2/deploy.py rollback` restores
+  backend **1.20.2**, retaining the explicit CEFR levels but omitting the added
+  equivalent-difficulty instruction. It does not restore the database.
+
+This release includes the user's follow-up during the initial **1.20.2** rollout
+(`bantera-20261018-1`). Deployment used the tested working tree; no Git commit or
+push was performed.

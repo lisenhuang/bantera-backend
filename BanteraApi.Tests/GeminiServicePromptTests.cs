@@ -154,16 +154,20 @@ public class GeminiServicePromptTests
     }
 
     [Theory]
-    [InlineData("beginner", "Difficulty: Beginner", "Use basic, simple words that a beginner can easily understand")]
-    [InlineData("intermediate", "Difficulty: Intermediate", "accessible sentences")]
-    [InlineData("advanced", "Difficulty: Advanced", "nuanced opinions")]
-    public async Task DialogueLevelChangesPromptAndSurvivesIntoSpeech(string level, string heading, string instruction)
+    [InlineData("beginner", "Difficulty: Beginner", "Use basic, simple words that a beginner can easily understand", "A1")]
+    [InlineData("intermediate", "Difficulty: Intermediate", "accessible sentences", "B1")]
+    [InlineData("advanced", "Difficulty: Advanced", "nuanced opinions", "C2")]
+    public async Task DialogueLevelChangesPromptAndSurvivesIntoSpeech(string level, string heading, string instruction, string cefr)
     {
         var handler = new CapturingHandler();
         var dialogue = await CreateService(handler).GenerateDialogueAsync("English", "en-NZ", "coffee", 60, level: level);
         Assert.Equal(level, dialogue.Level);
         Assert.Contains(heading, handler.GetPrompt());
         Assert.Contains(instruction, handler.GetPrompt());
+        Assert.Contains($"Use CEFR {cefr}-level vocabulary and grammar throughout the dialogue", handler.GetPrompt());
+        Assert.Contains("If the selected language or regional variety has no formal CEFR mapping", handler.GetPrompt());
+        Assert.Contains("vocabulary and grammar with difficulty comparable to English at the CEFR level specified above", handler.GetPrompt());
+        Assert.Contains("keeping the entire dialogue in the selected language and regional variety", handler.GetPrompt());
         Assert.Contains("simplify within the selected spoken language and regional variety", handler.GetPrompt());
         if (level == "beginner")
         {

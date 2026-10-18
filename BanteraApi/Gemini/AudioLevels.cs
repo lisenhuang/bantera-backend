@@ -25,12 +25,12 @@ public static class AudioLevels
             : query.Where(v => v.Level == normalized);
     }
 
-    public static string DialogueInstruction(string level) => level switch
+    public static string DialogueInstruction(string level) => (level switch
     {
-        Beginner => "Difficulty: Beginner. Use basic, simple words that a beginner can easily understand, simple grammar, short direct sentences, and concrete everyday ideas. Choose the simplest natural word within the selected spoken language and regional variety; avoid difficult or advanced words even when they are commonly used. Explain unavoidable unfamiliar terms using basic, simple words. Avoid obscure idioms, difficult slang, implied meanings, and complex clauses. Retain basic everyday colloquial words and grammatical particles that are natural to the selected spoken language. Keep the conversation useful and natural for an adult learner.",
-        Advanced => "Difficulty: Advanced. Use varied vocabulary and grammar, nuanced opinions, longer explanations, and implied meaning where natural. Include idiomatic expressions when they fit, without forcing slang or regional stereotypes. Keep the dialogue realistic and speakable, not academic prose.",
-        _ => "Difficulty: Intermediate. Use everyday vocabulary, varied but accessible sentences, common expressions, and clear explanations. Keep the dialogue natural and easy to follow without specialist knowledge.",
-    };
+        Beginner => "Difficulty: Beginner. Use CEFR A1-level vocabulary and grammar throughout the dialogue. Use basic, simple words that a beginner can easily understand, simple grammar, short direct sentences, and concrete everyday ideas. Choose the simplest natural word within the selected spoken language and regional variety; avoid vocabulary and grammar above A1. Explain unavoidable unfamiliar terms using basic, simple words. Avoid obscure idioms, difficult slang, implied meanings, and complex clauses. Retain basic everyday colloquial words and grammatical particles that are natural to the selected spoken language. Keep the conversation useful and natural for an adult learner.",
+        Advanced => "Difficulty: Advanced. Use CEFR C2-level vocabulary and grammar throughout the dialogue. Use precise, varied vocabulary and flexible, complex grammar suitable for a highly proficient learner, nuanced opinions, longer explanations, and implied meaning where natural. Include idiomatic expressions when they fit, without forcing slang or regional stereotypes. Keep the dialogue realistic and speakable, not academic prose.",
+        _ => "Difficulty: Intermediate. Use CEFR B1-level vocabulary and grammar throughout the dialogue; avoid vocabulary and grammar above B1. Use everyday vocabulary, varied but accessible sentences, common expressions, and clear explanations. Keep the dialogue natural and easy to follow without specialist knowledge.",
+    }) + " If the selected language or regional variety has no formal CEFR mapping, use vocabulary and grammar with difficulty comparable to English at the CEFR level specified above, while keeping the entire dialogue in the selected language and regional variety.";
 
     public static string SpeechInstruction(string level) => level switch
     {
