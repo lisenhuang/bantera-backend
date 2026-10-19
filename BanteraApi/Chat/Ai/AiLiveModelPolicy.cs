@@ -29,9 +29,9 @@ public static class AiLiveModelPolicy
         return config;
     }
 
-    public static object[] Tools(string model, bool deviceWebSearch = false, bool deviceVocabulary = false, bool deviceEmojis = false) => AiDeviceTools.Declarations
+    public static object[] Tools(string model, bool deviceWebSearch = false, bool deviceVocabulary = false, bool deviceEmojis = false, int vocabularyVersion = 1) => AiDeviceTools.Declarations
         .Concat(deviceWebSearch ? new[] { AiWebSearchTool.Declaration } : Array.Empty<object>())
-        .Concat(deviceVocabulary ? new[] { AiVocabularyTool.Declaration } : Array.Empty<object>())
+        .Concat(deviceVocabulary ? new[] { AiVocabularyTool.DeclarationFor(vocabularyVersion) } : Array.Empty<object>())
         .Concat(deviceEmojis ? new[] { AiEmojiTool.Declaration } : Array.Empty<object>())
         .Concat(AiCallbackService.Declarations).Select(tool => {
             var declaration = JsonSerializer.SerializeToNode(tool)!.AsObject();

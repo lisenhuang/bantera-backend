@@ -44,13 +44,13 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         if (quotaHandlers.TryGetValue(socket, out var report)) report();
     }
 
-    public static object Setup(string model, string prompt, bool voiceMessage, string voice = BanteraAiVoices.Default, bool deviceWebSearch = false, string? reasoning = null, bool deviceVocabulary = false, bool deviceEmojis = false) => new {
+    public static object Setup(string model, string prompt, bool voiceMessage, string voice = BanteraAiVoices.Default, bool deviceWebSearch = false, string? reasoning = null, bool deviceVocabulary = false, bool deviceEmojis = false, int vocabularyVersion = 1) => new {
         setup = new {
             model = "models/" + model,
             contextWindowCompression = new { slidingWindow = new { } },
             generationConfig = AiLiveModelPolicy.GenerationConfig(model, voice, reasoning),
-            systemInstruction = new { parts = new[] { new { text = prompt + AiCallbackService.CapabilityPolicy + AiConversationTiming.LatestMessagePolicy + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (deviceVocabulary ? AiVocabularyTool.Prompt : "") + (deviceEmojis ? AiEmojiTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
-            tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model, deviceWebSearch, deviceVocabulary, deviceEmojis) } },
+            systemInstruction = new { parts = new[] { new { text = prompt + AiCallbackService.CapabilityPolicy + AiConversationTiming.LatestMessagePolicy + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (deviceVocabulary ? AiVocabularyTool.Prompt + (vocabularyVersion >= 2 ? AiVocabularyTool.ReadPrompt : "") : "") + (deviceEmojis ? AiEmojiTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
+            tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model, deviceWebSearch, deviceVocabulary, deviceEmojis, vocabularyVersion) } },
             inputAudioTranscription = new { }, outputAudioTranscription = new { },
             realtimeInputConfig = new { automaticActivityDetection = voiceMessage
                 ? (object)new { disabled = true }
@@ -79,7 +79,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
               AiConversationTiming.HistoryPrompt(history)
             : "";
         var setup = JsonSerializer.SerializeToNode(Setup(model, prompt, voiceMessage, voice,
-            current.DeviceWebSearch, reasoning, current.DeviceVocabulary, current.DeviceEmojis))!.AsObject();
+            current.DeviceWebSearch, reasoning, current.DeviceVocabulary, current.DeviceEmojis, current.VocabularyVersion))!.AsObject();
         if (identity is not null) setup["setup"]!["sessionResumption"] = resumeHandle is null
             ? new System.Text.Json.Nodes.JsonObject()
             : new System.Text.Json.Nodes.JsonObject { ["handle"] = resumeHandle };

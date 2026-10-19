@@ -1550,3 +1550,33 @@ Cantonese wording, regional rules and speech pacing remain in place.
 This release includes the user's follow-up during the initial **1.20.2** rollout
 (`bantera-20261018-1`). Deployment used the tested working tree; no Git commit or
 push was performed.
+
+## October 19, 2026: Device vocabulary counts and quizzes
+
+Release **`bantera-20261019-1`** completed at **03:04:28 UTC**, publishing backend
+**1.21.0**. App **2.19.0 (370)** advertises vocabulary capability version 2,
+enabling `stats`, `latest` and device-selected random `quiz` actions. Existing
+list/search, mutation and review tools remain available. Vocabulary storage stays
+on the device; requested tool results are relayed to the model.
+
+- Compatibility: **GO for published apps**. Clients without capability version 2
+  retain the previous action schema. The capability participates in the session
+  resumption identity. No new migration, secret or runtime configuration.
+- API `bantera-api-20261019-1`: loopback **18123**; connector
+  `cloudflared-20261019-1`: readiness **12046**. Website **0.11.1** remains in
+  `bantera-website-20261015-1` on **13028**; other tunnel routes are preserved.
+- Verification: **108 backend tests passed**, three optional provider/database
+  tests skipped; **42 focused Flutter tests passed**, clean targeted analysis,
+  unsigned debug and signed release builds. Provider transport in these tests is
+  mocked, not a real-model conversation. Candidate and public smoke checks each
+  passed 13 HTTP checks plus migration verification. Availability monitoring
+  recorded **130/130 HTTP-200** responses; no fatal/startup/database error markers
+  were observed in the new API logs.
+- Protected release artifacts include a verified **3,875,696-byte** database
+  backup and source manifest. Source archive SHA-256:
+  `5c4a67a8e57b7e5f8807f32fa831994225ea144ac812ac6f9bd29f951ef27a49`.
+- The idle previous API was stopped after active-work/connection checks. Its
+  container/image and connector remain available for rollback:
+  `python3 /home/ubuntu/releases/bantera-20261019-1/deploy.py rollback` restores
+  backend **1.20.3** without restoring the database. Deployment used the tested
+  working tree; no Git commit or push was performed.

@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace BanteraApi.Chat.Ai;
 
 public sealed record AiClock(string TimeZone, int UtcOffsetMinutes);
-public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? HasMetBanteraAi = null, string? AlertPushToken = null, string? LearningLevel = null, bool DeviceWebSearch = false, string? ConversationId = null, bool DeviceVocabulary = false, bool DeviceEmojis = false)
+public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? HasMetBanteraAi = null, string? AlertPushToken = null, string? LearningLevel = null, bool DeviceWebSearch = false, string? ConversationId = null, bool DeviceVocabulary = false, bool DeviceEmojis = false, int VocabularyVersion = 1)
 {
     public static AiClientMetadata Read(string? json)
     {
@@ -27,7 +27,9 @@ public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? Ha
         var conversation = doc.RootElement.TryGetProperty("conversationId", out var id) && id.ValueKind == JsonValueKind.String && Guid.TryParse(id.GetString(), out var parsed) ? parsed.ToString() : null;
         var vocabulary = doc.RootElement.TryGetProperty("deviceVocabulary", out var vocabFlag) && vocabFlag.ValueKind == JsonValueKind.True;
         var emojis = doc.RootElement.TryGetProperty("deviceEmojis", out var emojiFlag) && emojiFlag.ValueKind == JsonValueKind.True;
-        return new(clock, token, hasMet, alert, level, search, conversation, vocabulary, emojis);
+        var vocabularyVersion = vocabulary && doc.RootElement.TryGetProperty("vocabularyVersion", out var v) &&
+            v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var version) && version >= 2 ? 2 : 1;
+        return new(clock, token, hasMet, alert, level, search, conversation, vocabulary, emojis, vocabularyVersion);
     }
     private static string? NormalizeLevel(string? level) => level?.Trim().ToLowerInvariant() switch {
         "beginner" => "beginner", "intermediate" => "intermediate", "advanced" => "advanced", _ => null

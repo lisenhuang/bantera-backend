@@ -21,6 +21,44 @@ public class AiVocabularyTests
         Assert.Contains("once per day", setup);
         Assert.DoesNotContain("search_web", setup);
     }
+    [Theory]
+    [InlineData("gemini-3.1-flash-live-preview")]
+    [InlineData("gemini-3.8-live")]
+    [InlineData("gemini-3.8-live-extended-thinking")]
+    public void ReadActionsAreOnlyAdvertisedToCapableDevices(string model)
+    {
+        var oldSetup = JsonSerializer.Serialize(GeminiLiveService.Setup(model, "", true, deviceVocabulary: true));
+        var newSetup = JsonSerializer.Serialize(GeminiLiveService.Setup(model, "", true, deviceVocabulary: true, vocabularyVersion: 2));
+        Assert.DoesNotContain("\"stats\"", oldSetup);
+        Assert.DoesNotContain("\"quiz\"", oldSetup);
+        Assert.DoesNotContain("excludeIds", oldSetup);
+        Assert.Contains("\"stats\"", newSetup);
+        Assert.Contains("\"latest\"", newSetup);
+        Assert.Contains("\"quiz\"", newSetup);
+        Assert.Contains("excludeIds", newSetup);
+        Assert.Contains("ALWAYS call manage_vocabulary", newSetup);
+        Assert.Contains("without revealing", newSetup);
+        Assert.Contains("do not mark review", newSetup);
+        Assert.DoesNotContain("manage_vocabulary", JsonSerializer.Serialize(GeminiLiveService.Setup(model, "", true, vocabularyVersion: 2)));
+    }
+    [Fact]
+    public void MetadataNegotiatesReadToolsAndInvalidatesAnOlderSession()
+    {
+        var old = AiClientMetadata.Read("""{"deviceVocabulary":true}""");
+        var current = AiClientMetadata.Read("""{"deviceVocabulary":true,"vocabularyVersion":2}""");
+        Assert.Equal(1, old.VocabularyVersion);
+        Assert.Equal(2, current.VocabularyVersion);
+        Assert.Equal(1, AiClientMetadata.Read("""{"vocabularyVersion":2}""").VocabularyVersion);
+        var user = new BanteraApi.Database.Entities.User { Id = Guid.NewGuid(), Name = "Test" };
+        var conversation = Guid.NewGuid().ToString();
+        old = old with { ConversationId = conversation };
+        current = current with { ConversationId = conversation };
+        Assert.NotEqual(AiLiveResumeCache.Identity("gemini-3.1-flash-live-preview", user, true, old, "Aoede", null),
+            AiLiveResumeCache.Identity("gemini-3.1-flash-live-preview", user, true, current, "Aoede", null));
+        var setup = GeminiLiveService.SessionSetup("gemini-3.1-flash-live-preview", user, true, [], current, "Aoede", null, null, null).ToJsonString();
+        Assert.Contains("\"quiz\"", setup);
+        Assert.Contains("ALWAYS call manage_vocabulary", setup);
+    }
     [Fact]
     public async Task VoiceVocabularyUsesDeviceResultAndRejectsWrongToolName()
     {
