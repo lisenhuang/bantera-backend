@@ -35,6 +35,7 @@ public sealed class PracticeExposure
     public bool? FirstCorrect { get; set; }
     public bool DeferredScoring { get; set; }
     public bool TranslationUsed { get; set; }
+    public bool ReviewMode { get; set; }
     public DateTime SeenAt { get; set; } = DateTime.UtcNow;
     public DateTime? FinishedAt { get; set; }
     public int Attempts { get; set; }
@@ -45,6 +46,7 @@ public sealed class PracticeProgress
     public string Language { get; set; } = "";
     public int Level { get; set; }
     public string Window { get; set; } = "";
+    public int? SelectedLevel { get; set; }
 }
 public sealed class PracticeAttempt
 {
@@ -80,28 +82,42 @@ public static class PracticeRules
         !string.IsNullOrWhiteSpace(d.MeaningKey) && d.MeaningKey.Length <= 180 &&
         !string.IsNullOrWhiteSpace(d.Explanation) && d.Explanation.Length <= 500 &&
         Normalise(d.Reply) != Normalise(d.Distractor);
+    public static int EffectiveLevel(PracticeProgress progress, bool useSelected = true) =>
+        useSelected && progress.SelectedLevel is { } selected && selected >= 0 && selected < progress.Level
+            ? selected : progress.Level;
+
+    public static bool SelectLevel(PracticeProgress progress, string level)
+    {
+        var selected = Array.IndexOf(Levels, level);
+        if (selected < 0 || selected > progress.Level) return false;
+        progress.SelectedLevel = selected == progress.Level ? null : selected;
+        return true;
+    }
+
     public static void Record(PracticeProgress progress, bool correct)
     {
+        if (progress.SelectedLevel >= progress.Level) progress.SelectedLevel = null;
         progress.Window += correct ? "1" : "0";
         if (progress.Window.Length < 12) return;
         progress.Window = progress.Window[^12..];
         var successes = progress.Window.Count(c => c == '1');
         if (successes >= 10 && progress.Level < 5) { progress.Level++; progress.Window = ""; }
         else if (successes <= 4 && progress.Level > 0) { progress.Level--; progress.Window = ""; }
+        if (progress.SelectedLevel >= progress.Level) progress.SelectedLevel = null;
     }
 
     public static void RecordAnswer(PracticeExposure exposure, PracticeProgress progress, string outcome)
     {
         if (exposure.FinishedAt is not null || outcome == "unclear" || exposure.FirstCorrect is not null) return;
         exposure.FirstCorrect = outcome == "correct";
-        if (!exposure.DeferredScoring && !exposure.TranslationUsed && progress.Level == exposure.Dialogue.Level)
+        if (!exposure.DeferredScoring && !exposure.TranslationUsed && !exposure.ReviewMode && progress.Level == exposure.Dialogue.Level)
             Record(progress, exposure.FirstCorrect.Value);
     }
 
     public static void Finish(PracticeExposure exposure, PracticeProgress progress)
     {
         if (exposure.FinishedAt is not null) return;
-        if (exposure.DeferredScoring && !exposure.TranslationUsed && exposure.FirstCorrect is { } correct &&
+        if (exposure.DeferredScoring && !exposure.TranslationUsed && !exposure.ReviewMode && exposure.FirstCorrect is { } correct &&
             exposure.Dialogue.Language == progress.Language && exposure.Dialogue.Level == progress.Level)
             Record(progress, correct);
         exposure.FinishedAt = DateTime.UtcNow;

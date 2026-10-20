@@ -70,6 +70,8 @@ public static partial class AdminAudioTestEndpoints
                 test.Language = language.DisplayName;
                 test.TargetDurationSeconds = request.DurationSeconds;
             }
+            if (!LearningLanguageCatalog.SupportsAudioDialogues(test.LanguageCode))
+                return Results.Json(new { error = "Audio dialogues are not available for this language yet." }, statusCode: 422);
             db.AdminAudioTests.Add(test);
             await db.SaveChangesAsync(ct);
             return Results.Accepted($"/api/admin/audio-tests/{test.Id}", Detail(test));

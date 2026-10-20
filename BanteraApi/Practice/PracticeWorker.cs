@@ -33,9 +33,9 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
             logger.LogWarning("Practice queue full for {Locale}/{Level}; run {RunId} can retry on the next demand.", demand.Locale, demand.Level, demand.RunId);
         }
     }
-    public void RequestAhead(Guid userId, string locale, string language, PracticeProgress progress, PracticeExposure? active = null)
+    public void RequestAhead(Guid userId, string locale, string language, PracticeProgress progress, PracticeExposure? active = null, bool useSelected = false)
     {
-        foreach (var level in PracticePreparation.Levels(progress, active)) Request(new(userId, locale, language, level));
+        foreach (var level in PracticePreparation.Levels(progress, active, useSelected || active?.ReviewMode == true)) Request(new(userId, locale, language, level));
     }
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
         Task.WhenAll(ConsumeAsync(stoppingToken), ConsumeAsync(stoppingToken));

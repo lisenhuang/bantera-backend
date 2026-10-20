@@ -4,11 +4,13 @@ namespace BanteraApi.Practice;
 public static class PracticePreparation
 {
     public const int ReadyTarget = 8;
-    public static int[] Levels(PracticeProgress progress, PracticeExposure? active = null)
+    public static int[] Levels(PracticeProgress progress, PracticeExposure? active = null, bool useSelected = false)
     {
+        if (useSelected && PracticeRules.EffectiveLevel(progress) < progress.Level)
+            return [PracticeRules.EffectiveLevel(progress)];
         var levels = new HashSet<int> { progress.Level };
         var projected = new PracticeProgress { Level = progress.Level, Window = progress.Window, Language = progress.Language };
-        if (active is { DeferredScoring: true, TranslationUsed: false, FinishedAt: null, FirstCorrect: { } correct } &&
+        if (active is { DeferredScoring: true, TranslationUsed: false, ReviewMode: false, FinishedAt: null, FirstCorrect: { } correct } &&
             active.Dialogue.Language == progress.Language && active.Dialogue.Level == progress.Level)
             PracticeRules.Record(projected, correct);
         levels.Add(projected.Level);

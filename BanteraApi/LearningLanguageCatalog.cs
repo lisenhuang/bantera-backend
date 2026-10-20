@@ -1,8 +1,8 @@
 namespace BanteraApi;
 
 /// <summary>
-/// Learning language catalog. Matches the native-language list: every speech-recognition locale
-/// (AI audio uses Gemini TTS + Gemini Transcribe), region-specific. Transcription hints are
+/// Product learning-language catalog, also used by native-language pickers.
+/// Listing a language does not guarantee device/provider speech support. Transcription hints are
 /// mapped separately; provider-unlisted regional variants use automatic language detection.
 /// </summary>
 public sealed record LearningLanguageItem(
@@ -12,6 +12,10 @@ public sealed record LearningLanguageItem(
 
 public static class LearningLanguageCatalog
 {
+    // Profile selection does not imply that the dialogue timing/transcription pipeline supports it.
+    public static bool SupportsAudioDialogues(string? locale) =>
+        !string.Equals(locale?.Trim().Replace('_', '-').Split('-')[0], "mi", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Curated global popularity order, using region-specific identifiers.</summary>
     public static IReadOnlyList<LearningLanguageItem> Items { get; } =
     [

@@ -60,6 +60,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("practice_exposures"); e.HasKey(x => x.Id);
             e.Property(x => x.DeferredScoring).HasDefaultValue(false);
             e.Property(x => x.TranslationUsed).HasDefaultValue(false);
+            e.Property(x => x.ReviewMode).HasDefaultValue(false);
             e.HasIndex(x => new { x.UserId, x.DialogueId }).IsUnique();
             e.HasIndex(x => new { x.UserId, x.RequestId }).IsUnique();
             e.HasIndex(x => new { x.UserId, x.SeenAt });

@@ -1609,6 +1609,13 @@ app.MapPost("/api/me/audio/generate", async (
         return;
     }
 
+    if (!LearningLanguageCatalog.SupportsAudioDialogues(req.LanguageCode))
+    {
+        httpContext.Response.StatusCode = 422;
+        await httpContext.Response.WriteAsJsonAsync(new ApiError("audio_language_unsupported", "Audio dialogues are not available for this language yet."), cancellationToken);
+        return;
+    }
+
     if (req.Level is not null && !AudioLevels.IsValid(req.Level))
     {
         httpContext.Response.StatusCode = 400;
@@ -1758,6 +1765,13 @@ app.MapPost("/api/me/audio/generate/v2", async (
     {
         httpContext.Response.StatusCode = 401;
         await httpContext.Response.WriteAsJsonAsync(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), cancellationToken);
+        return;
+    }
+
+    if (!LearningLanguageCatalog.SupportsAudioDialogues(req.LanguageCode))
+    {
+        httpContext.Response.StatusCode = 422;
+        await httpContext.Response.WriteAsJsonAsync(new ApiError("audio_language_unsupported", "Audio dialogues are not available for this language yet."), cancellationToken);
         return;
     }
 
@@ -2431,6 +2445,13 @@ app.MapPost("/api/me/audio/generate/v3",
         {
             httpContext.Response.StatusCode = 401;
             await httpContext.Response.WriteAsJsonAsync(new ApiError(ErrorCodes.Unauthorized, "Missing or invalid access token."), cancellationToken);
+            return;
+        }
+
+        if (!LearningLanguageCatalog.SupportsAudioDialogues(req.LanguageCode))
+        {
+            httpContext.Response.StatusCode = 422;
+            await httpContext.Response.WriteAsJsonAsync(new ApiError("audio_language_unsupported", "Audio dialogues are not available for this language yet."), cancellationToken);
             return;
         }
 

@@ -2001,3 +2001,133 @@ Rollback preserves database writes:
 ```bash
 python3 /home/ubuntu/releases/bantera-20261020-6/deploy.py rollback
 ```
+
+## Selected Practice review levels: 20 October 2026
+
+Backend **1.25.0**, release **bantera-20261020-7**, completed at
+**2026-10-20 00:54:00 UTC**. API `bantera-api-20261020-7` uses loopback
+18135 and final image `bantera-backend:bantera-20261020-7-final`. Connector
+`cloudflared-20261020-7` readiness is 12058. Website **0.12.0** remains in
+`bantera-website-20261020-6`, with its previous public release marker. Both
+public domains were independently verified; **156/156** sampled responses were
+HTTP 200. The verified pre-migration database backup is **4,571,980 bytes**.
+
+**GO for existing published apps:** `/api/me/practice/level` and response metadata
+are additive; `useSelectedLevel` is optional and defaults false. Older clients
+retain earned-level delivery and existing unfinished-exercise resume behavior.
+Migration `20261020004018_PracticeReviewLevels` adds nullable SelectedLevel to
+practice_progress and default-false ReviewMode to practice_exposures. No required
+new environment variables or secrets. Current earned level is the server-enforced
+ceiling; historical higher levels do not stay unlocked after a downgrade.
+Review selection preserves the scoring window, persists per account/language,
+and never scores review exposures, even if the earned level later changes.
+
+Local build passed; **1,005** backend tests passed, with 14 existing optional
+skips. Runtime checks passed: 13 HTTP/migration checks, shared library/audio reuse,
+all six levels, translation assistance, 44 number/recognition fixtures, 15 answer
+requests with zero model calls, and 10 review-selection/account/consent/legacy
+compatibility checks. Review checks reused real ready shared material using
+short-lived verification accounts, without introducing fake ready dialogues.
+An initial candidate restricted legacy resume to the current level; the existing
+six-level runtime check caught this. The corrected final candidate preserves the
+legacy behavior and passed all checks before promotion. Initial image/source and
+stopped candidate containers are retained; they never received public traffic.
+
+Rollback retains current database writes and restores backend 1.24.1:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261020-7/deploy.py rollback
+```
+
+The prior connector and application containers remain available. No Git
+commit/push, website change, paid-key setting change, or store submission was
+performed for this release.
+
+## Māori profile language selections: 20 October 2026
+
+Backend **1.26.0**, release **bantera-20261020-8**, completed at
+**2026-10-20 01:34:29 UTC**. API `bantera-api-20261020-8` uses loopback
+18136, connector `cloudflared-20261020-8` readiness 12059. Website **0.12.0**
+remains in release 6. Both public domains verified; **128/128** sampled public
+responses were HTTP 200. Verified database backup: **4,698,890 bytes**.
+
+**GO for existing published apps:** additive `mi-NZ` catalog selection and
+language-name resolution; existing languages and contracts preserved. No new
+migration, environment variable or secret. Profile native/learning fields save
+and reload Māori. Speaking Practice explicitly returns 422 with
+`practice_language_unsupported` for Māori, before queueing preparation or creating
+progress. Current device/TTS language lists do not establish Māori speech support;
+selecting a profile language is not a claim of fully supported voice learning.
+
+Build and 1,008 backend tests passed (14 existing optional skips). Candidate
+checks passed for catalog/profile saving, unsupported speech/consent, 13 existing
+HTTP contracts, shared library/audio reuse, all six levels, assistance, 44
+recognition fixtures, 15 deterministic answers without model calls and 10 review
+checks. Public Māori checks also passed with an ephemeral verification account,
+removed in a finally block. The initial public probe's default Python user agent
+was rejected by the edge; the probe was corrected to use the existing release
+verification user agent. No application change was required for that probe.
+
+Previous API/connector retained. Rollback keeps database writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261020-8/deploy.py rollback
+```
+
+No Git commit/push, paid-key configuration change or store submission performed.
+
+### Prepared, not deployed: Māori audio-dialogue restriction
+
+Backend **1.26.1** is prepared locally after the user's decision to withhold Māori
+audio dialogues. All three audio generation routes and admin audio-test creation
+reject `mi`, `mi-NZ` and case/separator variants with 422 before creating a job.
+Native/learning profile selection remains available. App **2.27.1 (400)** disables
+full dialogue generation for that language with the existing localized message.
+
+**GO for existing apps:** existing supported language behavior is unchanged;
+only the newly added unsupported Māori generation path is rejected. No migrations,
+configuration or secrets required. Build passed; 1,013 tests passed and 14 existing
+optional skips. Production remains backend 1.26.0/release 8 until separately deployed.
+The isolated live provider probe and physical iPhone capability findings are
+recorded in `app/docs/maori-language-support.md` in the sibling app repository.
+
+### Superseding prepared change: withdrawn Māori option
+
+Backend **1.26.2** removes Māori from the language catalog. Existing generation
+rejection protects stale clients; Practice uses its existing unknown-locale
+validation. App **2.27.2 (401)** removes it from both pickers and filters older
+cached catalogs. No profile data is rewritten. Native-only Cantonese filtering
+is in the app; both Cantonese variants remain in the learning catalog.
+
+**GO for deployment:** existing supported languages and request shapes unchanged;
+no migrations or configuration. The withdrawn locale is intentionally no longer
+offered. Build and 1,012 tests passed (14 optional skips). This version has not
+been deployed; production remains 1.26.0/release 8.
+
+## Māori withdrawal and native Cantonese filtering delivered
+
+Backend **1.26.2**, release **bantera-20261020-9**, completed on
+**20 October 2026 at 02:11:01 UTC**. API container `bantera-api-20261020-9`
+uses loopback 18137; connector `cloudflared-20261020-9` readiness 12060.
+Website 0.12.0 remains in release 6. Both public domains verified;
+**136/136** availability samples returned HTTP 200. Verified backup:
+**4,780,071 bytes**. Previous release 8 API/connector retained for rollback.
+
+Candidate and public tests confirm Māori absent from the catalog, both Cantonese
+learning options retained, retired Practice requests rejected, and all three
+full audio generation endpoints rejecting Māori variants without creating jobs,
+progress or exposures. Existing HTTP, shared-pool/audio, level, review,
+translation-assistance and recognition regression checks passed. No new migrations,
+configuration, paid-key setting changes, Git commit/push or store submission.
+
+App **2.27.2 (401)** was installed and launched on the physical iPhone 17 Pro.
+Its native-only filter hides mainland Cantonese, while learning choices retain
+both Cantonese variants. Māori is excluded from device, API and cached picker
+sources. The signed release APK was built and verified. Physical locked-screen
+callback testing remains unverified; automated callback regressions passed.
+
+Rollback preserves database writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261020-9/deploy.py rollback
+```

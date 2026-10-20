@@ -1460,6 +1460,11 @@ namespace BanteraApi.Migrations
                     b.Property<Guid>("RequestId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("ReviewMode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<DateTime>("SeenAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1499,6 +1504,9 @@ namespace BanteraApi.Migrations
                         .HasColumnType("character varying(12)");
 
                     b.Property<int>("Level")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("SelectedLevel")
                         .HasColumnType("integer");
 
                     b.Property<string>("Window")
