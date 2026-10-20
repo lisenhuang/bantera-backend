@@ -968,11 +968,9 @@ public class GeminiServicePromptTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task PaidKeyRoutingAppliesToTextAndAudio(bool audio, bool paidOnly)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PaidKeyRoutingStillAppliesToText(bool paidOnly)
     {
         using var provider = new ServiceCollection().BuildServiceProvider();
         var scope = provider.GetRequiredService<IServiceScopeFactory>();
@@ -981,11 +979,10 @@ public class GeminiServicePromptTests
         var policy = new PaidFallbackPolicy(paid, [user], paidOnly ? [user] : []);
         var store = new PaidTestStore(scope, policy);
         var events = new BanteraApi.Diagnostics.AiPipelineEventRecorder(scope, NullLogger<BanteraApi.Diagnostics.AiPipelineEventRecorder>.Instance);
-        var handler = new PaidRoutingHandler(paid, audio);
+        var handler = new PaidRoutingHandler(paid, false);
         var service = CreateService(handler, new("text", "tts", null, null), ["regular-one", paid, "regular-two"], paidFallback: store);
         async Task Run() {
-            if (audio) await service.GenerateAudioAsync(new GeneratedDialogue("Chat", "Kore", "Puck", [new("Speaker1", "Hello")], []), "en-NZ");
-            else await service.GenerateDialogueAsync("English", "en-NZ", "coffee", 60);
+            await service.GenerateDialogueAsync("English", "en-NZ", "coffee", 60);
         }
         // A missing/unknown identity must never reach the paid provider credential.
         await Assert.ThrowsAsync<InvalidOperationException>(Run);
@@ -1015,6 +1012,46 @@ public class GeminiServicePromptTests
         handler.Keys.Clear();
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateAudioAsync(
             new GeneratedDialogue("Chat", "Kore", "Puck", [new("Speaker1", "Hello")], []), "en-NZ"));
+        Assert.DoesNotContain(paid, handler.Keys);
+    }
+
+    [Theory]
+    [InlineData(false, "unknown")]
+    [InlineData(true, "unknown")]
+    [InlineData(false, "paid_only")]
+    [InlineData(true, "paid_only")]
+    [InlineData(false, "regular_only")]
+    [InlineData(true, "regular_only")]
+    public async Task DialogueAudioUsesGlobalSwitchRegardlessOfIndividualMode(bool enabled, string mode)
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var scope = provider.GetRequiredService<IServiceScopeFactory>();
+        var user = Guid.NewGuid();
+        const string paid = "AIzaSy-paid-test-secret";
+        var policy = new PaidFallbackPolicy(paid, mode == "unknown" ? [] : [user],
+            mode == "paid_only" ? [user] : [], mode == "regular_only" ? [user] : [],
+            DialogueAudioFallback: enabled);
+        var store = new PaidTestStore(scope, policy);
+        var handler = new PaidRoutingHandler(paid, true);
+        var service = CreateService(handler, new("text", "tts", null, null),
+            ["regular-one", paid, "regular-two"], paidFallback: store);
+        var events = new BanteraApi.Diagnostics.AiPipelineEventRecorder(scope,
+            NullLogger<BanteraApi.Diagnostics.AiPipelineEventRecorder>.Instance);
+        using (events.BeginContext(user, null, "en-NZ", "test"))
+        {
+            Task Run() => service.GenerateAudioAsync(new GeneratedDialogue("Chat", "Kore", "Puck",
+                [new("Speaker1", "Hello")], []), "en-NZ");
+            if (enabled) await Run();
+            else await Assert.ThrowsAsync<InvalidOperationException>(Run);
+        }
+        Assert.Equal(["regular-one", "regular-two"], handler.Keys.Take(2).Order());
+        Assert.Equal(enabled ? 3 : 2, handler.Keys.Count);
+        if (enabled) Assert.Equal(paid, handler.Keys.Last());
+        // A Dialogue opt-in must not grant shared Practice or anonymous text access,
+        // and the audio context must be restored after both success and failure.
+        handler.Keys.Clear();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GeneratePracticeAudioAsync("Hi", "en-NZ", false, 0));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateDialogueAsync("English", "en-NZ", "coffee", 60));
         Assert.DoesNotContain(paid, handler.Keys);
     }
 

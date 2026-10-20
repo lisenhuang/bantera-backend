@@ -28,6 +28,7 @@ public partial class GeminiService(
     internal Guid? RequestUserId => events.CurrentUserId ??
         (Guid.TryParse(requestContext?.HttpContext?.User.FindFirst("sub")?.Value, out var id) ? id : null);
     private readonly AsyncLocal<bool> practiceAudioRequest = new();
+    private readonly AsyncLocal<bool> dialogueAudioRequest = new();
     private const string LatestNewsScenarioId = "latest_news";
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private static readonly Regex TokenRegex = new(@"[\p{L}\p{N}']+", RegexOptions.Compiled);
@@ -660,12 +661,18 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
         }, cancellationToken, webSearch: useGoogleSearch, singleAttempt: testSession is not null);
     }
 
-    public Task<GeneratedAudio> GenerateAudioAsync(
+    public async Task<GeneratedAudio> GenerateAudioAsync(
         GeneratedDialogue dialogue,
         string languageCode,
         CancellationToken cancellationToken = default,
-        GeminiTestSession? testSession = null) =>
-        GenerateAudioCoreAsync(dialogue, languageCode, cancellationToken, testSession, singleSpeaker: false);
+        GeminiTestSession? testSession = null)
+    {
+        var previous = dialogueAudioRequest.Value;
+        // Explicit admin single-attempt diagnostics retain their individual key mode.
+        dialogueAudioRequest.Value = testSession is null;
+        try { return await GenerateAudioCoreAsync(dialogue, languageCode, cancellationToken, testSession, singleSpeaker: false); }
+        finally { dialogueAudioRequest.Value = previous; }
+    }
 
     // Practice clips contain exactly one utterance. Never route them through the
     // two-person configuration, which can cause TTS to invent an answering turn.
@@ -1705,7 +1712,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
         if (webSearch && model != AiSearchPolicy.GeminiModel)
             throw new InvalidOperationException("This Gemini model is not allowed for web search.");
         var configuredKeys = SelectKeys(Settings.ApiKeys, webSearch, AiSearchPolicy.GeminiKeyPrefix);
-        var plan = await keyHealth.PlanAsync(model, RequestUserId, cancellationToken, webSearch, practiceAudio: practiceAudioRequest.Value);
+        var plan = await keyHealth.PlanAsync(model, RequestUserId, cancellationToken, webSearch, practiceAudio: practiceAudioRequest.Value, dialogueAudio: dialogueAudioRequest.Value);
         var keys = plan.Keys;
         if (keys.Length == 0)
         {
@@ -1723,7 +1730,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
         {
             cancellationToken.ThrowIfCancellationRequested();
             var key = keys[attempt];
-            if (key == plan.PaidKey && !await keyHealth.StillAllowedAsync(key, RequestUserId, cancellationToken, practiceAudio: practiceAudioRequest.Value)) break;
+            if (key == plan.PaidKey && !await keyHealth.StillAllowedAsync(key, RequestUserId, cancellationToken, practiceAudio: practiceAudioRequest.Value, dialogueAudio: dialogueAudioRequest.Value)) break;
             var keyHint = MaskKey(key);
             var clock = System.Diagnostics.Stopwatch.StartNew();
             using var operationScope = events.BeginOperation(operation, model ?? "unknown");

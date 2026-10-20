@@ -9,7 +9,7 @@ namespace BanteraApi.Admin;
 public static class GeminiPaidFallbackEndpoints
 {
     public sealed record UserPreferenceRequest(string? Mode);
-    public sealed record UpdateRequest(string? ApiKey, bool RemoveKey, Guid[]? AllowedUserIds, Guid[]? PaidOnlyUserIds = null, Guid[]? RegularOnlyUserIds = null, bool? PracticeAudioFallback = null);
+    public sealed record UpdateRequest(string? ApiKey, bool RemoveKey, Guid[]? AllowedUserIds, Guid[]? PaidOnlyUserIds = null, Guid[]? RegularOnlyUserIds = null, bool? PracticeAudioFallback = null, bool? DialogueAudioFallback = null);
     internal static ApiError? Validate(UpdateRequest req)
     {
         var key = req.ApiKey?.Trim();
@@ -57,7 +57,7 @@ public static class GeminiPaidFallbackEndpoints
             if (!store.StorageReady) return Results.Json(new ApiError("storage_unavailable", "Secure key storage is unavailable."), statusCode: 503);
             var key = req.ApiKey?.Trim();
             if (Validate(req) is { } error) return Results.BadRequest(error);
-            try { await store.SaveAsync(key, req.RemoveKey, req.AllowedUserIds!, req.PaidOnlyUserIds ?? [], admin, ct, req.RegularOnlyUserIds, req.PracticeAudioFallback); }
+            try { await store.SaveAsync(key, req.RemoveKey, req.AllowedUserIds!, req.PaidOnlyUserIds ?? [], admin, ct, req.RegularOnlyUserIds, req.PracticeAudioFallback, req.DialogueAudioFallback); }
             catch (ArgumentException) { return Results.BadRequest(new ApiError("invalid_user", "Choose active users only.")); }
             return Results.Ok(await store.StatusAsync(ct));
         });

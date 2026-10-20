@@ -52,14 +52,45 @@ public class GeminiPaidFallbackTests
     }
 
     [Fact]
+    public async Task DialogueAudioRechecksGlobalOptInAndRespectsPaidKeyCooldown()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var scope = provider.GetRequiredService<IServiceScopeFactory>();
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var store = new Store(scope, Policy with { DialogueAudioFallback = true });
+        var health = new GeminiKeyHealthService(scope, cache,
+            Options.Create(new GeminiSettings { ApiKeys = ["a", Paid, "b"] }),
+            NullLogger<GeminiKeyHealthService>.Instance, store);
+        var plan = await health.PlanAsync("tts", null, default, dialogueAudio: true);
+        Assert.Equal(["a", "b"], plan.Keys.Take(2).Order());
+        Assert.Equal(Paid, plan.Keys.Last());
+        Assert.Equal(Paid, plan.PaidKey);
+        Assert.True(await health.StillAllowedAsync(Paid, null, default, dialogueAudio: true));
+        store.Policy = Policy;
+        Assert.False(await health.StillAllowedAsync(Paid, Allowed, default, dialogueAudio: true));
+        Assert.DoesNotContain(Paid, (await health.PlanAsync("tts", Allowed, default, dialogueAudio: true)).Keys);
+        store.Policy = Policy with { DialogueAudioFallback = true, Key = "replacement" };
+        Assert.False(await health.StillAllowedAsync(Paid, null, default, dialogueAudio: true));
+        store.Policy = Policy with { DialogueAudioFallback = true };
+        health.CoolDown(Paid, "tts");
+        Assert.DoesNotContain(Paid, (await health.PlanAsync("tts", null, default, dialogueAudio: true)).Keys);
+        store.Policy = Policy with { DialogueAudioFallback = true, Key = null };
+        Assert.Null((await health.PlanAsync("tts", null, default, dialogueAudio: true)).PaidKey);
+    }
+
+    [Fact]
     public void LegacyPaidPolicyDefaultsPracticeOffAndEncryptedRoundTripPreservesFlag()
     {
         var old = System.Text.Json.JsonSerializer.Deserialize<PaidFallbackPolicy>("{\"Key\":null,\"AllowedUserIds\":[]}")!;
         Assert.False(old.PracticeAudioFallback);
+        Assert.False(old.DialogueAudioFallback);
+        var legacyUpdate = new GeminiPaidFallbackEndpoints.UpdateRequest(null, false, []);
+        Assert.Null(legacyUpdate.DialogueAudioFallback);
         var secret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-        var encoded = GeminiPaidFallback.Encode(Policy with { PracticeAudioFallback = true }, secret);
+        var encoded = GeminiPaidFallback.Encode(Policy with { PracticeAudioFallback = true, DialogueAudioFallback = true }, secret);
         Assert.DoesNotContain(Paid, encoded);
         Assert.True(GeminiPaidFallback.Decode(encoded, secret).PracticeAudioFallback);
+        Assert.True(GeminiPaidFallback.Decode(encoded, secret).DialogueAudioFallback);
     }
     [Theory]
     [InlineData("AIzaSy", 33)]
