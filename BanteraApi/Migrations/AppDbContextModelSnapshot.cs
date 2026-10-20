@@ -1327,6 +1327,190 @@ namespace BanteraApi.Migrations
                     b.ToTable("user_word_activity", (string)null);
                 });
 
+            modelBuilder.Entity("BanteraApi.Practice.PracticeAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("Choice")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ExposureId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExposureId");
+
+                    b.ToTable("practice_attempts", (string)null);
+                });
+
+            modelBuilder.Entity("BanteraApi.Practice.PracticeDialogue", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ContentVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Cue")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("CueAudio")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Distractor")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DistractorAudio")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Explanation")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Locale")
+                        .IsRequired()
+                        .HasMaxLength(35)
+                        .HasColumnType("character varying(35)");
+
+                    b.Property<string>("MeaningKey")
+                        .IsRequired()
+                        .HasMaxLength(180)
+                        .HasColumnType("character varying(180)");
+
+                    b.Property<bool>("Ready")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Reply")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReplyAudio")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Language", "Fingerprint")
+                        .IsUnique();
+
+                    b.HasIndex("Locale", "Level", "Ready");
+
+                    b.ToTable("practice_dialogues", (string)null);
+                });
+
+            modelBuilder.Entity("BanteraApi.Practice.PracticeExposure", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("DeferredScoring")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<Guid>("DialogueId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool?>("FirstCorrect")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("SeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Swap")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("TranslationUsed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DialogueId");
+
+                    b.HasIndex("UserId", "DialogueId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "RequestId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "SeenAt");
+
+                    b.ToTable("practice_exposures", (string)null);
+                });
+
+            modelBuilder.Entity("BanteraApi.Practice.PracticeProgress", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Language")
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Window")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.HasKey("UserId", "Language");
+
+                    b.ToTable("practice_progress", (string)null);
+                });
+
             modelBuilder.Entity("BanteraApi.WebsiteAnalytics.WebsiteEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1649,6 +1833,41 @@ namespace BanteraApi.Migrations
                 });
 
             modelBuilder.Entity("BanteraApi.Database.Entities.UserWordActivity", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BanteraApi.Practice.PracticeAttempt", b =>
+                {
+                    b.HasOne("BanteraApi.Practice.PracticeExposure", null)
+                        .WithMany()
+                        .HasForeignKey("ExposureId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BanteraApi.Practice.PracticeExposure", b =>
+                {
+                    b.HasOne("BanteraApi.Practice.PracticeDialogue", "Dialogue")
+                        .WithMany()
+                        .HasForeignKey("DialogueId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BanteraApi.Database.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Dialogue");
+                });
+
+            modelBuilder.Entity("BanteraApi.Practice.PracticeProgress", b =>
                 {
                     b.HasOne("BanteraApi.Database.Entities.User", null)
                         .WithMany()

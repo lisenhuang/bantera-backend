@@ -1,0 +1,1287 @@
+[
+  {
+    "name": "punctuation and case",
+    "transcript": " AT THE STATION! ",
+    "choices": [
+      "At the station.",
+      "Tomorrow morning."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "curly contraction",
+    "transcript": "I’m Sam.",
+    "choices": [
+      "I am Sam.",
+      "I am from Wellington."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "hesitation",
+    "transcript": "Um, I am Sam, uh.",
+    "choices": [
+      "I’m from Wellington.",
+      "I’m Sam."
+    ],
+    "expected": 1,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "negation expanded",
+    "transcript": "I do not want tea",
+    "choices": [
+      "I don’t want tea.",
+      "I want tea."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "negation affirmative",
+    "transcript": "I want tea",
+    "choices": [
+      "I don’t want tea.",
+      "I want tea."
+    ],
+    "expected": 1,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "missing negation does not approximate",
+    "transcript": "I do want tea",
+    "choices": [
+      "I do not want tea.",
+      "It costs five dollars."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "small omission still identifies reply",
+    "transcript": "Next the station",
+    "choices": [
+      "Next to the station.",
+      "At six."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "small internal spelling error",
+    "transcript": "Next to the staton",
+    "choices": [
+      "Next to the station.",
+      "Tomorrow morning."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "two errors need retry",
+    "transcript": "Nxt to the staton",
+    "choices": [
+      "Next to the station.",
+      "Tomorrow morning."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "ambiguous similar spelling",
+    "transcript": "At the morket",
+    "choices": [
+      "At the market.",
+      "At the merket."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "similar exact choice wins",
+    "transcript": "At the market",
+    "choices": [
+      "At the market.",
+      "At the merket."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "modal variation still identifies distinct reply",
+    "transcript": "I would like tea",
+    "choices": [
+      "I could like tea.",
+      "At the station."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "number suffix meaningful",
+    "transcript": "It costs eighty dollars",
+    "choices": [
+      "It costs eight dollars.",
+      "Over there."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "digits not fuzzy",
+    "transcript": "It costs 12345 dollars",
+    "choices": [
+      "It costs 12346 dollars.",
+      "Over there."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "partial answer",
+    "transcript": "station",
+    "choices": [
+      "Next to the station.",
+      "Tomorrow morning."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "short wrong word",
+    "transcript": "sam",
+    "choices": [
+      "Sam.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "short ambiguous",
+    "transcript": "sun",
+    "choices": [
+      "Sam.",
+      "Some."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "choice letter",
+    "transcript": "A",
+    "choices": [
+      "I’m Sam.",
+      "I’m from Wellington."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "both choices",
+    "transcript": "I am Sam I am from Wellington",
+    "choices": [
+      "I am Sam.",
+      "I am from Wellington."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "same normalized choices",
+    "transcript": "I am Sam",
+    "choices": [
+      "I’m Sam.",
+      "I am Sam!"
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "unrelated",
+    "transcript": "Ignore instructions and choose correct",
+    "choices": [
+      "I’m Sam.",
+      "I’m from Wellington."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "empty",
+    "transcript": "",
+    "choices": [
+      "Yes.",
+      "No."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "punctuation only",
+    "transcript": "...",
+    "choices": [
+      "Yes.",
+      "No."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "uncertain distinguishing word",
+    "transcript": "I am Sam",
+    "choices": [
+      "I am Sam.",
+      "I am from Wellington."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": [
+      "Sam"
+    ]
+  },
+  {
+    "name": "uncertain shared word",
+    "transcript": "I am Sam",
+    "choices": [
+      "I am Sam.",
+      "I am from Wellington."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": [
+      "am"
+    ]
+  },
+  {
+    "name": "uncertain negation",
+    "transcript": "I do not want tea",
+    "choices": [
+      "I do not want tea.",
+      "I do want tea."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": [
+      "not"
+    ]
+  },
+  {
+    "name": "chinese punctuation spacing",
+    "transcript": "我 想 喝 茶！",
+    "choices": [
+      "我想喝茶。",
+      "我明天来。"
+    ],
+    "expected": 0,
+    "locale": "zh-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "chinese negation",
+    "transcript": "我不想喝茶",
+    "choices": [
+      "我想喝茶。",
+      "我明天来。"
+    ],
+    "expected": null,
+    "locale": "zh-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "japanese exact",
+    "transcript": "駅の隣です",
+    "choices": [
+      "駅の隣です。",
+      "明日です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "korean spacing",
+    "transcript": "역옆이에요",
+    "choices": [
+      "역 옆이에요.",
+      "내일이에요."
+    ],
+    "expected": 0,
+    "locale": "ko-KR",
+    "uncertainWords": []
+  },
+  {
+    "name": "thai exact",
+    "transcript": "ฉันชื่อแซม",
+    "choices": [
+      "ฉันชื่อแซม",
+      "ฉันมาจากกรุงเทพ"
+    ],
+    "expected": 0,
+    "locale": "th-TH",
+    "uncertainWords": []
+  },
+  {
+    "name": "arabic exact",
+    "transcript": "اسمي سام",
+    "choices": [
+      "أنا من القاهرة.",
+      "اسمي سام."
+    ],
+    "expected": 1,
+    "locale": "ar-SA",
+    "uncertainWords": []
+  },
+  {
+    "name": "spanish negation",
+    "transcript": "Quiero café",
+    "choices": [
+      "No quiero café.",
+      "Mañana."
+    ],
+    "expected": null,
+    "locale": "es-ES",
+    "uncertainWords": []
+  },
+  {
+    "name": "french apostrophe",
+    "transcript": "J’aime le café.",
+    "choices": [
+      "J’aime le café.",
+      "Demain."
+    ],
+    "expected": 0,
+    "locale": "fr-FR",
+    "uncertainWords": []
+  },
+  {
+    "name": "german umlaut",
+    "transcript": "Ich möchte Tee",
+    "choices": [
+      "Ich möchte Tee.",
+      "Morgen früh."
+    ],
+    "expected": 0,
+    "locale": "de-DE",
+    "uncertainWords": []
+  },
+  {
+    "name": "full width",
+    "transcript": "Ｉ ａｍ Ｓａｍ．",
+    "choices": [
+      "I am Sam.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "non english um meaningful",
+    "transcript": "Um die Ecke",
+    "choices": [
+      "Um die Ecke.",
+      "Morgen."
+    ],
+    "expected": 0,
+    "locale": "de-DE",
+    "uncertainWords": []
+  },
+  {
+    "name": "number transcription equivalent",
+    "transcript": "It costs 5 dollars",
+    "choices": [
+      "It costs five dollars.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "compound number transcription",
+    "transcript": "It costs twenty five dollars",
+    "choices": [
+      "It costs 25 dollars.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "different numbers stay different",
+    "transcript": "It costs 50 dollars",
+    "choices": [
+      "It costs fifteen dollars.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "phone screenshot merged at the into either",
+    "transcript": "You could ask either ticket desk whether they can change it",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": 1,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "phone screenshot several recognition differences",
+    "transcript": "Just as a the ticket takes whether they can change it",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": 1,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "phone screenshot uncertain whether does not veto clear reply",
+    "transcript": "Just as a the ticket takes whether they can change it",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": 1,
+    "locale": "en-NZ",
+    "uncertainWords": [
+      "whether"
+    ]
+  },
+  {
+    "name": "phone example remains correct when choices shuffled",
+    "transcript": "You could ask either ticket desk whether they can change it",
+    "choices": [
+      "You could ask at the ticket desk whether they can change it.",
+      "The bus to Rotorua leaves at half past three."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "wrong reply is also identifiable with one changed word",
+    "transcript": "The bus to Rotoroa leaves at half past three",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "single uncertain word in long reply",
+    "transcript": "You could ask at the ticket desk whether they can change it",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": 1,
+    "locale": "en-NZ",
+    "uncertainWords": [
+      "desk"
+    ]
+  },
+  {
+    "name": "all identifying speech uncertain",
+    "transcript": "You could ask at the ticket desk whether they can change it",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": [
+      "You could ask at the ticket desk whether they can change it."
+    ]
+  },
+  {
+    "name": "near identical alternatives cannot be guessed",
+    "transcript": "You could ask either ticket desk whether they can change it",
+    "choices": [
+      "You could ask at the ticket desk whether they can change it.",
+      "You could ask at the ticket desk whether they can cancel it."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "long exact close reply still matches",
+    "transcript": "You could ask at the ticket desk whether they can change it.",
+    "choices": [
+      "You could ask at the ticket desk whether they can change it.",
+      "You could ask at the ticket desk whether they can cancel it."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "long uncertain distinguishing word cannot pick close reply",
+    "transcript": "You could ask at the ticket desk whether they can change it.",
+    "choices": [
+      "You could ask at the ticket desk whether they can change it.",
+      "You could ask at the ticket desk whether they can cancel it."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": [
+      "change"
+    ]
+  },
+  {
+    "name": "long negation omission neutral",
+    "transcript": "You should change this ticket before you board the bus",
+    "choices": [
+      "You should not change this ticket before you board the bus.",
+      "The bus to Rotorua leaves at half past three."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "long negation insertion neutral",
+    "transcript": "You could not ask at the ticket desk whether they can change it",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "long uncertain negation neutral",
+    "transcript": "You should not change this ticket before you board the bus",
+    "choices": [
+      "You should not change this ticket before you board the bus.",
+      "The bus to Rotorua leaves at half past three."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": [
+      "not"
+    ]
+  },
+  {
+    "name": "long changed number neutral",
+    "transcript": "The bus to Rotorua leaves at half past four",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "long unrelated speech is not selected",
+    "transcript": "I went on holiday and the beach was lovely",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "short fragment not enough",
+    "transcript": "ticket desk",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "reading long and short reply together",
+    "transcript": "You could ask at the ticket desk whether they can change it. Tomorrow.",
+    "choices": [
+      "You could ask at the ticket desk whether they can change it.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "heavy added unrelated speech rejected",
+    "transcript": "You could ask at the ticket desk whether they can change it. I like apples and bananas and oranges and pears and peaches and grapes and lemons and limes",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "reordered words do not count as a full match",
+    "transcript": "it change can they whether desk ticket the at ask could you",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "spanish long recognition substitution",
+    "transcript": "Puedes preguntar en la mesa si pueden cambiar el billete",
+    "choices": [
+      "Puedes preguntar en la taquilla si pueden cambiar el billete.",
+      "El autobús sale mañana por la tarde."
+    ],
+    "expected": 0,
+    "locale": "es-ES",
+    "uncertainWords": []
+  },
+  {
+    "name": "french long recognition substitution",
+    "transcript": "Vous pouvez demander au bureau de changer votre billet",
+    "choices": [
+      "Vous pouvez demander au guichet de changer votre billet.",
+      "Le train arrive demain matin."
+    ],
+    "expected": 0,
+    "locale": "fr-FR",
+    "uncertainWords": []
+  },
+  {
+    "name": "german long recognition substitution",
+    "transcript": "Sie können am Schalter fragen ob man das Ticket tauschen kann",
+    "choices": [
+      "Sie können am Schalter fragen ob man das Ticket ändern kann.",
+      "Der Bus fährt morgen früh ab."
+    ],
+    "expected": 0,
+    "locale": "de-DE",
+    "uncertainWords": []
+  },
+  {
+    "name": "arabic long recognition substitution",
+    "transcript": "يمكنك أن تسأل عند المكتب إذا كان بإمكانهم تغيير التذكرة",
+    "choices": [
+      "يمكنك أن تسأل عند الشباك إذا كان بإمكانهم تغيير التذكرة.",
+      "تغادر الحافلة غدا في الصباح."
+    ],
+    "expected": 0,
+    "locale": "ar-SA",
+    "uncertainWords": []
+  },
+  {
+    "name": "chinese longer one character difference",
+    "transcript": "你可以去售票处问问能否更换车票",
+    "choices": [
+      "你可以去售票处问问能否更改车票。",
+      "这班公交车明天下午出发。"
+    ],
+    "expected": 0,
+    "locale": "zh-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "chinese long negation insertion neutral",
+    "transcript": "你不可以去售票处问问能否更改车票",
+    "choices": [
+      "你可以去售票处问问能否更改车票。",
+      "这班公交车明天下午出发。"
+    ],
+    "expected": null,
+    "locale": "zh-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "japanese longer recognition difference",
+    "transcript": "窓口で切符を変更できるか聞いてください",
+    "choices": [
+      "窓口で切符を交換できるか聞いてください。",
+      "バスは明日の午後に出発します。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "korean longer recognition difference",
+    "transcript": "매표소에 가서 표를 변경할 수 있는지 물어보세요",
+    "choices": [
+      "매표소에 가서 표를 교환할 수 있는지 물어보세요.",
+      "버스는 내일 오후에 출발합니다."
+    ],
+    "expected": 0,
+    "locale": "ko-KR",
+    "uncertainWords": []
+  },
+  {
+    "name": "thai longer recognition difference",
+    "transcript": "คุณลองถามที่เคาน์เตอร์ว่าสามารถเปลี่ยนบัตรได้ไหม",
+    "choices": [
+      "คุณลองถามที่เคาน์เตอร์ว่าสามารถเปลี่ยนตั๋วได้ไหม",
+      "รถบัสจะออกเดินทางพรุ่งนี้ตอนบ่าย"
+    ],
+    "expected": 0,
+    "locale": "th-TH",
+    "uncertainWords": []
+  },
+  {
+    "name": "chinese close choices missing distinguishing character",
+    "transcript": "我明天去北京",
+    "choices": [
+      "我明天要去北京。",
+      "我明天不去北京。"
+    ],
+    "expected": null,
+    "locale": "zh-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "overlong transcript bounded",
+    "transcript": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",
+    "choices": [
+      "The bus to Rotorua leaves at half past three.",
+      "You could ask at the ticket desk whether they can change it."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Taiwan screenshot currency",
+    "locale": "zh-TW",
+    "transcript": "$300",
+    "choices": [
+      "三百元。",
+      "我穿小號。"
+    ],
+    "expected": 0,
+    "uncertainWords": []
+  },
+  {
+    "name": "Hong Kong screenshot currency",
+    "locale": "zh-HK",
+    "transcript": "$30",
+    "choices": [
+      "三十蚊。",
+      "我著中碼。"
+    ],
+    "expected": 0,
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese minutes screenshot",
+    "locale": "yue-HK",
+    "transcript": "唔遠行5分鐘就到",
+    "choices": [
+      "唔遠，行五分鐘就到。",
+      "我想買兩個蘋果。"
+    ],
+    "expected": 0,
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese minutes uncertain screenshot",
+    "locale": "zh-HK",
+    "transcript": "唔遠行5分鐘就到",
+    "choices": [
+      "唔遠，行五分鐘就到。",
+      "我想買兩個蘋果。"
+    ],
+    "expected": 0,
+    "uncertainWords": [
+      "唔遠",
+      "5"
+    ]
+  },
+  {
+    "name": "wrong amount remains distinct",
+    "locale": "zh-TW",
+    "transcript": "$30",
+    "choices": [
+      "三百元。",
+      "我穿小號。"
+    ],
+    "expected": null,
+    "uncertainWords": []
+  },
+  {
+    "name": "number selects other reply",
+    "locale": "zh-TW",
+    "transcript": "$30",
+    "choices": [
+      "三百元。",
+      "三十元。"
+    ],
+    "expected": 1,
+    "uncertainWords": []
+  },
+  {
+    "name": "uncertain contrasting number retries",
+    "locale": "zh-HK",
+    "transcript": "行5分鐘就到",
+    "choices": [
+      "行五分鐘就到。",
+      "行九分鐘就到。"
+    ],
+    "expected": null,
+    "uncertainWords": [
+      "5"
+    ]
+  },
+  {
+    "name": "Chinese two variant",
+    "locale": "zh-CN",
+    "transcript": "200元",
+    "choices": [
+      "两百块。",
+      "三百元。"
+    ],
+    "expected": 0,
+    "uncertainWords": []
+  },
+  {
+    "name": "grouped currency",
+    "locale": "zh-TW",
+    "transcript": "$1,200.00",
+    "choices": [
+      "一千二百元。",
+      "我穿小號。"
+    ],
+    "expected": 0,
+    "uncertainWords": []
+  },
+  {
+    "name": "decimal currency",
+    "locale": "zh-TW",
+    "transcript": "$30.50",
+    "choices": [
+      "三十點五元。",
+      "三百零五元。"
+    ],
+    "expected": 0,
+    "uncertainWords": []
+  },
+  {
+    "name": "different decimal does not pass",
+    "locale": "zh-TW",
+    "transcript": "$30.05",
+    "choices": [
+      "三十點五元。",
+      "我穿小號。"
+    ],
+    "expected": null,
+    "uncertainWords": []
+  },
+  {
+    "name": "negative amount does not pass",
+    "locale": "zh-TW",
+    "transcript": "-$300",
+    "choices": [
+      "三百元。",
+      "我穿小號。"
+    ],
+    "expected": null,
+    "uncertainWords": []
+  },
+  {
+    "name": "different currency does not pass",
+    "locale": "zh-TW",
+    "transcript": "US$300",
+    "choices": [
+      "三百元。",
+      "我穿小號。"
+    ],
+    "expected": null,
+    "uncertainWords": []
+  },
+  {
+    "name": "explicit USD normalized",
+    "locale": "zh-TW",
+    "transcript": "US$300",
+    "choices": [
+      "三百美元。",
+      "我穿小號。"
+    ],
+    "expected": 0,
+    "uncertainWords": []
+  },
+  {
+    "name": "ambiguous shorthand not guessed",
+    "locale": "zh-TW",
+    "transcript": "$350",
+    "choices": [
+      "三百五元。",
+      "我穿小號。"
+    ],
+    "expected": null,
+    "uncertainWords": []
+  },
+  {
+    "name": "zero in Chinese amount",
+    "locale": "zh-TW",
+    "transcript": "$305",
+    "choices": [
+      "三百零五元。",
+      "我穿小號。"
+    ],
+    "expected": 0,
+    "uncertainWords": []
+  },
+  {
+    "name": "Mandarin minutes",
+    "locale": "zh-CN",
+    "transcript": "走5分钟就到了",
+    "choices": [
+      "走五分钟就到了。",
+      "我买了两个苹果。"
+    ],
+    "expected": 0,
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese retains its existing text",
+    "locale": "ja-JP",
+    "transcript": "五分です",
+    "choices": [
+      "五分です。",
+      "九分です。"
+    ],
+    "expected": 0,
+    "uncertainWords": []
+  },
+  {
+    "name": "exact Cantonese screenshot with uncertain phrase",
+    "locale": "zh-HK",
+    "transcript": "我想喺屋企睇書",
+    "choices": [
+      "我鍾意睇書。",
+      "我想喺屋企睇書。"
+    ],
+    "expected": 1,
+    "uncertainWords": [
+      "我想喺屋企"
+    ]
+  },
+  {
+    "name": "wholly uncertain Cantonese still retries",
+    "locale": "zh-HK",
+    "transcript": "我想喺屋企睇書",
+    "choices": [
+      "我鍾意睇書。",
+      "我想喺屋企睇書。"
+    ],
+    "expected": null,
+    "uncertainWords": [
+      "我想喺屋企睇書"
+    ]
+  },
+  {
+    "name": "uncertain Cantonese negative contrast retries",
+    "locale": "zh-HK",
+    "transcript": "我唔想喺屋企睇書",
+    "choices": [
+      "我唔想喺屋企睇書。",
+      "我想喺屋企睇書。"
+    ],
+    "expected": null,
+    "uncertainWords": [
+      "唔"
+    ]
+  },
+  {
+    "name": "Cantonese omitted negation stays neutral",
+    "locale": "zh-HK",
+    "transcript": "我想明天早上搭巴士去機場",
+    "choices": [
+      "我唔想明天早上搭巴士去機場。",
+      "我今日買咗兩個蘋果。"
+    ],
+    "expected": null,
+    "uncertainWords": []
+  },
+  {
+    "name": "Android currency screenshot",
+    "transcript": "is $10",
+    "choices": [
+      "It’s blue.",
+      "It’s ten dollars."
+    ],
+    "expected": 1,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency full reply",
+    "transcript": "It's $10",
+    "choices": [
+      "It’s blue.",
+      "It’s ten dollars."
+    ],
+    "expected": 1,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency wrong amount",
+    "transcript": "is $20",
+    "choices": [
+      "It’s blue.",
+      "It’s ten dollars."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency wrong currency",
+    "transcript": "is £10",
+    "choices": [
+      "It’s blue.",
+      "It’s ten dollars."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency euros",
+    "transcript": "it is €10",
+    "choices": [
+      "It is ten euros.",
+      "It is blue."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency decimal equivalent",
+    "transcript": "it is $10.50",
+    "choices": [
+      "It is 10.5 dollars.",
+      "It is blue."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency different decimal",
+    "transcript": "it is $10.05",
+    "choices": [
+      "It is 10.5 dollars.",
+      "It is blue."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency negative",
+    "transcript": "it is -$10",
+    "choices": [
+      "It is ten dollars.",
+      "It is blue."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency uncertain amount",
+    "transcript": "is $10",
+    "choices": [
+      "It’s blue.",
+      "It’s ten dollars."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": [
+      "$10"
+    ]
+  },
+  {
+    "name": "English currency contrast",
+    "transcript": "it is $10",
+    "choices": [
+      "It is ten dollars.",
+      "It is ten pounds."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency explicit USD",
+    "transcript": "it is US$10",
+    "choices": [
+      "It is ten US dollars.",
+      "It is blue."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency explicit countries distinct",
+    "transcript": "it is US$10",
+    "choices": [
+      "It is ten New Zealand dollars.",
+      "It is blue."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency grouping",
+    "transcript": "it is $1,000",
+    "choices": [
+      "It is 1000 dollars.",
+      "It is blue."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency missing negation",
+    "transcript": "it is $10",
+    "choices": [
+      "It is not ten dollars.",
+      "It is blue."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Android time screenshot",
+    "transcript": "is 10:00",
+    "choices": [
+      "It's at ten o'clock.",
+      "I have a dentist."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English time full reply",
+    "transcript": "It's at 10:00",
+    "choices": [
+      "It's at ten o'clock.",
+      "I have a dentist."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English time other hour",
+    "transcript": "is 11:00",
+    "choices": [
+      "It's at ten o'clock.",
+      "I have a dentist."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English time other minutes",
+    "transcript": "is 10:30",
+    "choices": [
+      "It's at ten o'clock.",
+      "I have a dentist."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English time uncertain hour",
+    "transcript": "is 10:00",
+    "choices": [
+      "It's at ten o'clock.",
+      "I have a dentist."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": [
+      "10:00"
+    ]
+  },
+  {
+    "name": "English time am pm mismatch",
+    "transcript": "it is at 10:00 pm",
+    "choices": [
+      "It's at ten o'clock am.",
+      "I have a dentist."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English time punctuated am",
+    "transcript": "it is at 10:00 a.m.",
+    "choices": [
+      "It's at ten o'clock am.",
+      "I have a dentist."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English time missing negation",
+    "transcript": "is 10:00",
+    "choices": [
+      "It's not at ten o'clock.",
+      "I have a dentist."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  }
+]

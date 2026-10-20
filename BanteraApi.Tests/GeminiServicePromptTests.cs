@@ -356,6 +356,66 @@ public class GeminiServicePromptTests
         Assert.Equal(2, handler.RequestCount);
     }
 
+    [Theory]
+    [InlineData("gemini-2.5-flash-preview-tts", false)]
+    [InlineData("gemini-2.5-pro-preview-tts", true)]
+    [InlineData("gemini-3.1-flash-tts-preview", false)]
+    [InlineData("gemini-3.1-flash-tts-preview", true)]
+    [InlineData("gemini-3.8-flash-tts", false)]
+    [InlineData("gemini-3.8-flash-tts", true)]
+    [InlineData("gemini-3.8-flash-lite-tts", false)]
+    [InlineData("gemini-3.8-flash-lite-tts", true)]
+    public async Task PracticeAudio_UsesExactlyOneVoiceAndOneUtterance(string model, bool reply)
+    {
+        var handler = new PreviewAudioHandler(regional: true);
+        var service = CreateService(handler, new("text", model, null, null));
+        const string utterance = "Where is the train station?";
+        await service.GeneratePracticeAudioAsync(utterance, "en-AU", reply, 0);
+        using var doc = JsonDocument.Parse(Assert.Single(handler.Requests));
+        var config = doc.RootElement.GetProperty("generationConfig").GetProperty("speechConfig");
+        Assert.False(config.TryGetProperty("multiSpeakerVoiceConfig", out _));
+        var voice = config.GetProperty("voiceConfig");
+        var part = Assert.Single(doc.RootElement.GetProperty("contents")[0].GetProperty("parts").EnumerateArray());
+        if (model.Contains("3.8"))
+        {
+            Assert.Equal(reply ? "au-male" : "au-female", voice.GetProperty("voice").GetString());
+            Assert.Equal(utterance, part.GetProperty("text").GetString());
+            var metadata = part.GetProperty("speech_metadata");
+            Assert.False(metadata.TryGetProperty("speaker", out _));
+            Assert.Contains("English (Australia)", metadata.GetProperty("style").GetString());
+        }
+        else
+        {
+            Assert.Equal(reply ? "Puck" : "Kore", voice.GetProperty("prebuiltVoiceConfig").GetProperty("voiceName").GetString());
+            var prompt = part.GetProperty("text").GetString()!;
+            Assert.EndsWith(utterance, prompt);
+            Assert.Contains("Do not answer questions", prompt);
+            Assert.DoesNotContain("Speaker1", prompt);
+            Assert.DoesNotContain("Speaker2", prompt);
+            Assert.Equal(1, prompt.Split(utterance).Length - 1);
+        }
+    }
+
+    [Theory]
+    [InlineData("gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview")]
+    [InlineData("gemini-3.1-flash-tts-preview", "gemini-3.8-flash-lite-tts")]
+    public async Task PracticeAudio_FallbackAlsoStaysSingleSpeaker(string primary, string fallback)
+    {
+        var handler = new PreviewAudioHandler(HttpStatusCode.ServiceUnavailable);
+        var service = CreateService(handler, new("text", primary, null, fallback));
+        await service.GeneratePracticeAudioAsync("At the next stop.", "en-NZ", true, 1);
+        Assert.Equal(2, handler.Requests.Count);
+        foreach (var request in handler.Requests)
+        {
+            using var doc = JsonDocument.Parse(request);
+            var config = doc.RootElement.GetProperty("generationConfig").GetProperty("speechConfig");
+            Assert.True(config.TryGetProperty("voiceConfig", out _));
+            Assert.False(config.TryGetProperty("multiSpeakerVoiceConfig", out _));
+            Assert.DoesNotContain("Speaker1", request);
+            Assert.DoesNotContain("Speaker2", request);
+        }
+    }
+
     [Fact]
     public async Task GenerateAudioAsync_RejectsTwoVoicesOfTheSameGender()
     {
@@ -936,6 +996,28 @@ public class GeminiServicePromptTests
         // Regular keys were cooled above; paid remains reachable only for this user.
         Assert.All(handler.Keys, key => Assert.Equal(paid, key));
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SharedPracticePaidAudioIsOptInAndDoesNotLeakToOtherAudio(bool enabled)
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var scope = provider.GetRequiredService<IServiceScopeFactory>();
+        const string paid = "AIzaSy-paid-test-secret";
+        var store = new PaidTestStore(scope, new(paid, [], PracticeAudioFallback: enabled));
+        var handler = new PaidRoutingHandler(paid, true);
+        var service = CreateService(handler, new("text", "tts", null, null), ["regular-one", paid, "regular-two"], paidFallback: store);
+        if (enabled) await service.GeneratePracticeAudioAsync("Hello", "en-NZ", false, 0);
+        else await Assert.ThrowsAsync<InvalidOperationException>(() => service.GeneratePracticeAudioAsync("Hello", "en-NZ", false, 0));
+        Assert.Equal(["regular-one", "regular-two"], handler.Keys.Take(2).Order());
+        Assert.Equal(enabled ? 3 : 2, handler.Keys.Count);
+        if (enabled) Assert.Equal(paid, handler.Keys.Last());
+        handler.Keys.Clear();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateAudioAsync(
+            new GeneratedDialogue("Chat", "Kore", "Puck", [new("Speaker1", "Hello")], []), "en-NZ"));
+        Assert.DoesNotContain(paid, handler.Keys);
+    }
+
     private sealed class PaidTestStore(IServiceScopeFactory scopes, PaidFallbackPolicy policy)
         : GeminiPaidFallback(scopes, Options.Create(new BanteraApi.OpenAi.ChatGptConnectionOptions()))
     {

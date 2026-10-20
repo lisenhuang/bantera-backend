@@ -18,6 +18,7 @@ using BanteraApi.Gemini;
 using BanteraApi.Mcp;
 using BanteraApi.Mcp.Tools;
 using BanteraApi.Profile;
+using BanteraApi.Practice;
 using BanteraApi.OpenAi;
 using BanteraApi.RevAi;
 using BanteraApi.Storage;
@@ -108,6 +109,8 @@ builder.Services.AddHttpClient("gemini", c =>
     c.Timeout = TimeSpan.FromSeconds(180);
 }).AddHttpMessageHandler<BanteraApi.Diagnostics.GeminiModelCallHandler>();
 builder.Services.AddScoped<GeminiService>();
+builder.Services.AddSingleton<PracticeWorker>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PracticeWorker>());
 builder.Services.AddSingleton<IDialogueDurationPlanner, HistoricalDialogueDurationPlanner>();
 builder.Services.AddSingleton<GeminiVoiceCatalog>();
 builder.Services.AddHostedService<AdminAudioTestWorker>();
@@ -3143,6 +3146,7 @@ if (failures.Count > 0)
 startupLogger.LogInformation("[Startup] All checks passed — starting server.");
 // ─────────────────────────────────────────────────────────────────────────────
 
+PracticeEndpoints.Map(app);
 AdminEndpoints.Map(app);
 BanteraApi.WebsiteAnalytics.WebsiteAnalyticsEndpoints.Map(app);
 BanteraApi.Profile.WordActivityEndpoints.Map(app);

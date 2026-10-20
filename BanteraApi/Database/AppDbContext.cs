@@ -1,3 +1,4 @@
+using BanteraApi.Practice;
 using BanteraApi.Database.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -46,6 +47,36 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.Entity<PracticeDialogue>(e => {
+            e.ToTable("practice_dialogues"); e.HasKey(x => x.Id);
+            e.Property(x => x.ContentVersion).HasDefaultValue(1);
+            e.Property(x => x.Locale).HasMaxLength(35); e.Property(x => x.Language).HasMaxLength(12);
+            e.Property(x => x.Fingerprint).HasMaxLength(64); e.Property(x => x.Topic).HasMaxLength(40);
+            e.Property(x => x.MeaningKey).HasMaxLength(180);
+            e.HasIndex(x => new { x.Language, x.Fingerprint }).IsUnique();
+            e.HasIndex(x => new { x.Locale, x.Level, x.Ready });
+        });
+        b.Entity<PracticeExposure>(e => {
+            e.ToTable("practice_exposures"); e.HasKey(x => x.Id);
+            e.Property(x => x.DeferredScoring).HasDefaultValue(false);
+            e.Property(x => x.TranslationUsed).HasDefaultValue(false);
+            e.HasIndex(x => new { x.UserId, x.DialogueId }).IsUnique();
+            e.HasIndex(x => new { x.UserId, x.RequestId }).IsUnique();
+            e.HasIndex(x => new { x.UserId, x.SeenAt });
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Dialogue).WithMany().HasForeignKey(x => x.DialogueId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<PracticeProgress>(e => {
+            e.ToTable("practice_progress"); e.HasKey(x => new { x.UserId, x.Language });
+            e.Property(x => x.Language).HasMaxLength(12); e.Property(x => x.Window).HasMaxLength(12);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<PracticeAttempt>(e => {
+            e.ToTable("practice_attempts"); e.HasKey(x => x.Id);
+            e.Property(x => x.Outcome).HasMaxLength(20);
+            e.HasOne<PracticeExposure>().WithMany().HasForeignKey(x => x.ExposureId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         b.Entity<AiCallback>(e => {
             e.ToTable("ai_callbacks"); e.HasKey(x => x.Id);
             e.Property(x => x.RequestKey).HasMaxLength(200);

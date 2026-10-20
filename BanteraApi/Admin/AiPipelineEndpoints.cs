@@ -104,7 +104,9 @@ public static class AiPipelineEndpoints
             [FromQuery] string? code = null,
             [FromQuery] string? language = null,
             [FromQuery] int limit = 50,
-            [FromQuery] int offset = 0) =>
+            [FromQuery] int offset = 0,
+            [FromQuery] Guid? jobId = null,
+            [FromQuery] string? endpoint = null) =>
         {
             days = Math.Clamp(days, 1, 90);
             limit = Math.Clamp(limit, 1, 200);
@@ -116,6 +118,9 @@ public static class AiPipelineEndpoints
             if (!string.IsNullOrWhiteSpace(stage)) query = query.Where(e => e.Stage == stage);
             if (!string.IsNullOrWhiteSpace(code)) query = query.Where(e => e.Code == code);
             if (!string.IsNullOrWhiteSpace(language)) query = query.Where(e => e.LanguageCode == language);
+
+            if (jobId != null) query = query.Where(e => e.JobId == jobId);
+            if (!string.IsNullOrWhiteSpace(endpoint)) query = query.Where(e => e.Endpoint == endpoint);
 
             var total = await query.CountAsync(ct);
             var items = await query

@@ -1580,3 +1580,424 @@ on the device; requested tool results are relayed to the model.
   `python3 /home/ubuntu/releases/bantera-20261019-1/deploy.py rollback` restores
   backend **1.20.3** without restoring the database. Deployment used the tested
   working tree; no Git commit or push was performed.
+
+## October 19, 2026: Spoken reply Practice and daily-goal celebration
+
+Release **`bantera-20261019-2`** completed at **09:20:36 UTC**, publishing backend
+**1.22.0**. App **2.20.0 (371)** adds spoken reply Practice, hidden adaptive
+difficulty, shared generated material with per-user seen tracking, listening and
+speaking word counts, and a shared daily-goal celebration followed by an eligible
+native review request. Apple controls whether the review prompt appears.
+
+- Compatibility: **GO for published apps**. New authenticated Practice endpoints
+  and four additive tables; existing API contracts remain unchanged. No new
+  environment variables or secrets. The migration was verified in production.
+- API `bantera-api-20261019-2`: loopback **18124**; connector
+  `cloudflared-20261019-2`: readiness **12047**. Website **0.11.1** remains in
+  `bantera-website-20261015-1` on **13028**. Both public domains passed promotion
+  and stability checks.
+- Verification: **847 backend tests passed, 14 skipped**; focused Flutter tests,
+  callback/CallKit and audio regression tests passed. Unsigned debug and signed
+  release iOS builds succeeded. UI golden checks cover light/dark Practice,
+  large text and the goal celebration. Targeted analysis had two formatting-only
+  informational diagnostics and no errors.
+- Candidate and public smoke checks each passed 13 HTTP checks. A separate live
+  Practice smoke test verified actual generation, all three audio files, consent,
+  neutral unclear speech, correct/incorrect intent, idempotent retries, account
+  isolation, shared library reuse and per-user seen exclusion. Synthetic test
+  accounts were removed; generated shared lessons remain reusable.
+- A verified **3,900,399-byte** database backup and source manifest are retained
+  in the protected release directory with the smoke proofs and deployment logs.
+  The idle previous API was stopped after checking active work/connections;
+  its container, image and connector remain available for rollback:
+  `python3 /home/ubuntu/releases/bantera-20261019-2/deploy.py rollback` restores
+  backend **1.21.0** without restoring the database. Practice requires 1.22.0.
+- Signed app **2.20.0 (371)** was installed and launched on the iPhone 17 Pro.
+  Physical microphone interaction and locked-screen callback audio remain
+  unverified; installation is not evidence of those behaviours. Deployment used
+  the tested working tree; no Git commit, push or App Store submission occurred.
+
+## October 19, 2026: Practice single-speaker correction
+
+Release **`bantera-20261019-3`** targets backend **1.22.1** and app
+**2.20.1 (372)**. A stored cue 1 contained an invented second speaker answering
+its question. The verified transcript reproduced this defect. Practice now uses a
+single-speaker TTS configuration for each utterance, with explicit verbatim-only
+instructions for preview models and separate style metadata for structured models.
+Discover retains its existing two-speaker generation. Text generation and review
+also reject self-answered cues and embedded conversations.
+
+- Compatibility: **GO for published apps**. Additive `ContentVersion` column on
+  Practice dialogues, defaulting existing rows to version 1. New generation is
+  version 2; obsolete rows cannot be selected or resumed. Existing API routes,
+  auth and other features remain compatible. No new configuration or secrets.
+- The content refresh tolerates stale previous IDs and releases an old request's
+  unique ID before replacing its retired exercise. New app builds refresh a
+  retired answer automatically. Old app builds can advance with Next.
+- API loopback **18125**; connector readiness **12048**. Existing website
+  `bantera-website-20261015-1` / **0.11.1** and other tunnel routes are retained.
+- Local verification: **857 backend tests passed, 14 skipped**, including ten
+  new single-speaker/primary-fallback tests; **32 Flutter checks passed**, including
+  callback/CallKit and audio regression tests. Targeted analysis is clean; unsigned
+  debug and signed release builds succeeded. Physical microphone and locked-screen
+  callback audio remain unverified.
+- The staged release passed 13 API smoke checks, actual generation and all Practice
+  flow checks, including replacement of a cached legacy exercise. Independent
+  transcription of a new cue and both choices found one speaker in each clip and
+  no invented response. Recognizer contraction variations were normalized for this
+  check; original transcriptions are retained in `single-speaker-audit.json`.
+- Protected artifacts include a verified **3,966,000-byte** database backup, source
+  manifest, smoke proofs, audio audit and promotion log. Authorized cleanup removes
+  version-1 Practice rows and their audio, cascading only their Practice exposures
+  and attempts. Word totals and proficiency levels are retained; affected evidence
+  windows are cleared. Cleanup counts are recorded in `practice-cleanup-proof.json`.
+- Rollback: `python3 /home/ubuntu/releases/bantera-20261019-3/deploy.py rollback`
+  restores backend **1.22.0** without restoring the database. This would also restore
+  its flawed Practice generator; use only for an urgent wider incident. Deployment
+  does not commit/push Git or submit an App Store version.
+
+Release outcome: **SUCCESS at 09:43:44 UTC**. Both public domains passed the
+post-promotion checks. The idle old API was stopped and retained for rollback.
+Cleanup verified removal of **31 obsolete dialogues and 93 audio objects**, with
+**zero** version-1 rows remaining and **8** regenerated exercises ready. Installed
+inventory confirmed **2.20.1 (372)** on the iPhone 17 Pro.
+
+## October 19, 2026: Practice answers without AI verification
+
+Release **`bantera-20261019-4`** targets backend **1.22.2** and app **2.20.2 (373)**.
+The app matches recognized speech against both displayed choices locally. Ambiguous
+speech immediately receives a neutral retry. Clear matches use the existing answer
+endpoint, whose deterministic matcher checks the stored correct answer and records
+idempotent progress. The AI judgement method has been removed entirely, with no
+AI fallback. Shared exercise generation and audio generation still use AI.
+
+- Compatibility: **GO for published apps**. Same authenticated request and response
+  contract, including older transcript-only clients. No new migration, configuration
+  or secrets. Existing content format 2, audio, word counts and proficiency remain.
+- Matching normalizes punctuation/case, common English contractions and numbers;
+  a narrowly limited internal spelling error can match a longer word. Negation
+  omissions, number changes, short near-matches, uncertain distinguishing words and
+  ambiguous choices return unclear. Free-form paraphrases may require repeating
+  the displayed reply. Forty identical phone/server fixtures cover these cases and
+  representative non-Latin scripts.
+- **900 backend tests passed, 14 skipped**; **72 Flutter checks passed**, including
+  matcher, Practice UI, callback/CallKit and audio tests. Targeted analysis is clean;
+  unsigned debug and signed release builds succeeded. Physical microphone and
+  locked-screen callback testing remain unverified.
+- Staged API and Practice flow checks passed. Nine synthetic answer requests had
+  **10.5 ms median / 19.7 ms maximum loopback latency**, with **zero Practice model
+  calls** recorded during the checks. This measurement excludes phone transcription
+  and network latency. Test identities/content were removed. Proof is retained in
+  `no-ai-answer-proof.json`.
+- API `bantera-api-20261019-4` uses loopback **18126**; connector
+  `cloudflared-20261019-4` readiness **12049**. Website **0.11.1** and its existing
+  container/other tunnel routes are retained. Protected source manifest and a
+  verified **3,988,803-byte** database backup accompany the release.
+- Rollback: `python3 /home/ubuntu/releases/bantera-20261019-4/deploy.py rollback`
+  restores **1.22.1**, including its AI answer verification. It does not restore
+  the database. No Git commit/push or App Store submission is performed.
+
+Release outcome: **SUCCESS at 10:02:46 UTC**. Both public domains passed final
+checks; the idle previous API was stopped and retained for rollback. CoreDevice
+confirmed app **2.20.2 (373)** installed on the iPhone 17 Pro. Basic matching is
+language-independent; English contraction/number normalization is additional, so
+other languages may require more neutral retries. The multilingual fixtures verify
+representative cases, not exhaustive linguistic equivalence across every locale.
+
+## Practice tolerant choice matching: 19 October 2026, release 5
+
+Release **bantera-20261019-5** succeeded at **2026-10-19 10:25:41 UTC**.
+Backend **1.22.3** is live in `bantera-api-20261019-5` (loopback **18127**),
+with connector `cloudflared-20261019-5` (readiness **12050**). Website **0.11.1**
+remains in `bantera-website-20261015-1`, loopback **13028**. Both public domains,
+API version, website marker, lesson listing and authentication gates passed the
+rolling handover and stable verification window. The controller automatically
+restores the prior connector if promotion fails.
+
+The release deploys the tested uncommitted backend working tree. Source hashes,
+Git base and changed paths, private runtime snapshots, verified 3,991,068-byte
+PostgreSQL backup and smoke evidence are retained in the release directory.
+**GO for published clients:** same endpoint and response contracts; no new schema
+migration, environment variable or secret. Existing app clients remain compatible,
+although older Practice apps retain their stricter local matching until updated.
+
+Both phone screenshot transcripts passed the authenticated candidate endpoint.
+Fifteen synthetic answer requests had a 10.1 ms loopback median and 19.6 ms maximum;
+no Practice AI model calls were recorded during those checks. These timings exclude
+speech recognition and the phone's network. Local tests passed 932 backend cases
+(14 existing skips) and 116 Flutter checks, including callbacks and CallKit. Device
+microphone and locked-screen callback acceptance remain unverified.
+
+App **2.20.4 (375)** was installed and confirmed in CoreDevice's installed app list.
+The first automatic launch was blocked while the phone required its passcode.
+No App Store submission or Git commit/push was performed.
+
+Rollback for this release:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261019-5/deploy.py rollback
+```
+
+It restores backend **1.22.2** through `cloudflared-20261019-4` and leaves the
+current database intact. The previous image and container are retained; the
+controller starts the previous API if it is stopped.
+
+The previous API was retained running after the retirement guard detected active
+background work. No running job was interrupted to clean up the old release.
+
+After the phone was unlocked, CoreDevice successfully launched **2.20.4 (375)**.
+All **128/128** public-domain availability samples during promotion returned HTTP 200.
+
+## Visible Practice level: 20 October 2026 (NZDT), release 6
+
+Release **bantera-20261019-6** succeeded at **2026-10-19 14:55:26 UTC**
+(**20 October, 03:55 NZDT**). Backend **1.22.4** is live in
+`bantera-api-20261019-6`, loopback **18128**, through
+`cloudflared-20261019-6`, readiness **12051**. Website **0.11.1** remains
+`bantera-website-20261015-1`, loopback **13028**. Public API version and both
+public domains passed the controller's promotion checks and stable window.
+
+**GO for existing published clients:** ready Practice responses gain only the
+string `level` (A1, A2, B1, B2, C1 or C2), sourced from the displayed dialogue.
+Existing response fields, progression, auth and answer matching are unchanged.
+No migration, new config, secret or content reset is required. All six levels
+passed authenticated ready/resume checks; existing Practice, audio, consent,
+isolation and deterministic-answer smoke checks also passed. Fifteen synthetic
+answer requests produced zero Practice AI calls. Local checks: 107 Flutter tests
+including callback/CallKit regression tests; 932 backend tests with 14 existing
+skips; unsigned debug and signed release iOS builds and signature verification.
+
+App **2.20.5 (376)** is built but **not installed**: the iPhone became unavailable.
+The user was asked to reconnect and unlock it. Physical microphone and locked-screen
+callback acceptance remain unverified. No Git commit/push or App Store submission.
+
+The release directory retains source hashes, working-tree manifest, private runtime
+snapshots, a verified 4,068,837-byte DB backup and smoke proofs. Earlier containers
+remain available for rollback. The SSH connection dropped intermittently during
+transfer and verification; the detached controller subsequently confirmed SUCCESS.
+
+Rollback (does not restore the database):
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261019-6/deploy.py rollback
+```
+
+This restores the retained backend **1.22.3** through `cloudflared-20261019-5`.
+
+Installation follow-up: after the user reconnected and unlocked the iPhone,
+CoreDevice confirmed **2.20.5 (376)** installed and successfully launched
+`bantera.lisenhuang.com`. This supersedes the pending-installation status above;
+physical microphone and locked-screen callback acceptance remain unverified.
+
+## Optional Practice translation: 20 October 2026 (NZDT)
+
+Release `bantera-20261020-1` targets backend **1.23.0** and app **2.23.0 (383)**.
+**GO for existing published clients:** `deferLevelScoring` on Next defaults false,
+so old clients retain immediate first-clear scoring. New clients defer until Next,
+allowing a persisted translation hint to exclude the whole exercise, even if it
+is revealed after an answer. `/{id}/translation` is authenticated, account-scoped
+and idempotent; ready responses add `deferredScoring` and `translationUsed`.
+
+Migration `PracticeTranslationAssistance` adds two non-null boolean columns with
+false defaults to `practice_exposures`. Existing data and old inserts remain valid.
+No new environment variable, secret or AI dependency is required. Historical
+already-scored legacy exercises are preserved and replaced when a new client
+resumes; unscored active exercises can adopt deferred scoring.
+
+Local validation: 938 backend tests passed with 14 existing skips, 145 Flutter
+tests passed, changed-file analysis clean, debug and signed iOS builds passed.
+Staged checks passed API health/auth gates, legacy Practice and deterministic
+matching, all six visible levels, and assistance before/after correct and wrong
+answers, resume persistence, first-clear scoring, duplicate Next and isolation.
+The existing no-AI-answer smoke suite recorded zero Practice model calls.
+
+The release uses loopback API **18129** and connector readiness **12052**, retaining
+website **0.11.1** and its container. A verified **4,166,703-byte** DB backup,
+source hash/working-tree manifest and private runtime snapshots are retained.
+Rollback controller: `python3 /home/ubuntu/releases/bantera-20261020-1/deploy.py rollback`.
+It restores backend **1.22.4** through `cloudflared-20261019-6` without restoring
+the database. App translation hints then fail closed instead of exposing a hint
+that could be scored. No Git commit/push or App Store submission is performed.
+
+Deployment completed successfully at **21:10:32 UTC on 19 October** (**10:10:32
+NZDT on 20 October 2026**). Both public domains and expected versions passed the
+stable verification window and independent final HTTP checks. The prior API is
+retained running because the idle guard detected background work; nothing was
+interrupted for cleanup. App **2.23.0 (383)** was verified installed on the iPhone
+17 Pro; automatic launch initially failed because iOS reported the phone locked.
+After unlocking, CoreDevice confirmed a successful launch of 2.23.0 (383).
+
+## Practice Chinese/Cantonese answer formatting: 20 October 2026 (NZDT)
+
+Release **bantera-20261020-2** completed successfully at **2026-10-19 22:16:31 UTC**
+(**20 October, 11:16 NZDT**). Backend **1.23.1** runs in
+`bantera-api-20261020-2`, loopback **18130**, through
+`cloudflared-20261020-2`, readiness **12053**. Website **0.11.1** remains in
+`bantera-website-20261015-1`; unrelated tunnel routes were preserved. Both public
+domains and exact release versions passed the stable handover window and an
+independent final HTTP check.
+
+**GO for existing published clients:** deterministic matcher changes only, with
+unchanged endpoints, request/response shapes and authentication. No new migration,
+environment variable, secret or runtime dependency. Existing older clients may
+still reject numeral formatting locally until updated; new app **2.25.0 (388)**
+uses the same normalization and was verified installed and launched on iPhone
+17 Pro. No Git commit/push or App Store submission was performed.
+
+The shared fixtures cover $300/三百元, $30/三十蚊, 5分鐘/五分鐘, and exact
+Cantonese replies with phrase-level low recognition confidence. Different amounts,
+currencies, negation and ambiguous choices retain retry behavior. 960 backend tests
+passed, 14 existing optional tests skipped. The candidate passed 13 HTTP smoke
+checks, existing Practice/level/translation flows, and 22 authenticated new matcher
+cases. The existing 15-request answer check recorded zero Practice AI calls.
+
+Protected release artifacts include a verified **4,203,840-byte** database backup,
+source archive hash and working-tree manifest, runtime snapshots and smoke proofs.
+Old application containers remain available; no background work was interrupted
+for cleanup. Rollback restores **1.23.0** without restoring the database:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261020-2/deploy.py rollback
+```
+
+Live read-only model-settings verification confirmed Practice generation and
+content validation use `chatgpt/gpt-6-luna` with high reasoning, falling back to
+`gemini-flash-latest`. This release does not alter that configuration. User-answer
+matching remains deterministic with no AI judgement.
+
+## Practice ahead preparation: 20 October 2026 (NZDT)
+
+Backend **1.23.2**, release candidate `bantera-20261020-3`, targets eight unseen,
+fully voiced exercises per locale/level pool and requests refills on ready/resume,
+Next and answer paths. Reachable adjacent levels are warmed up to four scored
+results before a boundary; a deferred current answer is projected without changing
+score or marking additional material seen. Two consumers and nonblocking database
+pool locks avoid blocking the entire preparation queue behind another pool/replica.
+Speech synthesis is serialized within this worker. Approved drafts and completed
+clips survive failures and are resumed before generating more text. At most two
+text batches are generated per demand. Existing prompts, duplicate validation,
+model fallback, answer matching and public contracts remain unchanged.
+
+**GO for published clients:** no endpoint/schema/auth changes, new migrations,
+environment variables or secrets. Local build passed (existing warnings only);
+967 backend tests passed with 14 existing optional skips. App **2.25.2 (390)**
+passed 72 focused Practice/callback/CallKit/audio tests, targeted analysis, debug
+and signed release builds, signature validation, installation and launch on iPhone
+17 Pro. Only correct answers trigger the particles/rocket; all recognized speaking
+and listening still count. Physical microphone and locked-screen callback audio
+remain unverified.
+
+Candidate verification passed 13 HTTP/migration checks, existing Practice flows,
+all six levels, translation-assistance scoring, and 22 Chinese/Cantonese fixtures.
+Fifteen deterministic answer checks recorded zero Practice AI calls (11.2 ms
+loopback median, 335 ms maximum). Cached B1-to-B2 advancement returned ready in
+12.3 ms and all three audio objects were playable. These timings exclude phone
+networking and speech recognition.
+
+The forced-empty-pool test verified next-level approved text is prepared before
+Next without early scoring/seen exposure. Live speech requests hit provider quota
+limits: new next-level audio completion was **not verified**. Approved drafts
+survived repeated failures and no new text model calls occurred during the final
+90-second retry window. Unit tests cover preserving completed clips and generating
+only missing clips on retry. This provider limitation can still cause waits when
+a user's unseen audio buffer is empty; the release does not promise zero waits.
+The earlier unpromoted concurrent-audio candidate was retained stopped as
+`bantera-api-20261020-3-rejected`; it never received public traffic.
+
+Protected artifacts are in `/home/ubuntu/releases/bantera-20261020-3`, including
+source manifest/archive, private runtime snapshots, verified **4,258,715-byte**
+backup and smoke proofs with the provider limitation explicitly recorded. Candidate
+API loopback is **18131**, connector readiness **12054**. The website remains
+**0.11.1** in `bantera-website-20261015-1`. Rollback restores backend **1.23.1**
+without restoring the database:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261020-3/deploy.py rollback
+```
+
+No Git commit/push or App Store submission was performed.
+
+Deployment completed successfully at **2026-10-19 23:00:05 UTC** (**20 October,
+12:00:05 NZDT**). The active record names `bantera-20261020-3`, API
+`bantera-api-20261020-3` and connector `cloudflared-20261020-3`. All **128/128**
+public availability samples returned HTTP 200. Independent HTTPS checks confirmed
+API **1.23.2** and the unchanged website release. Previous application containers
+and connector remain available for rollback. The speech-provider limitation above
+remains outstanding and was not treated as proof of fresh-audio completion.
+
+## Practice diagnostics: 20 October 2026 (NZDT)
+
+Backend **1.23.3**, release **bantera-20261020-4**, completed at
+**2026-10-19 23:38:11 UTC**. API `bantera-api-20261020-4` uses loopback
+18132; connector `cloudflared-20261020-4` readiness is 12055. Website
+0.11.1 remains unchanged. Public domains/version markers passed, with
+**156/156 HTTP 200** availability samples and retained rollback containers.
+
+**GO for existing apps:** additive admin query filters and internal logging only;
+no new schema, environment variables or secrets. Build passed; 969 backend tests
+passed (14 existing optional skips). Candidate checks covered existing Practice,
+all levels, assisted scoring, 22 number/recognition cases and 15 deterministic
+answer requests with no AI calls. Diagnostics verification retrieved 32 correlated
+events from an actual candidate preparation run through the admin API. An initial
+English-only test missed events from multilingual fixtures; the corrected check
+uses candidate-start time and verifies the actual run's locale consistently.
+
+Text, review, audio, upload and save stages record start/completion/failure with
+run ID, locale, level, dialogue/clip ID and elapsed time. Exceptions retain safe
+technical type/status/frame details. Nested model/key/fallback events share the
+run ID; raw utterances, audio and credentials are not added to these diagnostics.
+Admin `/api/admin/ai-pipeline/events` supports `jobId` and `endpoint` filters.
+Existing event retention is 90 days. Live audio logs confirmed HTTP 429 responses
+across 14 regular keys for primary/fallback TTS, subsequent cooldown skips, and
+one successful clip. Shared pool routing still does not use per-user paid access.
+
+Backup verified: **4,345,180 bytes**. Rollback restores backend 1.23.2 without
+restoring the database:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261020-4/deploy.py rollback
+```
+
+## Paid Practice audio fallback and ASR formatting: 20 October 2026
+
+Release **bantera-20261020-6** completed at **2026-10-20 00:04:53 UTC**.
+Backend **1.24.1** (`bantera-api-20261020-6`, loopback 18134) and website
+**0.12.0** (`bantera-website-20261020-6`, loopback 13030) are routed by
+`cloudflared-20261020-6` (readiness 12057). Both public version markers verified;
+**132/132** public availability samples returned HTTP 200. Database backup:
+**4,396,124 bytes**. Previous production 1.23.3/website 0.11.1 remains available.
+
+**GO for existing published apps:** additive nullable admin request/status field;
+existing encrypted paid-key storage; no new migration, environment variable or
+secret. The paid Practice audio switch defaults off and remained off after
+verification. An admin must enable it and save. Shared Practice audio tries
+regular keys first for each configured TTS model, then the separately saved paid
+key when enabled; cooldown/unusable keys are skipped. Existing per-user call modes
+remain independent. Real paid-provider usage was not exercised or enabled by the
+release tests. English currency/whole-hour normalization matches the phone's
+shared fixtures while protecting differing amounts, currencies and negation.
+
+Verification: 996 backend tests passed, 14 existing optional skips; website lint,
+type checking, Node 24 production build and 12 tests passed. Runtime checks cover
+13 HTTP contracts, all six levels, translation-assisted scoring, shared library
+reuse across new users, audio objects, seen exclusion, 44 number/recognition
+fixtures, and 15 deterministic answer requests with zero model calls. Paid settings
+were checked through the authenticated public API/dashboard (regular-user rejection,
+admin access, no raw key, default-off checkbox and help text). The public probe
+needed the release-verification user agent; the default Python probe did not pass
+the edge response checks. No production setting was changed.
+
+Candidate 5 was never promoted. Candidate 6 initially stopped during staging due
+to a stale candidate website container name; this was corrected before any public
+handover. Its backend was rebuilt as `bantera-backend:bantera-20261020-6-final`
+with the final time-format fixtures; previous candidate source/container retained.
+One old smoke expectation for an unrecognized currency spelling was corrected to
+neutral retry, consistent with protected currency matching. All checks then passed.
+The website includes the previously prepared AI-consent privacy copy from its
+current working tree. No Git commit/push or store submission was performed.
+
+Rollback preserves database writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261020-6/deploy.py rollback
+```

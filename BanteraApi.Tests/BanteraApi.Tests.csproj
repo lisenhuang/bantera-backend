@@ -21,4 +21,7 @@
     <ProjectReference Include="..\BanteraApi\BanteraApi.csproj" />
     <EmbeddedResource Include="Fixtures/Voice/*.pcm" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="Fixtures/practice_matching.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

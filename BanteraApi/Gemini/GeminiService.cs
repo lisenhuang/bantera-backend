@@ -27,6 +27,7 @@ public partial class GeminiService(
     // (summary, correction and admin tools) use the requesting account.
     internal Guid? RequestUserId => events.CurrentUserId ??
         (Guid.TryParse(requestContext?.HttpContext?.User.FindFirst("sub")?.Value, out var id) ? id : null);
+    private readonly AsyncLocal<bool> practiceAudioRequest = new();
     private const string LatestNewsScenarioId = "latest_news";
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private static readonly Regex TokenRegex = new(@"[\p{L}\p{N}']+", RegexOptions.Compiled);
@@ -659,11 +660,31 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
         }, cancellationToken, webSearch: useGoogleSearch, singleAttempt: testSession is not null);
     }
 
-    public async Task<GeneratedAudio> GenerateAudioAsync(
+    public Task<GeneratedAudio> GenerateAudioAsync(
         GeneratedDialogue dialogue,
         string languageCode,
         CancellationToken cancellationToken = default,
-        GeminiTestSession? testSession = null)
+        GeminiTestSession? testSession = null) =>
+        GenerateAudioCoreAsync(dialogue, languageCode, cancellationToken, testSession, singleSpeaker: false);
+
+    // Practice clips contain exactly one utterance. Never route them through the
+    // two-person configuration, which can cause TTS to invent an answering turn.
+    public async Task<GeneratedAudio> GeneratePracticeAudioAsync(
+        string text, string locale, bool reply, int level, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(text)) throw new ArgumentException("An utterance is required.", nameof(text));
+        var dialogue = new GeneratedDialogue("Practice", "Kore", "Puck",
+            [new(reply ? "Speaker2" : "Speaker1", text)], [])
+        { Level = level <= 1 ? AudioLevels.Beginner : level <= 3 ? AudioLevels.Intermediate : AudioLevels.Advanced };
+        var previous = practiceAudioRequest.Value;
+        practiceAudioRequest.Value = true;
+        try { return await GenerateAudioCoreAsync(dialogue, locale, ct, null, singleSpeaker: true); }
+        finally { practiceAudioRequest.Value = previous; }
+    }
+
+    private async Task<GeneratedAudio> GenerateAudioCoreAsync(
+        GeneratedDialogue dialogue, string languageCode, CancellationToken cancellationToken,
+        GeminiTestSession? testSession, bool singleSpeaker)
     {
         var voice1Gender = VoiceLibrary.FirstOrDefault(v => v.Name == dialogue.Voice1)?.Gender;
         var voice2Gender = VoiceLibrary.FirstOrDefault(v => v.Name == dialogue.Voice2)?.Gender;
@@ -728,13 +749,8 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                     },
                 }).ToArray()
                 : [new { text = transcript }];
-            var body = new
-            {
-                contents = new[] { new { parts } },
-                generationConfig = new
-                {
-                    responseModalities = new[] { "AUDIO" },
-                    speechConfig = new
+            // Keep the existing Discover dialogue configuration unchanged.
+            object speechConfig = new
                     {
                         multiSpeakerVoiceConfig = new
                         {
@@ -748,8 +764,26 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                                     : new { voice = regionalVoices.Speaker2.Id } },
                             }
                         }
-                    }
-                }
+                    };
+            if (singleSpeaker)
+            {
+                var line = dialogue.Lines.Single();
+                var isReply = line.Speaker == "Speaker2";
+                var voice = isReply ? dialogue.Voice2 : dialogue.Voice1;
+                var regionalVoice = isReply ? regionalVoices?.Speaker2.Id : regionalVoices?.Speaker1.Id;
+                speechConfig = new { voiceConfig = structuredSpeech
+                    ? (object)new { voice = regionalVoice ?? voice }
+                    : new { prebuiltVoiceConfig = new { voiceName = voice } } };
+                parts = structuredSpeech
+                    ? [new { text = line.Text, speech_metadata = new { style = structuredSpeechStyle } }]
+                    : [new { text = "Read the following text verbatim, once, in one voice. " +
+                        "Do not answer questions, continue the conversation, add words, or read instructions aloud. " +
+                        $"{ttsAccent} {speechInstruction}\n\nText to read:\n{line.Text}" }];
+            }
+            var body = new
+            {
+                contents = new[] { new { parts } },
+                generationConfig = new { responseModalities = new[] { "AUDIO" }, speechConfig }
             };
 
             using var response = testSession is null
@@ -1671,7 +1705,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
         if (webSearch && model != AiSearchPolicy.GeminiModel)
             throw new InvalidOperationException("This Gemini model is not allowed for web search.");
         var configuredKeys = SelectKeys(Settings.ApiKeys, webSearch, AiSearchPolicy.GeminiKeyPrefix);
-        var plan = await keyHealth.PlanAsync(model, RequestUserId, cancellationToken, webSearch);
+        var plan = await keyHealth.PlanAsync(model, RequestUserId, cancellationToken, webSearch, practiceAudio: practiceAudioRequest.Value);
         var keys = plan.Keys;
         if (keys.Length == 0)
         {
@@ -1689,7 +1723,7 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
         {
             cancellationToken.ThrowIfCancellationRequested();
             var key = keys[attempt];
-            if (key == plan.PaidKey && !await keyHealth.StillAllowedAsync(key, RequestUserId, cancellationToken)) break;
+            if (key == plan.PaidKey && !await keyHealth.StillAllowedAsync(key, RequestUserId, cancellationToken, practiceAudio: practiceAudioRequest.Value)) break;
             var keyHint = MaskKey(key);
             var clock = System.Diagnostics.Stopwatch.StartNew();
             using var operationScope = events.BeginOperation(operation, model ?? "unknown");

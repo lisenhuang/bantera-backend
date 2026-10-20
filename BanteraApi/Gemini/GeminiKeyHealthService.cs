@@ -77,16 +77,23 @@ public sealed class GeminiKeyHealthService(
     }
 
     public sealed record KeyPlan(string[] Keys, string? PaidKey);
-    public async Task<KeyPlan> PlanAsync(string? model, Guid? user, CancellationToken ct, bool webSearch = false, string? preferredHash = null)
+    public async Task<KeyPlan> PlanAsync(string? model, Guid? user, CancellationToken ct, bool webSearch = false, string? preferredHash = null, bool practiceAudio = false)
     {
-        var policy = paidFallback is null ? new PaidFallbackPolicy(null, []) : await paidFallback.ForUserAsync(user, ct);
+        var policy = paidFallback is null ? new PaidFallbackPolicy(null, []) : practiceAudio ? await paidFallback.ReadAsync(ct) : await paidFallback.ForUserAsync(user, ct);
         var regular = GeminiService.SelectKeys(options.Value.ApiKeys, webSearch, AiSearchPolicy.GeminiKeyPrefix);
-        var ordered = GeminiPaidFallback.Order(regular, policy, user, preferredHash, webSearch);
+        var ordered = practiceAudio
+            ? GeminiPaidFallback.OrderForPracticeAudio(regular, policy)
+            : GeminiPaidFallback.Order(regular, policy, user, preferredHash, webSearch);
         var eligible = await EligibleKeysAsync(ordered, model, ct);
         return new(eligible, policy.Key is { } paid && eligible.Contains(paid) ? paid : null);
     }
-    public async Task<bool> StillAllowedAsync(string paidKey, Guid? user, CancellationToken ct)
+    public async Task<bool> StillAllowedAsync(string paidKey, Guid? user, CancellationToken ct, bool practiceAudio = false)
     {
+        if (practiceAudio)
+        {
+            var shared = paidFallback is null ? null : await paidFallback.ReadAsync(ct);
+            return shared?.PracticeAudioFallback == true && shared.Key == paidKey;
+        }
         if (paidFallback is null || user is null) return false;
         var policy = await paidFallback.ForUserAsync(user, ct);
         return policy.Key == paidKey && policy.AllowedUserIds.Contains(user.Value);

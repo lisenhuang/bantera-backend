@@ -8,10 +8,10 @@ using Microsoft.Extensions.Options;
 
 namespace BanteraApi.Gemini;
 
-public sealed record PaidFallbackPolicy(string? Key, Guid[] AllowedUserIds, Guid[]? PaidOnlyUserIds = null, Guid[]? RegularOnlyUserIds = null);
+public sealed record PaidFallbackPolicy(string? Key, Guid[] AllowedUserIds, Guid[]? PaidOnlyUserIds = null, Guid[]? RegularOnlyUserIds = null, bool PracticeAudioFallback = false);
 public sealed record PaidFallbackUser(Guid Id, string? Name, string? Email, string Mode = "fallback");
 public sealed record PaidKeyPreference(bool CanConfigure, string Mode);
-public sealed record PaidFallbackStatus(bool StorageReady, bool Configured, string? Hint, PaidFallbackUser[] Users);
+public sealed record PaidFallbackStatus(bool StorageReady, bool Configured, string? Hint, PaidFallbackUser[] Users, bool PracticeAudioFallback = false);
 
 // One encrypted atomic setting. No key is ever returned by the admin API.
 public class GeminiPaidFallback(IServiceScopeFactory scopes, IOptions<ChatGptConnectionOptions> encryption)
@@ -34,7 +34,7 @@ public class GeminiPaidFallback(IServiceScopeFactory scopes, IOptions<ChatGptCon
             ?? throw new InvalidDataException("Paid fallback configuration unavailable.");
     internal static string Encode(PaidFallbackPolicy policy, string secret) =>
         Convert.ToBase64String(ChatGptConnection.Seal(JsonSerializer.SerializeToUtf8Bytes(policy), Setting, Convert.FromBase64String(secret)));
-    public async Task SaveAsync(string? key, bool removeKey, Guid[] users, Guid[] paidOnly, Guid admin, CancellationToken ct, Guid[]? regularOnly = null)
+    public async Task SaveAsync(string? key, bool removeKey, Guid[] users, Guid[] paidOnly, Guid admin, CancellationToken ct, Guid[]? regularOnly = null, bool? practiceAudioFallback = null)
     {
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -51,7 +51,7 @@ public class GeminiPaidFallback(IServiceScopeFactory scopes, IOptions<ChatGptCon
             throw new ArgumentException("Choose active users only.");
         var row = await db.AppSettings.SingleOrDefaultAsync(s => s.Key == Setting, ct);
         if (row is null) { row = new AppSetting { Key = Setting }; db.AppSettings.Add(row); }
-        row.Value = Encode(new(selected, ids, paidOnly.Distinct().ToArray(), regular.Distinct().ToArray()), encryption.Value.EncryptionKey);
+        row.Value = Encode(new(selected, ids, paidOnly.Distinct().ToArray(), regular.Distinct().ToArray(), practiceAudioFallback ?? previous.PracticeAudioFallback), encryption.Value.EncryptionKey);
         row.UpdatedAt = DateTime.UtcNow; row.UpdatedByUserId = admin;
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -63,7 +63,7 @@ public class GeminiPaidFallback(IServiceScopeFactory scopes, IOptions<ChatGptCon
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var users = await db.Users.AsNoTracking().Where(u => policy.AllowedUserIds.Contains(u.Id) && u.DeletedAt == null)
             .Select(u => new PaidFallbackUser(u.Id, u.Name, u.Identities.Select(i => i.ProviderEmail).FirstOrDefault(), "fallback")).ToArrayAsync(ct);
-        return new(StorageReady, policy.Key is not null, policy.Key is null ? null : GeminiKeyHealthService.MaskKey(policy.Key), users.Select(u => u with { Mode = Mode(policy, u.Id) }).ToArray());
+        return new(StorageReady, policy.Key is not null, policy.Key is null ? null : GeminiKeyHealthService.MaskKey(policy.Key), users.Select(u => u with { Mode = Mode(policy, u.Id) }).ToArray(), policy.PracticeAudioFallback);
     }
     public virtual async Task<PaidFallbackPolicy> ForUserAsync(Guid? user, CancellationToken ct)
     {
@@ -106,6 +106,12 @@ public class GeminiPaidFallback(IServiceScopeFactory scopes, IOptions<ChatGptCon
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return true;
+    }
+    internal static string[] OrderForPracticeAudio(IEnumerable<string> regular, PaidFallbackPolicy policy)
+    {
+        var keys = regular.Where(k => k != policy.Key).Distinct(StringComparer.Ordinal).ToList();
+        if (policy.PracticeAudioFallback && policy.Key is { } paid) keys.Add(paid);
+        return keys.ToArray();
     }
     internal static string[] Order(IEnumerable<string> regular, PaidFallbackPolicy policy, Guid? user, string? preferredHash = null, bool webSearch = false)
     {

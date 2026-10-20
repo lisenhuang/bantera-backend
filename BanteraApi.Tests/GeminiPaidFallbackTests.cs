@@ -17,6 +17,50 @@ namespace BanteraApi.Tests;
 
 public class GeminiPaidFallbackTests
 {
+    [Fact]
+    public void SharedPracticeAudioRequiresExplicitOptInAndKeepsPaidLast()
+    {
+        Assert.Equal(["a", "b"], GeminiPaidFallback.OrderForPracticeAudio([Paid, "a", "a", "b"], Policy));
+        var enabled = Policy with { PracticeAudioFallback = true, PaidOnlyUserIds = [Allowed] };
+        Assert.Equal(["a", "b", Paid], GeminiPaidFallback.OrderForPracticeAudio([Paid, "a", "b"], enabled));
+        Assert.Equal(["a", "b"], GeminiPaidFallback.Order([Paid, "a", "b"], enabled, null));
+    }
+
+    [Fact]
+    public async Task SharedPracticeAudioRechecksAdminOptInAndRespectsKeyCooldown()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var scope = provider.GetRequiredService<IServiceScopeFactory>();
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var store = new Store(scope, Policy with { PracticeAudioFallback = true });
+        var health = new GeminiKeyHealthService(scope, cache,
+            Options.Create(new GeminiSettings { ApiKeys = ["a", Paid, "b"] }),
+            NullLogger<GeminiKeyHealthService>.Instance, store);
+        var planned = (await health.PlanAsync("tts", null, default, practiceAudio: true)).Keys;
+        Assert.Equal(["a", "b"], planned.Take(2).Order());
+        Assert.Equal(Paid, planned.Last());
+        Assert.Equal(["a", "b"], (await health.PlanAsync("tts", null, default)).Keys.Order());
+        health.CoolDown("a", "tts"); health.CoolDown("b", "tts");
+        Assert.Equal([Paid], (await health.PlanAsync("tts", null, default, practiceAudio: true)).Keys);
+        Assert.True(await health.StillAllowedAsync(Paid, null, default, practiceAudio: true));
+        store.Policy = Policy;
+        Assert.False(await health.StillAllowedAsync(Paid, null, default, practiceAudio: true));
+        Assert.Empty((await health.PlanAsync("tts", null, default, practiceAudio: true)).Keys);
+        store.Policy = Policy with { PracticeAudioFallback = true };
+        health.CoolDown(Paid, "tts");
+        Assert.Empty((await health.PlanAsync("tts", null, default, practiceAudio: true)).Keys);
+    }
+
+    [Fact]
+    public void LegacyPaidPolicyDefaultsPracticeOffAndEncryptedRoundTripPreservesFlag()
+    {
+        var old = System.Text.Json.JsonSerializer.Deserialize<PaidFallbackPolicy>("{\"Key\":null,\"AllowedUserIds\":[]}")!;
+        Assert.False(old.PracticeAudioFallback);
+        var secret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        var encoded = GeminiPaidFallback.Encode(Policy with { PracticeAudioFallback = true }, secret);
+        Assert.DoesNotContain(Paid, encoded);
+        Assert.True(GeminiPaidFallback.Decode(encoded, secret).PracticeAudioFallback);
+    }
     [Theory]
     [InlineData("AIzaSy", 33)]
     [InlineData("AQ.", 250)]
