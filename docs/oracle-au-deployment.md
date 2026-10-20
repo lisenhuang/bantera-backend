@@ -2131,3 +2131,36 @@ Rollback preserves database writes:
 ```bash
 python3 /home/ubuntu/releases/bantera-20261020-9/deploy.py rollback
 ```
+
+## Global paid audio controls delivered: 20 October 2026
+
+Release **bantera-20261020-10** completed at **2026-10-20 03:03:29 UTC**.
+Backend **1.27.0** (`4a095cd`) and website **0.13.0** (`d9d5449`) are live.
+API `bantera-api-20261020-10` uses loopback 18138; website
+`bantera-website-20261020-10` uses 13031; connector
+`cloudflared-20261020-10` readiness uses 12061. Both public versions were
+independently verified. All **156/156** sampled HTTP responses returned 200.
+
+**GO for existing published apps:** the new `dialogueAudioFallback` admin field
+is additive; omitted writes preserve it. No migration, new environment variable
+or secret is required. Both audio switches apply globally to all users. The
+existing Practice setting remained enabled; new Dialogues fallback remained off.
+No paid-key setting was changed by deployment checks.
+
+Candidate checks covered 13 HTTP contracts, authentication and DI, shared Practice
+library reuse and audio URLs, all six levels, translation-assisted eligibility,
+44 recognition/number fixtures and 15 answer requests with zero AI model calls.
+Authenticated admin checks confirmed both dashboard controls, masked API settings,
+and rejection of ordinary users. Actual paid-provider failure routing was not
+forced in production; previously passing backend unit tests cover that policy.
+
+A verified **4,874,606-byte** PostgreSQL backup, immutable source archives/hashes,
+private runtime snapshots, staged images and logs are retained in the release
+folder. Previous API, website and connector remain available. No Git commit/push
+or App Store submission was performed.
+
+Rollback preserves current database writes:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261020-10/deploy.py rollback
+```
