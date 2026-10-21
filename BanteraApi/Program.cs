@@ -139,6 +139,7 @@ builder.Services.AddScoped<RevAiAlignmentService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<AdminService>();
 builder.Services.AddScoped<AdminAnalyticsService>();
+builder.Services.AddScoped<AdminWordRankingService>();
 builder.Services.AddHostedService<BanteraApi.WebsiteAnalytics.WebsiteAnalyticsCleanup>();
 
 // ── Admin MCP server (OAuth 2.1 authorization server + resource server) ───────

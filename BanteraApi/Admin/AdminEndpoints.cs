@@ -9,6 +9,16 @@ public static class AdminEndpoints
     {
         var group = app.MapGroup("/api/admin").RequireAuthorization("Admin");
 
+        group.MapGet("/word-rankings", async (AdminWordRankingService rankings, HttpResponse response,
+            CancellationToken ct, string period = "today", string metric = "listened",
+            int limit = 20, int offset = 0) =>
+        {
+            response.Headers.CacheControl = "private, no-store";
+            if (period is not ("today" or "week" or "total") || metric is not ("listened" or "spoken"))
+                return Results.BadRequest(new { message = "Invalid ranking filter." });
+            return Results.Ok(await rankings.GetAsync(period, metric, limit, offset, ct));
+        }).WithName("AdminWordRankings");
+
         // GET /api/admin/stats
         group.MapGet("/stats", async (AdminService admin) =>
         {
