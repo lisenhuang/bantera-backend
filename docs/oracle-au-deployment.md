@@ -1,5 +1,46 @@
 # Bantera deployment on Oracle AU
 
+## Admin word activity rankings: 21 October 2026
+
+Release **bantera-20261021-5** is published with status **SUCCESS**. Backend
+**1.31.0** runs in `bantera-api-20261021-5` (loopback 18144), website
+**0.16.0** in `bantera-website-20261021-5` (loopback 13038), and connector
+`cloudflared-20261021-5` uses readiness port 12070.
+
+The Overview page now ranks users by listened or spoken words for Today,
+This week and All time, with pagination and links to user details. Activity
+uses existing device-local date buckets; the reference date is Pacific/Auckland
+and weeks start Monday. Counts combine legacy and language-tagged device
+snapshots. Offline activity appears after syncing.
+
+**GO for existing published apps:** additive admin-only endpoint, no migration,
+no new secret, and no mobile update. The latest phone callback search handoff
+from API 1.30.1 is preserved. The website's existing BANTERA_API_BASE_URL setting
+now targets the candidate API internally; both containers share the dedicated
+internal network `bantera-app-20261021-5`, retaining their existing networks.
+The first staged dashboard check caught separate Docker networks before
+promotion; after adding that private connection, all checks passed.
+
+Validation: backend build and 1,083 tests passed (16 optional skips); website
+lint had zero errors, type checking/build passed, and all 14 tests passed.
+Candidate and public checks each passed 13 existing HTTP contracts and 20
+ranking checks, including all six filters against independent read-only SQL
+aggregates, admin authorization, pagination and rendered dashboard content.
+Live browser checks confirmed period and metric controls. All 130 monitored
+public responses returned 200. Verified PostgreSQL backup: **6,185,226 bytes**.
+No test data was written to production.
+
+Previous API 1.30.1, website 0.15.0 and connector remain available for rollback
+without restoring the database:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261021-5/deploy.py rollback
+```
+
+Source hashes, runtime snapshots, backup and verification proofs remain in the
+release directory. Post-release retention completed with approximately 111 GB
+available. No App Store or Google Play release was required.
+
 ## Phone callback search handoff: 21 October 2026
 
 Release **bantera-20261021-4** completed at **2026-10-21 09:51:24 UTC**, status
