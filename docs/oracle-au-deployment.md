@@ -1,5 +1,69 @@
 # Bantera deployment on Oracle AU
 
+## Speaking leaderboard: 22 October 2026
+
+Release **bantera-20261021-9** publishes API **1.32.2** and website **0.17.1**.
+It follows the same-day initial leaderboard releases 1.32.0/1.32.1. API runs in
+`bantera-api-20261021-9` (loopback 18148), website in
+`bantera-website-20261021-9` (loopback 13042), with
+`cloudflared-20261021-9` (readiness 12074).
+
+The Goal entry opens a paginated Speaking leaderboard. Rankings combine spoken
+words across languages for today's UTC calendar date plus the preceding six
+calendar days. Each row shows the current profile name/photo, current learning
+language and exact total. Ties share a rank. The owner's ordinary row says You;
+there is no pinned own row, language breakdown, eye control or hiding dialog.
+Names/photos are always shown. Users can change them through Edit Profile.
+The authenticated dashboard includes a matching seven-day preview, separate
+from the existing Today / This week / All time admin rankings.
+
+**GO for existing published apps:** the leaderboard API and UTC activity sync
+are additive; previous APIs remain unchanged. The initial leaderboard migration
+added three tables. This correction needs no further migration, configuration
+or secret. The now-unused visibility table is retained rather than dropped.
+The pre-release mobile client's visibility route remains authenticated, accepts
+show requests without writing, and returns 409 for unsupported hide requests.
+Current mobile code has no visibility caller.
+
+Historical limitation: earlier app versions saved local dates without timestamps.
+Their original date buckets remain included and explicitly labelled; new activity
+uses UTC. Upgraded-device snapshots replace the old source atomically, preventing
+double counting. Changing the selected language never removes previous counts.
+
+Local validation: backend build and 1,088 tests passed (16 optional skips),
+including isolated PostgreSQL tests for aggregation, ties, pagination, UTC source
+replacement and visible profiles despite old hidden preferences. Website type
+checking, build and 14 tests passed; lint had no errors (13 existing warnings).
+App 3.3.2 (425) passed 60 selected tests, including leaderboard layouts across
+17 locales, callback/CallKit and audio regressions. Focused analysis was clean;
+whole-app analysis reported 44 existing informational notices. Light/dark golden
+mockups are under app/docs/design/speaking-leaderboard. No physical-device testing
+or launch was performed; installation alone does not verify locked-screen audio.
+
+Release status **SUCCESS** at 2026-10-21 11:16:42 UTC. Both public version
+markers and authenticated dashboard rendering passed. Candidate and live checks
+each passed 13 existing HTTP contracts, 20 admin ranking checks and 11 speaking
+checks, including independent read-only SQL comparison of every returned name,
+photo presence, language and total. No test data was written to production.
+All **160/160** monitored public responses returned 200. Verified database backup:
+**6,232,364 bytes**. Post-release cleanup completed; **111 GB of 194 GB** remains
+available (44% reported usage), with current and one rollback release retained.
+Both public services were rechecked after cleanup.
+
+Signed iOS **3.3.2 (425)** was installed on Ethan’s iPhone 17 Pro and verified
+through the installed-app inventory. The app was not launched or tested on the
+physical phone.
+
+Rollback retains database writes and the additive tables:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261021-9/deploy.py rollback
+```
+
+The preceding release is API 1.32.1 / website 0.17.0 in bantera-20261021-8.
+Source manifests, backups and verification proofs remain on the server. No Git
+commit/push, App Store submission or Google Play submission was performed.
+
 ## Admin word activity rankings: 21 October 2026
 
 Release **bantera-20261021-5** is published with status **SUCCESS**. Backend

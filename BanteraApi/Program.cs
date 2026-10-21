@@ -140,6 +140,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<AdminService>();
 builder.Services.AddScoped<AdminAnalyticsService>();
 builder.Services.AddScoped<AdminWordRankingService>();
+builder.Services.AddScoped<BanteraApi.Leaderboards.SpeakingLeaderboardService>();
 builder.Services.AddHostedService<BanteraApi.WebsiteAnalytics.WebsiteAnalyticsCleanup>();
 
 // ── Admin MCP server (OAuth 2.1 authorization server + resource server) ───────
@@ -3173,6 +3174,7 @@ PracticeEndpoints.Map(app);
 AdminEndpoints.Map(app);
 BanteraApi.WebsiteAnalytics.WebsiteAnalyticsEndpoints.Map(app);
 BanteraApi.Profile.WordActivityEndpoints.Map(app);
+BanteraApi.Leaderboards.SpeakingLeaderboardEndpoints.Map(app);
 AiSettingsEndpoints.Map(app);
 GeminiPaidFallbackEndpoints.Map(app);
 GeminiRegularKeyEndpoints.Map(app);

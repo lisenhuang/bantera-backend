@@ -820,6 +820,60 @@ namespace BanteraApi.Migrations
                     b.ToTable("oauth_refresh_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingDay", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Language")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<long>("SpokenWords")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("UserId", "DeviceId", "Date", "Language");
+
+                    b.HasIndex("Date");
+
+                    b.ToTable("speaking_days", (string)null);
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingDevice", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly?>("LegacyThroughDate")
+                        .HasColumnType("date");
+
+                    b.HasKey("UserId", "DeviceId");
+
+                    b.ToTable("speaking_devices", (string)null);
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingVisibility", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("ShowProfile")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("speaking_visibility", (string)null);
+                });
+
             modelBuilder.Entity("BanteraApi.Database.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1738,6 +1792,33 @@ namespace BanteraApi.Migrations
                     b.Navigation("Client");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingDay", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingDevice", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingVisibility", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("BanteraApi.Database.Entities.UserAudioJob", b =>

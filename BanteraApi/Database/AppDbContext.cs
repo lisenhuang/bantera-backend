@@ -128,6 +128,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne<User>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        b.Entity<SpeakingVisibility>(e => {
+            e.ToTable("speaking_visibility"); e.HasKey(x => x.UserId);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<SpeakingDevice>(e => {
+            e.ToTable("speaking_devices"); e.HasKey(x => new { x.UserId, x.DeviceId });
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<SpeakingDay>(e => {
+            e.ToTable("speaking_days"); e.HasKey(x => new { x.UserId, x.DeviceId, x.Date, x.Language });
+            e.Property(x => x.Language).HasMaxLength(3);
+            e.HasIndex(x => x.Date);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         b.Entity<UserWordActivity>(e =>
         {
             e.ToTable("user_word_activity");
