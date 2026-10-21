@@ -70,13 +70,14 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         string? identity, string? resumeHandle)
     {
         var current = metadata ?? new AiClientMetadata(new AiClock("UTC", 0), null);
+        if (current.PhoneCallback) current = current with { DeviceWebSearch = false };
         // A fresh session learns its background reference once, in setup. Sending
         // this as an unfinished user turn makes old questions part of new audio input.
         var prompt = resumeHandle is null
             ? BanteraAiIdentity.Prompt(user) + current.LevelPrompt + AiCallPolicy.IntroductionPolicy(metadata, history, voiceMessage) +
               current.TimePrompt + AiConversationTiming.Prompt(history, current.Clock) +
               (voiceMessage ? AiConversationTiming.VoiceReplyDirective(history, current.Clock, DateTimeOffset.UtcNow) : "") +
-              AiConversationTiming.HistoryPrompt(history)
+              AiConversationTiming.HistoryPrompt(history) + (current.PhoneCallback ? AiCallbackService.PhoneSearchPolicy : "")
             : "";
         var setup = JsonSerializer.SerializeToNode(Setup(model, prompt, voiceMessage, voice,
             current.DeviceWebSearch, reasoning, current.DeviceVocabulary, current.DeviceEmojis, current.VocabularyVersion))!.AsObject();

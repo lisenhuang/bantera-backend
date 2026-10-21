@@ -7,6 +7,9 @@ public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? Ha
 {
     [System.Text.Json.Serialization.JsonIgnore]
     public AiPracticeLevel? PracticeLevel { get; init; }
+    // Set only by the server's callback path, never by client metadata.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool PhoneCallback { get; init; }
 
     public static AiClientMetadata Read(string? json)
     {

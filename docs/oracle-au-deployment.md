@@ -1,5 +1,39 @@
 # Bantera deployment on Oracle AU
 
+## Phone callback search handoff: 21 October 2026
+
+Release **bantera-20261021-4** completed at **2026-10-21 09:51:24 UTC**, status
+**SUCCESS**. Backend **1.30.1** runs in `bantera-api-20261021-4` (loopback
+18143), with `cloudflared-20261021-4` (readiness 12069). Website **0.15.0**
+remains in `bantera-website-20261021-3` (loopback 13036). Both public versions
+were independently verified. Database backup: **6,184,993 bytes**.
+
+**GO for existing published apps:** no endpoint/schema/configuration/secret or
+service-registration changes, and no mobile update required. Phone callbacks
+direct web/image searches and live weather requests to a real-time voice call
+started inside Chats > Bantera AI. The server removes callback search tools
+and blocks invented search calls without interrupting audio. In-app voice
+calls retain device-side search. Resume identities prevent old search-enabled
+callback instructions from being reused.
+
+The build and 92 focused AI regressions passed (5 optional database/provider
+tests skipped). Candidate and public smoke checks each passed 13 HTTP contracts.
+The actual candidate assembly passed 25 search policy/tool checks across four
+Live models. No provider calls or database writes were made by that policy
+probe. Physical locked-screen behavior and live spoken phrasing remain untested.
+
+The previous API 1.30.0 and its connector remain available. Rollback preserves
+database writes and the shared website:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261021-4/deploy.py rollback
+```
+
+Post-deployment retention removed three obsolete containers; approximately
+111 GB of 194 GB remains available (43% usage). Source hashes, private runtime
+snapshots, database backup, controller, availability samples and verification
+proofs remain in the release directory.
+
 ## Gemini key dashboard and disk retention: 21 October 2026
 
 Release **bantera-20261021-3** is published with status **SUCCESS**. Backend

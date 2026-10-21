@@ -174,7 +174,7 @@ public static class BanteraAiEndpoints
                 reminder = await AiCallbackService.ReminderForCallAsync(db, userId, callbackId, timeout.Token);
                 // A scheduled call has its own conversation identity, distinct
                 // from a previous callback, in-app call, or voice-message turn.
-                metadata = metadata with { ConversationId = callbackId.ToString() };
+                metadata = metadata with { ConversationId = callbackId.ToString(), PhoneCallback = true, DeviceWebSearch = false };
             }
             var callKey = Guid.NewGuid().ToString();
             model = await settings.GetModelAsync(timeout.Token);
@@ -391,9 +391,13 @@ public static class BanteraAiEndpoints
                 foreach (var call in calls.EnumerateArray())
                 {
                     var name = call.GetProperty("name").GetString()!;
-                    if (AiCallbackService.ToolNames.Contains(name))
+                    if (AiCallbackService.ToolNames.Contains(name) || (state.Metadata.PhoneCallback && name == AiWebSearchTool.Name))
                     {
-                        var result = await state.ExecuteTool(state.Metadata, call);
+                        // Never relay a callback search to the device, even if the
+                        // provider invents a call to this undeclared tool.
+                        var result = state.Metadata.PhoneCallback && name == AiWebSearchTool.Name
+                            ? (object)new { unavailable = true, reason = "in_app_call_required" }
+                            : await state.ExecuteTool(state.Metadata, call);
                         state.Health.ToolResponse();
                         await state.SendAsync(upstream, new { toolResponse = new { functionResponses = new[] { new { id = call.GetProperty("id").GetString(), name, response = new { result } } } } }, ct);
                     }
