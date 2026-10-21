@@ -54,10 +54,10 @@ public sealed class AdminAudioTestWorker(IServiceScopeFactory scopes, ILogger<Ad
         using var userContext = scope.ServiceProvider.GetRequiredService<BanteraApi.Diagnostics.AiPipelineEventRecorder>()
             .BeginContext(test.CreatedByUserId, null, test.LanguageCode, "admin_audio_test");
         var paid = await scope.ServiceProvider.GetRequiredService<GeminiPaidFallback>().ReadAsync(stoppingToken);
-        var geminiSettings = scope.ServiceProvider.GetRequiredService<IOptions<GeminiSettings>>().Value;
+        var regularKeys = await scope.ServiceProvider.GetRequiredService<GeminiRegularKeyStore>().KeysAsync(stoppingToken, includeDisabled: true);
         var storageSettings = scope.ServiceProvider.GetRequiredService<IOptions<R2Settings>>().Value;
         var session = new GeminiTestSession(test.TextModel, test.AudioModel,
-            [.. geminiSettings.ApiKeys, paid.Key ?? "", storageSettings.AccessKeyId, storageSettings.SecretAccessKey]);
+            [.. regularKeys, paid.Key ?? "", storageSettings.AccessKeyId, storageSettings.SecretAccessKey]);
         session.PersistAsync = async () =>
         {
             test.DiagnosticsJson = session.ToJson();

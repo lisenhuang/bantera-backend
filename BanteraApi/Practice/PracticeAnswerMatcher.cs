@@ -72,7 +72,9 @@ public static class PracticeAnswerMatcher
         if (new[] { "zh", "yue" }.Contains(locale.ToLowerInvariant().Split('-')[0]) &&
             heard == options[best] && left.Length >= 6 && scores[best] - scores[1-best] >= .20 &&
             2.0 * Overlap(right[0], right[1]) / (right[0].Length + right[1].Length) < .70 &&
-            Overlap(ReliableUnits(heard, uncertain, locale), right[best]) >= 2) return best;
+            // Expanded clock labels must not count as additional confidence.
+            Overlap(ReliableUnits(heard, uncertain.Concat(
+                Regex.Matches(heard, @"[0-9]+时[0-9]+分").Select(m => m.Value)).ToArray(), locale), right[best]) >= 2) return best;
 
         // Identify the selected reply from substantial ordered evidence, without
         // treating every recognition difference as an incorrect selection.
@@ -162,7 +164,8 @@ public static class PracticeAnswerMatcher
     {
         var result = Regex.Matches(text, locale.StartsWith("en", StringComparison.OrdinalIgnoreCase) ? @"[0-9]+(?:decimal[0-9]+)?" : @"\p{N}+").Select(x => x.Value).ToList();
         if (new[] { "zh", "yue" }.Contains(locale.ToLowerInvariant().Split('-')[0]))
-            result.AddRange(Regex.Matches(text, "美元|港元|台币|欧元|英镑|元|负").Select(m => m.Value));
+            // Keep hour/minute order meaningful as well as the individual numbers.
+            result.AddRange(Regex.Matches(text, @"[0-9]+时[0-9]+分|美元|港元|台币|欧元|英镑|元|负").Select(m => m.Value));
         if (locale.StartsWith("en", StringComparison.OrdinalIgnoreCase))
             result.AddRange(Regex.Matches(text, @"\b(dollars|euros|pounds|usd|nzd|aud|cad|hkd|negative|am|pm)\b").Select(m => m.Value));
         if (Negations.TryGetValue(locale.Equals("zh-hk", StringComparison.OrdinalIgnoreCase)
@@ -192,7 +195,12 @@ public static class PracticeAnswerMatcher
         text = PracticeNumberNormalization.Normalize(text, locale);
         text = Regex.Replace(text.Replace("'", ""), @"[^\p{L}\p{M}\p{N}]+", " ").Trim();
         if (locale.StartsWith("en", StringComparison.OrdinalIgnoreCase)) text = EnglishNumbers(text);
-        return Compact(locale) ? text.Replace(" ", "") : text;
+        if (Compact(locale)) text = text.Replace(" ", "");
+        // Only the opening Cantonese affirmative particle, not arbitrary 啊/呀.
+        if (locale.ToLowerInvariant().Split('-')[0] == "yue" ||
+            locale.Equals("zh-hk", StringComparison.OrdinalIgnoreCase))
+            text = Regex.Replace(text, "^得啊", "得呀");
+        return text;
     }
 
     private static string EnglishNumbers(string text)

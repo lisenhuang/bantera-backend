@@ -5,6 +5,9 @@ namespace BanteraApi.Chat.Ai;
 public sealed record AiClock(string TimeZone, int UtcOffsetMinutes);
 public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? HasMetBanteraAi = null, string? AlertPushToken = null, string? LearningLevel = null, bool DeviceWebSearch = false, string? ConversationId = null, bool DeviceVocabulary = false, bool DeviceEmojis = false, int VocabularyVersion = 1)
 {
+    [System.Text.Json.Serialization.JsonIgnore]
+    public AiPracticeLevel? PracticeLevel { get; init; }
+
     public static AiClientMetadata Read(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return new(new("UTC", 0), null);
@@ -34,12 +37,12 @@ public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? Ha
     private static string? NormalizeLevel(string? level) => level?.Trim().ToLowerInvariant() switch {
         "beginner" => "beginner", "intermediate" => "intermediate", "advanced" => "advanced", _ => null
     };
-    public string LevelPrompt => NormalizeLevel(LearningLevel) switch {
+    public string LevelPrompt => PracticeLevel?.Prompt ?? (NormalizeLevel(LearningLevel) switch {
         "beginner" => " Current Discover practice level: beginner. Use common everyday words, short simple sentences, a gentle clear pace and one concrete question at a time. Model short phrases they can repeat; explain unfamiliar words simply. ",
         "intermediate" => " Current Discover practice level: intermediate. Use everyday vocabulary with some useful new expressions, moderately complex sentences and a natural but clear pace. Encourage fuller answers and short explanations of opinions. ",
         "advanced" => " Current Discover practice level: advanced. Use natural conversational pace, nuanced vocabulary, idiomatic expressions and more complex discussion. Offer subtle corrections and invite detailed opinions without long monologues. ",
         _ => " No specific Discover practice level is selected (All levels or an older app). Do not assume a proficiency level; adapt gradually to the learner's demonstrated ability. "
-    };
+    });
     public static AiClock ReadClock(JsonElement c)
     {
         var zone = c.GetProperty("timeZone").GetString() ?? "UTC";

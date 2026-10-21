@@ -33,9 +33,9 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
             logger.LogWarning("Practice queue full for {Locale}/{Level}; run {RunId} can retry on the next demand.", demand.Locale, demand.Level, demand.RunId);
         }
     }
-    public void RequestAhead(Guid userId, string locale, string language, PracticeProgress progress, PracticeExposure? active = null, bool useSelected = false)
+    public void RequestAhead(Guid userId, string locale, string language, PracticeProgress progress, PracticeExposure? active = null, bool useSelected = false, bool supportsA0 = true)
     {
-        foreach (var level in PracticePreparation.Levels(progress, active, useSelected || active?.ReviewMode == true)) Request(new(userId, locale, language, level));
+        foreach (var level in PracticePreparation.Levels(progress, active, useSelected || active?.ReviewMode == true, supportsA0)) Request(new(userId, locale, language, PracticeRules.ClientLevel(level, supportsA0)));
     }
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
         Task.WhenAll(ConsumeAsync(stoppingToken), ConsumeAsync(stoppingToken));
@@ -96,7 +96,7 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
         {
             if (await ReadyCount() >= PracticePreparation.ReadyTarget) break;
             var history = await writer.Set<PracticeDialogue>().AsNoTracking().Where(d => d.Language == demand.Language && d.ContentVersion == PracticeRules.ContentVersion).ToListAsync(ct);
-            var topics = PracticeRules.Topics.OrderBy(t => history.Count(d => d.Level == demand.Level && d.Topic == t)).Take(5).ToArray();
+            var topics = (demand.Level == PracticeRules.BeginnerLevel ? PracticeRules.BeginnerTopics : PracticeRules.Topics).OrderBy(t => history.Count(d => d.Level == demand.Level && d.Topic == t)).Take(5).ToArray();
             var recent = history.OrderByDescending(d => d.CreatedAt).Take(8).Select(d => new { d.Cue, d.Reply, d.MeaningKey }).ToArray();
             // One generation batch and one batch review. No unbounded regeneration loop.
             var logContext = new PracticeLogContext(demand.RunId, demand.Locale, demand.Level, Batch: batch + 1);

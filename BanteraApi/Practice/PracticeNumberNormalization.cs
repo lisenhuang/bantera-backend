@@ -52,6 +52,12 @@ internal static class PracticeNumberNormalization
             var fraction = parts.Length == 2 ? string.Concat(parts[1].Select(c => digits.IndexOf(c))).TrimEnd('0') : "";
             return value.ToString(CultureInfo.InvariantCulture) + (fraction.Length == 0 ? "" : "点" + fraction);
         });
+        // Preserve clock units; do not reinterpret decimal amounts as times.
+        text = Regex.Replace(text, @"(?<![0-9.:])([01]?[0-9]|2[0-3]):([0-5][0-9])(?![0-9.:])",
+            m => int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)
+                + "时" + int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + "分");
+        text = Regex.Replace(text, @"(?<![0-9.点點])([01]?[0-9]|2[0-3])[點点]半",
+            m => int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + "时30分");
         text = Regex.Replace(text, @"(?<![0-9,])[0-9]{1,3}(?:,[0-9]{3})+(?![0-9,])", m => m.Value.Replace(",", ""));
         text = Regex.Replace(text, @"([0-9]+)\.([0-9]+)", m =>
         {

@@ -1283,5 +1283,288 @@
     "expected": null,
     "locale": "en-NZ",
     "uncertainWords": []
+  },
+  {
+    "name": "Cantonese screenshot numeric half past",
+    "transcript": "得啊我6:30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": 0,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese screenshot with uncertain particle and minutes",
+    "transcript": "得啊我6:30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": 0,
+    "locale": "zh-HK",
+    "uncertainWords": [
+      "得啊",
+      "30"
+    ]
+  },
+  {
+    "name": "Cantonese screenshot with uncertain whole time",
+    "transcript": "得啊我6:30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": 0,
+    "locale": "zh-HK",
+    "uncertainWords": [
+      "得啊",
+      "6:30"
+    ]
+  },
+  {
+    "name": "Cantonese half past yue locale",
+    "transcript": "得啊我6:30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": 0,
+    "locale": "yue-HK",
+    "uncertainWords": [
+      "得啊",
+      "30"
+    ]
+  },
+  {
+    "name": "Cantonese full width clock and leading zero",
+    "transcript": "得啊我０６：３０可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": 0,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese written half past against numeric choice",
+    "transcript": "得呀，我六點半可以。",
+    "choices": [
+      "得啊我6:30可以",
+      "我最鍾意食魚。"
+    ],
+    "expected": 0,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese wrong hour remains unclear",
+    "transcript": "得啊我7:30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese wrong minute remains unclear",
+    "transcript": "得啊我6:35可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese omitted time remains unclear",
+    "transcript": "得啊我可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese wrong negation remains unclear",
+    "transcript": "得啊我6:30唔可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese whole reply uncertain remains unclear",
+    "transcript": "得啊我6:30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": [
+      "得啊我6:30可以"
+    ]
+  },
+  {
+    "name": "Cantonese uncertain time cannot pick close alternatives",
+    "transcript": "得啊我6:30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "得呀，我七點半可以。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": [
+      "6:30"
+    ]
+  },
+  {
+    "name": "Cantonese clear time can pick close alternatives",
+    "transcript": "得啊我6:30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "得呀，我七點半可以。"
+    ],
+    "expected": 0,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese alternative time correctly identifies other choice",
+    "transcript": "得啊我7:30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "得呀，我七點半可以。"
+    ],
+    "expected": 1,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Clock hour and minute cannot swap",
+    "transcript": "得呀我12:06可以",
+    "choices": [
+      "得呀，我6:12可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Clock cannot match decimal number",
+    "transcript": "得啊我6.30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Clock cannot match integer number",
+    "transcript": "得啊我630可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Clock seconds are not silently discarded",
+    "transcript": "得啊我6:30:15可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Invalid clock hour is not partially matched",
+    "transcript": "得啊我106:30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Invalid clock minute is not partially matched",
+    "transcript": "得啊我6:300可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Mandarin half past formatting",
+    "transcript": "我今天6:30可以出發",
+    "choices": [
+      "我今天六点半可以出發",
+      "我想喝一杯茶"
+    ],
+    "expected": 0,
+    "locale": "zh-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "Mandarin two half past formatting",
+    "transcript": "我今天02:30可以出發",
+    "choices": [
+      "我今天两点半可以出發",
+      "我想喝一杯茶"
+    ],
+    "expected": 0,
+    "locale": "zh-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "Chinese twelve half past formatting",
+    "transcript": "我今天12:30可以出發",
+    "choices": [
+      "我今天十二點半可以出發",
+      "我想喝一杯茶"
+    ],
+    "expected": 0,
+    "locale": "zh-TW",
+    "uncertainWords": []
+  },
+  {
+    "name": "Clock formatting cannot create reliable speech from uncertain fragments",
+    "transcript": "得啊我6:30可以",
+    "choices": [
+      "得呀，我六點半可以。",
+      "我最鍾意食魚。"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": [
+      "得啊",
+      "我",
+      "6",
+      "30",
+      "可以"
+    ]
   }
 ]

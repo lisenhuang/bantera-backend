@@ -4,7 +4,7 @@ namespace BanteraApi.Practice;
 public static class PracticePreparation
 {
     public const int ReadyTarget = 8;
-    public static int[] Levels(PracticeProgress progress, PracticeExposure? active = null, bool useSelected = false)
+    public static int[] Levels(PracticeProgress progress, PracticeExposure? active = null, bool useSelected = false, bool supportsA0 = false)
     {
         if (useSelected && PracticeRules.EffectiveLevel(progress) < progress.Level)
             return [PracticeRules.EffectiveLevel(progress)];
@@ -12,7 +12,7 @@ public static class PracticePreparation
         var projected = new PracticeProgress { Level = progress.Level, Window = progress.Window, Language = progress.Language };
         if (active is { DeferredScoring: true, TranslationUsed: false, ReviewMode: false, FinishedAt: null, FirstCorrect: { } correct } &&
             active.Dialogue.Language == progress.Language && active.Dialogue.Level == progress.Level)
-            PracticeRules.Record(projected, correct);
+            PracticeRules.Record(projected, correct, supportsA0);
         levels.Add(projected.Level);
         // Four scored replies before a possible boundary, warm only reachable
         // neighbouring pools. Translated/unanswered exercises never mutate score.
@@ -26,7 +26,7 @@ public static class PracticePreparation
                 foreach (var outcome in new[] { false, true })
                 {
                     var copy = new PracticeProgress { Level = state.Level, Window = state.Window };
-                    PracticeRules.Record(copy, outcome);
+                    PracticeRules.Record(copy, outcome, supportsA0);
                     levels.Add(copy.Level);
                     next.Add(copy);
                 }

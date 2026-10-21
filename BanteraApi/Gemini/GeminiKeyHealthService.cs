@@ -22,14 +22,15 @@ public sealed record GeminiKeyHealthSnapshot(int Total, int Healthy, IReadOnlyLi
 /// <summary>
 /// Keeps short, model-specific quota cooldowns in memory and confirmed invalid keys in
 /// app_settings so they remain disabled after a restart. Only key hashes and masked hints
-/// are stored; the configured API keys remain in server environment variables.
+/// are stored; credentials are supplied by the environment and encrypted admin key store.
 /// </summary>
 public sealed class GeminiKeyHealthService(
     IServiceScopeFactory scopeFactory,
     IMemoryCache cache,
     IOptions<GeminiSettings> options,
     ILogger<GeminiKeyHealthService> logger,
-    GeminiPaidFallback? paidFallback = null)
+    GeminiPaidFallback? paidFallback = null,
+    GeminiRegularKeyStore? regularKeyStore = null)
 {
     private const string InvalidPrefix = "ai.gemini.invalidKey.";
     private const string InvalidCacheKey = "gemini-invalid-keys";
@@ -76,11 +77,15 @@ public sealed class GeminiKeyHealthService(
             .ToArray();
     }
 
+    public async Task<string[]> RegularKeysAsync(CancellationToken ct, bool webSearch = false) =>
+        GeminiService.SelectKeys(regularKeyStore is null ? options.Value.ApiKeys : await regularKeyStore.KeysAsync(ct),
+            webSearch, AiSearchPolicy.GeminiKeyPrefix);
+
     public sealed record KeyPlan(string[] Keys, string? PaidKey);
     public async Task<KeyPlan> PlanAsync(string? model, Guid? user, CancellationToken ct, bool webSearch = false, string? preferredHash = null, bool practiceAudio = false, bool dialogueAudio = false)
     {
         var policy = paidFallback is null ? new PaidFallbackPolicy(null, []) : (practiceAudio || dialogueAudio) ? await paidFallback.ReadAsync(ct) : await paidFallback.ForUserAsync(user, ct);
-        var regular = GeminiService.SelectKeys(options.Value.ApiKeys, webSearch, AiSearchPolicy.GeminiKeyPrefix);
+        var regular = await RegularKeysAsync(ct, webSearch);
         var ordered = practiceAudio
             ? GeminiPaidFallback.OrderForPracticeAudio(regular, policy)
             : dialogueAudio ? GeminiPaidFallback.OrderForDialogueAudio(regular, policy)
@@ -150,7 +155,7 @@ public sealed class GeminiKeyHealthService(
     {
         var invalid = await GetInvalidAsync(ct);
         var paid = paidFallback is null ? null : (await paidFallback.ReadAsync(ct)).Key;
-        var keys = GeminiService.SelectKeys(options.Value.ApiKeys.Concat(paid is null ? [] : new[] { paid }), false, options.Value.WebSearchKeyPrefix);
+        var keys = GeminiService.SelectKeys((await RegularKeysAsync(ct)).Concat(paid is null ? [] : new[] { paid }), false, options.Value.WebSearchKeyPrefix);
         var now = DateTimeOffset.UtcNow;
         var items = new List<GeminiKeyHealthItem>();
         var affected = 0;
@@ -184,7 +189,7 @@ public sealed class GeminiKeyHealthService(
     public async Task<bool> ReenableAsync(string id, CancellationToken ct)
     {
         var paid = paidFallback is null ? null : (await paidFallback.ReadAsync(ct)).Key;
-        var keys = GeminiService.SelectKeys(options.Value.ApiKeys.Concat(paid is null ? [] : new[] { paid }), false, options.Value.WebSearchKeyPrefix);
+        var keys = GeminiService.SelectKeys((await RegularKeysAsync(ct)).Concat(paid is null ? [] : new[] { paid }), false, options.Value.WebSearchKeyPrefix);
         if (!keys.Any(key => KeyId(key) == id)) return false;
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

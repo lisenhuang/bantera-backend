@@ -43,6 +43,18 @@ public class PracticeAnswerMatcherTests
             PracticeAnswerMatcher.Judge(d, swap, "The bus to Rotoroa leaves at half past three", null));
     }
     [Fact]
+    public void CantoneseScreenshotIsCorrectWithRecognitionHintsAndShuffledChoices()
+    {
+        var d = new PracticeDialogue { Locale = "zh-HK", Reply = "得呀，我六點半可以。", Distractor = "我最鍾意食魚。" };
+        foreach (var swap in new[] { false, true })
+        {
+            Assert.Equal(new PracticeJudgement("correct", swap ? 1 : 0),
+                PracticeAnswerMatcher.Judge(d, swap, "得啊我6:30可以", "Uncertain words: 得啊, 30"));
+            Assert.Equal(new PracticeJudgement("unclear", null),
+                PracticeAnswerMatcher.Judge(d, swap, "得啊我7:30可以", "Uncertain words: 得啊, 30"));
+        }
+    }
+    [Fact]
     public void UnrecognizedConfidenceHintCannotProduceWrongAnswer()
     {
         var d = new PracticeDialogue { Locale = "en-NZ", Reply = "Yes.", Distractor = "No." };

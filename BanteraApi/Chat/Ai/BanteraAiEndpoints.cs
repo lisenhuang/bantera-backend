@@ -113,6 +113,7 @@ public static class BanteraAiEndpoints
             var pcm = file is null ? Array.Empty<byte>() : await AiAudioCodec.ReadPcmAsync(file, timeout.Token, allowEmptyRecording: acceptNoSpeech);
             inputBytes = pcm.Length;
             model = await settings.GetModelAsync(timeout.Token);
+            metadata = await AiPracticeContext.LoadAsync(db, user, metadata, timeout.Token);
             var reply = await live.ReplyAsync(model, user, pcm, history, timeout.Token, text, snapshot, metadata, call => callbacks.ExecuteAsync(userId, metadata, requestId.ToString(), call.GetProperty("name").GetString()!, call.GetProperty("args"), timeout.Token), voice: await settings.GetVoiceAsync(timeout.Token), reasoning: await settings.GetReasoningAsync(model, timeout.Token));
             // No database/R2 write: the client owns all history and audio persistence.
             return Results.Ok(new { audio = Convert.ToBase64String(AiAudioCodec.Wave(reply.Pcm)),
@@ -179,6 +180,7 @@ public static class BanteraAiEndpoints
             model = await settings.GetModelAsync(timeout.Token);
             var voice = await settings.GetVoiceAsync(timeout.Token);
             var reasoning = await settings.GetReasoningAsync(model, timeout.Token);
+            metadata = await AiPracticeContext.LoadAsync(db, user, metadata, timeout.Token);
             // Every new call gets its own full session and the supplied memory.
             // Only reconnecting this ongoing call may reuse a checkpoint;
             // its remaining duration above prevents restarting the countdown.

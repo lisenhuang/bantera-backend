@@ -1711,11 +1711,11 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
         var stage = operation.Replace(' ', '_').Replace("(", "").Replace(")", "");
         if (webSearch && model != AiSearchPolicy.GeminiModel)
             throw new InvalidOperationException("This Gemini model is not allowed for web search.");
-        var configuredKeys = SelectKeys(Settings.ApiKeys, webSearch, AiSearchPolicy.GeminiKeyPrefix);
         var plan = await keyHealth.PlanAsync(model, RequestUserId, cancellationToken, webSearch, practiceAudio: practiceAudioRequest.Value, dialogueAudio: dialogueAudioRequest.Value);
         var keys = plan.Keys;
         if (keys.Length == 0)
         {
+            var configuredKeys = await keyHealth.RegularKeysAsync(cancellationToken, webSearch);
             await events.RecordAsync(
                 fallbackAvailable ? AiPipelineSeverity.Warning : AiPipelineSeverity.Error,
                 stage, "all_keys_unavailable",

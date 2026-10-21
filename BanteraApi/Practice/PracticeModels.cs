@@ -61,6 +61,13 @@ public static class PracticeRules
 {
     public const int ContentVersion = 2;
     public static readonly string[] Levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
+    // Persisted A1-C2 indices remain 0-5; A0 is additive and never renumbers saved data.
+    public const int BeginnerLevel = -1;
+    public static string LevelName(int level) => level == BeginnerLevel ? "A0" : Levels[level];
+    public static int LevelIndex(string level) => level == "A0" ? BeginnerLevel :
+        Array.IndexOf(Levels, level) is var index && index >= 0 ? index : -2;
+    public static int ClientLevel(int level, bool supportsA0) => supportsA0 ? level : Math.Max(0, level);
+    public static readonly string[] BeginnerTopics = ["introductions", "food", "shopping", "home", "help", "weather"];
     public static readonly string[] Topics = ["introductions", "food", "transport", "shopping", "home", "work", "study", "travel", "plans", "help", "appointments", "opinions", "weather", "leisure", "neighbours", "services"];
     public static string Normalise(string text) => Regex.Replace(text.Normalize(NormalizationForm.FormKC).ToLowerInvariant(), @"[^\p{L}\p{N}]", "");
     public static string Fingerprint(string cue, string reply) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Normalise(cue) + "|" + Normalise(reply))));
@@ -83,18 +90,18 @@ public static class PracticeRules
         !string.IsNullOrWhiteSpace(d.Explanation) && d.Explanation.Length <= 500 &&
         Normalise(d.Reply) != Normalise(d.Distractor);
     public static int EffectiveLevel(PracticeProgress progress, bool useSelected = true) =>
-        useSelected && progress.SelectedLevel is { } selected && selected >= 0 && selected < progress.Level
+        useSelected && progress.SelectedLevel is { } selected && selected >= BeginnerLevel && selected < progress.Level
             ? selected : progress.Level;
 
     public static bool SelectLevel(PracticeProgress progress, string level)
     {
-        var selected = Array.IndexOf(Levels, level);
-        if (selected < 0 || selected > progress.Level) return false;
+        var selected = LevelIndex(level);
+        if (selected < BeginnerLevel || selected > progress.Level) return false;
         progress.SelectedLevel = selected == progress.Level ? null : selected;
         return true;
     }
 
-    public static void Record(PracticeProgress progress, bool correct)
+    public static void Record(PracticeProgress progress, bool correct, bool supportsA0 = false)
     {
         if (progress.SelectedLevel >= progress.Level) progress.SelectedLevel = null;
         progress.Window += correct ? "1" : "0";
@@ -102,7 +109,7 @@ public static class PracticeRules
         progress.Window = progress.Window[^12..];
         var successes = progress.Window.Count(c => c == '1');
         if (successes >= 10 && progress.Level < 5) { progress.Level++; progress.Window = ""; }
-        else if (successes <= 4 && progress.Level > 0) { progress.Level--; progress.Window = ""; }
+        else if (successes <= 4 && progress.Level > (supportsA0 ? BeginnerLevel : 0)) { progress.Level--; progress.Window = ""; }
         if (progress.SelectedLevel >= progress.Level) progress.SelectedLevel = null;
     }
 
@@ -114,12 +121,12 @@ public static class PracticeRules
             Record(progress, exposure.FirstCorrect.Value);
     }
 
-    public static void Finish(PracticeExposure exposure, PracticeProgress progress)
+    public static void Finish(PracticeExposure exposure, PracticeProgress progress, bool supportsA0 = false)
     {
         if (exposure.FinishedAt is not null) return;
         if (exposure.DeferredScoring && !exposure.TranslationUsed && !exposure.ReviewMode && exposure.FirstCorrect is { } correct &&
             exposure.Dialogue.Language == progress.Language && exposure.Dialogue.Level == progress.Level)
-            Record(progress, correct);
+            Record(progress, correct, supportsA0);
         exposure.FinishedAt = DateTime.UtcNow;
     }
 }

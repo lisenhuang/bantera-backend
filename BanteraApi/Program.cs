@@ -115,6 +115,7 @@ builder.Services.AddSingleton<IDialogueDurationPlanner, HistoricalDialogueDurati
 builder.Services.AddSingleton<GeminiVoiceCatalog>();
 builder.Services.AddHostedService<AdminAudioTestWorker>();
 builder.Services.AddSingleton<GeminiPaidFallback>();
+builder.Services.AddSingleton<GeminiRegularKeyStore>();
 builder.Services.AddSingleton<GeminiKeyHealthService>();
 builder.Services.AddSingleton<AiModelSettingsService>();
 builder.Services.AddSingleton<CueTimingSettingsService>();
@@ -3173,6 +3174,7 @@ BanteraApi.WebsiteAnalytics.WebsiteAnalyticsEndpoints.Map(app);
 BanteraApi.Profile.WordActivityEndpoints.Map(app);
 AiSettingsEndpoints.Map(app);
 GeminiPaidFallbackEndpoints.Map(app);
+GeminiRegularKeyEndpoints.Map(app);
 ChatGptConnectionEndpoints.Map(app);
 AiSearchTestEndpoint.Map(app);
 ChatCallSettingsEndpoints.Map(app);

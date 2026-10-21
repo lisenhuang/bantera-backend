@@ -1,5 +1,95 @@
 # Bantera deployment on Oracle AU
 
+## Gemini key dashboard and disk retention: 21 October 2026
+
+Release **bantera-20261021-3** is published with status **SUCCESS**. Backend
+**1.30.0** runs in `bantera-api-20261021-3` (loopback 18142), website
+**0.15.0** in `bantera-website-20261021-3` (loopback 13036), and connector
+`cloudflared-20261021-3` uses readiness port 12068. Both public version markers
+and authenticated `/dashboard/gemini-keys` rendering were verified. Candidate
+and public checks each passed 13 HTTP contracts, plus 12 candidate and 14 public
+key-dashboard checks. PostgreSQL backup: **6,035,687 bytes**.
+
+**GO for existing published apps:** additive admin endpoints, existing encrypted
+settings storage, no migration or new secret. No mobile update is required.
+The previous API 1.29.0, website 0.14.0 and their connector remain available for
+rollback without restoring the database:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261021-3/deploy.py rollback
+```
+
+Disk cleanup completed at **2026-10-21 02:44:56 UTC**. Available capacity rose
+from **3.5 GB / 194 GB (99% reported usage)** to **112 GB / 194 GB (43%)**.
+Across cleanup passes, 169 obsolete Bantera containers and 103 unused Bantera
+image tags were removed, along with disposable build caches, old extracted
+release copies and package download caches. Databases, volumes, uploads,
+backups, model caches and unrelated application containers were preserved.
+The first pass stopped on a root-owned generated build file; the corrected,
+bounded cleanup completed on retry. Logs and `cleanup-proof.json` remain in
+the release directory.
+
+The hourly `server-disk-guard.timer` is enabled and active; a manual service run
+returned success. Cleanup starts at 80% usage or below 30 GiB available.
+Builds require at least max(20 GiB, 10% capacity). New Bantera containers have
+10 MB x 3 log limits; the host journal is capped at 512 MB and 14 days. Current
+and one rollback release are protected. See [disk policy](server-build-retention.md).
+The guard records actionable failures in the journal; external alerts are not
+configured. Other applications must adopt the shared build lock and log policy
+in their future deployment procedures.
+
+After cleanup, both Bantera public versions returned 200; Evervault and V2en
+also returned 200. The unchanged shared route `cc.asxp.eu.org` returned 502
+and `tv.aify.nz` returned 404 at `/`; neither had a pre-cleanup HTTP baseline,
+so these results do not establish a new regression or a pre-existing failure.
+Their routing and application containers were preserved.
+
+No Git commit/push or store submission was performed.
+
+## AI Practice level context: 21 October 2026
+
+Release **bantera-20261021-2** completed at **2026-10-21 01:31:27 UTC**.
+Backend **1.29.0** runs in `bantera-api-20261021-2` (loopback 18141),
+through `cloudflared-20261021-2` (readiness 12067). Website **0.14.0** remains
+in `bantera-website-20261021-1`. Both public versions were independently
+verified; **156/156** monitored HTTP responses returned 200.
+
+**GO for existing published apps:** unchanged API contracts, no migrations,
+new settings, secrets or service registrations. Saved Practice level is read
+per authenticated account and learning language for AI messages, calls and
+reminders. Selected review level guides replies while preserving earned level.
+Session identity changes prevent resuming stale level instructions.
+
+Build and 617 AI/Practice tests passed (8 optional skips). Candidate runtime
+checks passed 13 HTTP contracts and 11 level-context checks against the actual
+candidate assembly/database, including A0 prompts, review selection, language
+and account isolation, fresh saved levels and resume identity. Synthetic records
+were enclosed in a rolled-back transaction. The same 13 HTTP contracts passed
+publicly. No provider speech quality or physical callback check was performed.
+
+Verified PostgreSQL backup: **5,949,920 bytes**. Source hashes, reviewed dirty
+paths, private runtime snapshots, proofs and controller remain in the release
+directory. The unchanged signed iOS **3.1.0 (421)** was installed successfully
+on the iPhone 17 Pro (CoreDevice sequence 2872), without launching or testing
+on the phone. Signature validation passed and no app source was newer than
+the signed build. No new app version is needed for the backend feature.
+
+During rollout, Japanese A0 waiting was diagnosed independently: one approved
+draft, zero ready exercises and zero saved audio clips. Six correlated audio
+runs failed with HTTP 429; the already-enabled paid fallback was attempted six
+times and also entered quota cooldown each time. This predates and persists
+across the release; no provider settings or billing were changed. The app polls
+every four seconds for up to three minutes; the worker retries failed demand
+after 90 seconds. This release does not resolve that provider-capacity issue.
+
+Rollback preserves current writes and restores A0-aware API 1.28.0:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261021-2/deploy.py rollback
+```
+
+No Git commit/push or store submission was performed.
+
 Bantera **backend, website and PostgreSQL database all run on Oracle AU (Melbourne)**. Use this host for future deployment requests; do not assume Oracle SG. Deploy only when explicitly requested. Last inspected: 7 October 2026.
 
 ## Connection and routing
@@ -2164,3 +2254,91 @@ Rollback preserves current database writes:
 ```bash
 python3 /home/ubuntu/releases/bantera-20261020-10/deploy.py rollback
 ```
+
+## Cantonese clock matching and iOS 3.0.0: 20 October 2026
+
+Backend **1.27.1**, release **bantera-20261020-14**, completed at
+**2026-10-20 10:08:32 UTC**. API `bantera-api-20261020-14` uses loopback
+18139; connector `cloudflared-20261020-14` readiness uses 12065.
+Website **0.13.3** remains in `bantera-website-20261020-13` on 13034.
+Both public domains and exact release versions were verified; all **160/160**
+availability samples returned HTTP 200 during handover and the stability window.
+
+The matcher accepts equivalent explicit Chinese half-past times (`6:30` and
+`六點半`) and the opening Cantonese affirmative `得啊` / `得呀`. Clock
+hour/minute order stays protected; different times, omitted times, negation and
+ambiguous or wholly uncertain speech remain rejected. Expanded clock characters
+do not count as additional reliable speech.
+
+**GO for existing published apps:** request/response shapes and authentication
+are unchanged. No database migration, new environment variable, secret or
+startup dependency is introduced. Build and **222 backend practice tests** passed.
+The candidate passed **138 authenticated matching/input-limit cases** and **13
+HTTP contract checks**. The public API passed all **24 newly added matching
+cases** and the same HTTP checks. Synthetic verification accounts and dialogues
+were removed in finally blocks; no real user's transcript or answer was changed.
+Candidate startup logs contained no error markers.
+
+Source is the reviewed working tree based on `00c58e6`, with only the matcher,
+normalizer, version and regression fixtures/tests changed. The immutable source
+archive checksum, dirty-file manifest, private runtime snapshots, verified
+**5,282,302-byte** database backup, controller and proof logs are retained in the
+release folder. No Git commit/push or paid-provider setting change was performed.
+
+The signed iOS app **3.0.0 (414)** was installed and launched on the physical
+iPhone 17 Pro. It includes the Goal tab progress ring, retargeted celebration,
+direct goal setup when no goal is saved, and matching normalization. Debug and
+release builds, signature verification, analysis and **176 app tests** passed,
+including callback/CallKit regressions. Physical locked-screen callback audio
+remains unverified.
+
+Previous API/connector remain available. Rollback preserves current database
+writes and restores API 1.27.0 with the same website:
+
+```bash
+python3 /home/ubuntu/releases/bantera-20261020-14/deploy.py rollback
+```
+
+## A0 beginner Practice: 21 October 2026
+
+Release **bantera-20261021-1** completed at **2026-10-20 23:58:00 UTC**
+(21 October NZDT). Backend **1.28.0** and website **0.14.0** are live in
+`bantera-api-20261021-1` (18140) and `bantera-website-20261021-1` (13035),
+through `cloudflared-20261021-1` (12066). Exact public versions and the A0 FAQ
+were independently verified. All **134/134** monitored HTTP samples returned 200.
+
+**GO for existing published app clients:** optional `supportsA0` gates the new
+level, existing A1–C2 stored numbers remain unchanged, and existing progress is
+preserved. No schema migration, new environment variable or secret. The database
+backup was verified at **5,831,909 bytes**. Runtime snapshots, source archives,
+hashes, build logs and proof files are retained in the release directory.
+
+Builds and **1,052 backend tests** passed (14 existing optional skips); website
+build and 12 tests passed. App practice, matching and required callback tests
+passed after correcting a stale `0.0%` expectation to the already-shipped `0%`.
+Candidate and public checks each passed 13 HTTP contracts and 13 A0 state/API
+contracts, including fresh A0 start, locked higher levels, legacy fallback,
+review selection and preserving/restoring earned progress.
+
+**Audio limitation:** the separate real A0 exercise/audio test did not pass.
+Google TTS returned quota errors for regular keys and the already-enabled paid
+fallback. A0 text was generated, but its audio remained pending. No key,
+provider/model setting or paid-fallback policy was changed. Contract proofs
+explicitly record `a0AudioReady: false`; they do not establish audio playback or
+end-to-end A0 answer/Next progression. Disposable verification accounts were
+removed on both success and interrupted generation checks. Existing per-language
+pools remain available; new generation depends on provider quota recovering.
+
+Signed iOS **3.1.0 (421)** passed debug/release builds and signature validation,
+and was installed on the iPhone 17 Pro (CoreDevice database sequence 2864).
+The app was not launched or tested on the phone. The user's confirmed boundary
+is automatic translated meanings at A0, counting toward A1; A1–C2 translations
+remain optional and exclude the exercise from level changes. Easier review never
+changes an already-earned level. Device translation availability still applies.
+
+Previous containers and connector are retained. **After real A0 progress is
+saved, rollback requires an A0-aware API build**; do not blindly restore 1.27.1,
+which indexes stored levels through the old six-level array. See
+[the compatibility and rollback notes](practice-a0.md). Never restore the old
+database as an application rollback. No Git commit/push or store submission was
+performed.

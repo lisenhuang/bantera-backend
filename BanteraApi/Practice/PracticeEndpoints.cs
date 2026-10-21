@@ -9,8 +9,8 @@ namespace BanteraApi.Practice;
 
 public static class PracticeEndpoints
 {
-    public sealed record NextRequest(Guid RequestId, string Locale, Guid? PreviousId, bool DeferLevelScoring = false, bool UseSelectedLevel = false);
-    public sealed record LevelRequest(string Locale, string Level);
+    public sealed record NextRequest(Guid RequestId, string Locale, Guid? PreviousId, bool DeferLevelScoring = false, bool UseSelectedLevel = false, bool SupportsA0 = false);
+    public sealed record LevelRequest(string Locale, string Level, bool SupportsA0 = false);
     public sealed record AnswerRequest(Guid AttemptId, string Transcript, string? Recognition);
     public static void Map(WebApplication app)
     {
@@ -40,13 +40,16 @@ public static class PracticeEndpoints
             var language = WordActivityEndpoints.NormalizeLanguage(locale);
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             await UserLock(db, userId, ct);
-            var progress = await Progress(db, userId, language, ct);
-            if (!PracticeRules.SelectLevel(progress, request.Level))
-                return Results.Json(new { code = "practice_level_locked", currentLevel = PracticeRules.Levels[progress.Level] }, statusCode: 409);
+            var progress = await Progress(db, userId, language, ct, request.SupportsA0);
+            // A legacy device can stay at A1 while another device is learning A0.
+            // Do not overwrite that device's saved beginner progress.
+            var legacyBeginner = !request.SupportsA0 && progress.Level == PracticeRules.BeginnerLevel && request.Level == "A1";
+            if ((!request.SupportsA0 && request.Level == "A0") || (!legacyBeginner && !PracticeRules.SelectLevel(progress, request.Level)))
+                return Results.Json(new { code = "practice_level_locked", currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, request.SupportsA0)) }, statusCode: 409);
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
-            worker.Request(new(userId, locale, language, PracticeRules.EffectiveLevel(progress)));
-            return Results.Ok(new { currentLevel = PracticeRules.Levels[progress.Level], practiceLevel = PracticeRules.Levels[PracticeRules.EffectiveLevel(progress)] });
+            worker.Request(new(userId, locale, language, PracticeRules.ClientLevel(PracticeRules.EffectiveLevel(progress), request.SupportsA0)));
+            return Results.Ok(new { currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, request.SupportsA0)), practiceLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(PracticeRules.EffectiveLevel(progress), request.SupportsA0)) });
         });
         group.MapPost("/next", async (NextRequest request, ClaimsPrincipal user, AppDbContext db, PracticeWorker worker, R2StorageService storage, CancellationToken ct) =>
         {
@@ -57,18 +60,19 @@ public static class PracticeEndpoints
             var language = WordActivityEndpoints.NormalizeLanguage(locale);
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             await UserLock(db, userId, ct);
-            var progress = await Progress(db, userId, language, ct);
+            var progress = await Progress(db, userId, language, ct, request.SupportsA0);
             var exposures = db.Set<PracticeExposure>().Where(x => x.Dialogue.ContentVersion == PracticeRules.ContentVersion);
             var existing = await db.Set<PracticeExposure>().Include(x => x.Dialogue)
                 .FirstOrDefaultAsync(x => x.UserId == userId && x.RequestId == request.RequestId, ct);
             if (existing is not null)
             {
-                if (existing.Dialogue.ContentVersion == PracticeRules.ContentVersion)
+                if (existing.Dialogue.ContentVersion == PracticeRules.ContentVersion && (request.SupportsA0 || existing.Dialogue.Level >= 0))
                 {
                     var existingProgress = existing.Dialogue.Language == language ? progress : await Progress(db, userId, existing.Dialogue.Language, ct);
-                    worker.RequestAhead(userId, existing.Dialogue.Locale, existing.Dialogue.Language, existingProgress, existing, request.UseSelectedLevel);
-                    return Results.Ok(Present(existing, storage, existingProgress));
+                    worker.RequestAhead(userId, existing.Dialogue.Locale, existing.Dialogue.Language, existingProgress, existing, request.UseSelectedLevel, request.SupportsA0);
+                    return Results.Ok(Present(existing, storage, existingProgress, request.SupportsA0));
                 }
+                if (existing.Dialogue.ContentVersion == PracticeRules.ContentVersion) return Results.Conflict();
                 // Release the unique request ID before replacing a retired exercise.
                 // A client can retry the same request after a content refresh.
                 db.Remove(existing);
@@ -81,12 +85,12 @@ public static class PracticeEndpoints
                 if (old is not null)
                 {
                     await db.Entry(old).Reference(x => x.Dialogue).LoadAsync(ct);
-                    PracticeRules.Finish(old, progress);
+                    PracticeRules.Finish(old, progress, request.SupportsA0);
                 }
             }
             else
             {
-                var active = await exposures.Include(x => x.Dialogue).Where(x => x.UserId == userId && x.FinishedAt == null && x.Dialogue.Locale == locale && (!request.UseSelectedLevel || x.Dialogue.Level == PracticeRules.EffectiveLevel(progress)) && (!x.ReviewMode || request.UseSelectedLevel))
+                var active = await exposures.Include(x => x.Dialogue).Where(x => x.UserId == userId && x.FinishedAt == null && x.Dialogue.Locale == locale && (request.SupportsA0 || x.Dialogue.Level >= 0) && (!request.UseSelectedLevel || x.Dialogue.Level == PracticeRules.ClientLevel(PracticeRules.EffectiveLevel(progress), request.SupportsA0)) && (!x.ReviewMode || request.UseSelectedLevel))
                     .OrderByDescending(x => x.SeenAt).FirstOrDefaultAsync(ct);
                 if (active is not null)
                 {
@@ -99,14 +103,14 @@ public static class PracticeEndpoints
                         active.DeferredScoring |= request.DeferLevelScoring;
                         await db.SaveChangesAsync(ct);
                         await tx.CommitAsync(ct);
-                        worker.RequestAhead(userId, locale, language, progress, active, request.UseSelectedLevel);
-                        return Results.Ok(Present(active, storage, progress));
+                        worker.RequestAhead(userId, locale, language, progress, active, request.UseSelectedLevel, request.SupportsA0);
+                        return Results.Ok(Present(active, storage, progress, request.SupportsA0));
                     }
                 }
             }
             if (await exposures.CountAsync(x => x.UserId == userId && x.SeenAt >= DateTime.UtcNow.Date, ct) >= 200)
                 return Results.Json(new { code = "practice_daily_limit" }, statusCode: 429);
-            var targetLevel = PracticeRules.EffectiveLevel(progress, request.UseSelectedLevel);
+            var targetLevel = PracticeRules.ClientLevel(PracticeRules.EffectiveLevel(progress, request.UseSelectedLevel), request.SupportsA0);
             var available = db.Set<PracticeDialogue>().Where(d => d.Locale == locale && d.Level == targetLevel && d.Ready && d.ContentVersion == PracticeRules.ContentVersion &&
                 !exposures.Any(e => e.UserId == userId && e.DialogueId == d.Id));
             var selected = await available.OrderBy(d => d.CreatedAt).FirstOrDefaultAsync(ct);
@@ -118,8 +122,8 @@ public static class PracticeEndpoints
             }
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
-            worker.RequestAhead(userId, locale, language, progress, exposure, request.UseSelectedLevel);
-            return exposure is null ? Results.Json(new { status = "preparing", retryAfterSeconds = 4, currentLevel = PracticeRules.Levels[progress.Level], practiceLevel = PracticeRules.Levels[targetLevel] }, statusCode: 202) : Results.Ok(Present(exposure, storage, progress));
+            worker.RequestAhead(userId, locale, language, progress, exposure, request.UseSelectedLevel, request.SupportsA0);
+            return exposure is null ? Results.Json(new { status = "preparing", retryAfterSeconds = 4, currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, request.SupportsA0)), practiceLevel = PracticeRules.LevelName(targetLevel) }, statusCode: 202) : Results.Ok(Present(exposure, storage, progress, request.SupportsA0));
         });
         group.MapPost("/{id:guid}/answer", async (Guid id, AnswerRequest request, ClaimsPrincipal user, AppDbContext db, PracticeWorker worker, CancellationToken ct) =>
         {
@@ -164,22 +168,22 @@ public static class PracticeEndpoints
     }
     private static Task<int> UserLock(AppDbContext db, Guid id, CancellationToken ct) =>
         db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({"practice-user:" + id}, 0))", ct);
-    private static async Task<PracticeProgress> Progress(AppDbContext db, Guid userId, string language, CancellationToken ct)
+    private static async Task<PracticeProgress> Progress(AppDbContext db, Guid userId, string language, CancellationToken ct, bool supportsA0 = false)
     {
         var p = await db.Set<PracticeProgress>().FindAsync([userId, language], ct);
         if (p is not null) return p;
-        p = new() { UserId = userId, Language = language }; db.Add(p); return p;
+        p = new() { UserId = userId, Language = language, Level = supportsA0 ? PracticeRules.BeginnerLevel : 0 }; db.Add(p); return p;
     }
-    private static object Present(PracticeExposure e, R2StorageService storage, PracticeProgress progress)
+    private static object Present(PracticeExposure e, R2StorageService storage, PracticeProgress progress, bool supportsA0)
     {
         var d = e.Dialogue;
         object Choice(string text, string key) => new { text, audioUrl = storage.GeneratePresignedUrl(key, TimeSpan.FromHours(4)) };
         var choices = new[] { Choice(d.Reply, d.ReplyAudio), Choice(d.Distractor, d.DistractorAudio) };
         if (e.Swap) Array.Reverse(choices);
-        return new { status = "ready", id = e.Id, locale = d.Locale, level = PracticeRules.Levels[d.Level], cue = d.Cue,
+        return new { status = "ready", id = e.Id, locale = d.Locale, level = PracticeRules.LevelName(d.Level), cue = d.Cue,
             cueAudioUrl = storage.GeneratePresignedUrl(d.CueAudio, TimeSpan.FromHours(4)), choices,
             deferredScoring = e.DeferredScoring, translationUsed = e.TranslationUsed,
-            currentLevel = PracticeRules.Levels[progress.Level], practiceLevel = PracticeRules.Levels[d.Level], reviewMode = e.ReviewMode };
+            currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, supportsA0)), practiceLevel = PracticeRules.LevelName(d.Level), reviewMode = e.ReviewMode };
     }
     private static object Feedback(PracticeAttempt a, PracticeExposure e) => new {
         outcome = a.Outcome, choice = a.Choice,

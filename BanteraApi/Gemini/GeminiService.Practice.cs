@@ -28,6 +28,18 @@ public partial class GeminiService
             return JsonSerializer.Deserialize<T>(json, JsonOpts) ?? throw new InvalidDataException("Invalid practice response.");
         }, ct);
     }
+    internal const string BeginnerPracticeInstruction =
+        "A0 is Bantera's starting-from-zero stage, informed by Pre-A1, not an official CEFR level. " +
+        "Assume little or no target-language knowledge, including no knowledge of its alphabet or writing system. " +
+        "Teach one concrete expression per exercise through greetings, names, thanks, familiar objects or basic needs. " +
+        "Use one word or a short fixed expression, usually 1-4 words in English; adapt naturally to other languages. " +
+        "Avoid subordinate clauses, idioms, abstract reasoning, implied intent, grammar terminology and subtle distractors. " +
+        "The audio and translated meanings are learning support before the spoken response. " +
+        "Do not require reading skill or prior cultural knowledge to understand the exchange when heard with its meaning. " +
+        "Use complete natural phrases, never broken grammar to shorten them. Do not invent a visual scene the learner cannot see. " +
+        "Examples of cue/reply: Hello./Hello.; Your name?/Anna.; Thank you./You're welcome. " +
+        "Keep the explanation to one simple sentence about the meaning. ";
+
     public Task<PracticeDraft[]> GeneratePracticeAsync(string locale, int level, string[] topics, object recent, CancellationToken ct) =>
         PracticeJsonAsync<PracticeDraft[]>("Create exactly five DISTINCT short, adult language-learning reply-selection exercises. " +
             "Return an array of objects {topic, meaningKey, cue, reply, distractor, explanation}. " +
@@ -38,16 +50,18 @@ public partial class GeminiService
             "All cue/reply/distractor/explanation text must use the requested regional language, not English translations. Keep explanations short and kind. " +
             "meaningKey is a concise English description of the communicative intent and answer relationship, ignoring names, places and interchangeable objects. " +
             "Use genuinely different intents and situations from recent material; do not just substitute nouns. Vocabulary may recur. " +
-            "Use the given CEFR difficulty, adapted naturally to the language. A1: very short concrete exchanges; A2: routine situations; B1: reasons and plans; B2: implications; C1/C2: pragmatic nuance while keeping each utterance under 45 words. " +
+            "Use the given practice difficulty, adapted naturally to the language. A1: very short concrete exchanges; A2: routine situations; B1: reasons and plans; B2: implications; C1/C2: pragmatic nuance while keeping each utterance under 45 words. " +
+            (level == PracticeRules.BeginnerLevel ? BeginnerPracticeInstruction : "") +
             "Self-check that only the reply fits before returning. " + AccentInstructions.GetValueOrDefault(locale, $"Use natural language for {locale}."),
-            new { locale, level = PracticeRules.Levels[level], topics, recent }, ct);
+            new { locale, level = PracticeRules.LevelName(level), topics, recent }, ct);
 
     public Task<int[]> ValidatePracticeAsync(string locale, int level, object candidates, CancellationToken ct) =>
         PracticeJsonAsync<int[]>("Independently review the supplied language exercises and nearby existing exercises. " +
-            "Return ONLY a JSON array of the candidate indices that pass ALL checks: correct locale and CEFR difficulty; exactly one suitable reply; " +
+            "Return ONLY a JSON array of the candidate indices that pass ALL checks: correct locale and requested practice difficulty; exactly one suitable reply; " +
             "each cue and each choice is a single person speaking a single turn, with no speaker labels or embedded conversation; cue never answers its own question; " +
             "distractor clearly mismatches context; natural, safe adult content; distinct from nearby exercises and other candidates in meaning. " +
-            "Reject paraphrases or exchanges that merely change names or objects. Repeated vocabulary in a different communicative situation is fine.",
-            new { locale, level = PracticeRules.Levels[level], candidates }, ct);
+            "Reject paraphrases or exchanges that merely change names or objects. Repeated vocabulary in a different communicative situation is fine. " +
+            (level == PracticeRules.BeginnerLevel ? BeginnerPracticeInstruction + "Reject exercises that require A1 sentence comprehension or several new concepts." : ""),
+            new { locale, level = PracticeRules.LevelName(level), candidates }, ct);
 
 }

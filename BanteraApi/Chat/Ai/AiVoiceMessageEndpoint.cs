@@ -49,6 +49,7 @@ public static class AiVoiceMessageEndpoint
             model = await settings.GetModelAsync(lifetime.Token);
             voice = await settings.GetVoiceAsync(lifetime.Token);
             var reasoning = await settings.GetReasoningAsync(model, lifetime.Token);
+            metadata = await AiPracticeContext.LoadAsync(db, user, metadata, lifetime.Token);
             phase = "stream";
             var replyTask = live.StreamReplyAsync(model, user, input, history, snapshot,
                 metadata, voice,
