@@ -23,7 +23,7 @@ public sealed class AiCallbackService(AppDbContext db, IOptions<ApnsSettings> ap
         "Do not guess live facts, pretend you searched, or claim to know current weather without a search. Earlier search results in history are not a fresh lookup. " +
         "Do not schedule another phone callback as a way to search. Let the learner choose whether to switch; do not end this call or claim to have opened the app for them. Continue ordinary conversation when they wish. ";
     public const string Identity = "ba07e2a0-a100-4000-8000-000000000001";
-    public static readonly string[] ToolNames = ["get_current_time", "schedule_callback", "schedule_reminder", "list_callbacks", "cancel_callback"];
+    public static readonly string[] ToolNames = ["get_current_time", "schedule_callback", "schedule_reminder", "list_callbacks", "cancel_callback", AiBugReportTool.Name];
     public static object[] Declarations => [
         new { name = "get_current_time", description = "Get trusted current time in the learner's timezone before interpreting an absolute callback time.", parameters = new { type = "OBJECT", properties = new { } } },
         new { name = "schedule_callback", description = "Schedule a Bantera AI audio call that rings this iPhone, even when requested through a voice message. Use ONLY when the learner explicitly asks you to call them later AND has told you what to remind them about. If they only give a time, ask what to remind them about and wait for their answer; do not schedule yet. Do not invent a reminder or assume language practice. Use delaySeconds for relative requests, e.g. 60 for one minute, OR atUtc for an explicit time converted using get_current_time. Ask if ambiguous. Confirm only when the tool succeeds. The server stores the schedule and short reminder; delivery needs connectivity and this iOS device's call notifications. Never promise exact delivery.", parameters = new { type = "OBJECT", properties = new { explicitCallRequested = new { type = "BOOLEAN", description = "True ONLY when the learner explicitly requested a phone/audio call, not just a reminder." }, reminder = new { type = "STRING", description = "The reminder requested by the learner, 1 to 500 characters. Required; never invent it." }, delaySeconds = new { type = "INTEGER", description = "Seconds from now; 10 to 2592000." }, atUtc = new { type = "STRING", description = "ISO 8601 UTC timestamp, alternative to delaySeconds." } }, required = new[] { "reminder", "explicitCallRequested" } } },
@@ -53,6 +53,7 @@ public sealed class AiCallbackService(AppDbContext db, IOptions<ApnsSettings> ap
     }
     public async Task<object> ExecuteAsync(Guid user, AiClientMetadata meta, string requestKey, string name, JsonElement args, CancellationToken ct)
     {
+        if (name == AiBugReportTool.Name) return await AiBugReportTool.ExecuteAsync(db, user, meta, args, ct);
         var scheduling = name is "schedule_callback" or "schedule_reminder";
         async Task Log(string outcome) {
             if (scheduling && diagnostics is not null)

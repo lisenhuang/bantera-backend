@@ -29,6 +29,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<OAuthAuthorizationCode> OAuthAuthorizationCodes => Set<OAuthAuthorizationCode>();
     public DbSet<OAuthRefreshToken> OAuthRefreshTokens => Set<OAuthRefreshToken>();
     public DbSet<McpAuditLog> McpAuditLogs => Set<McpAuditLog>();
+    public DbSet<AiBugReport> AiBugReports => Set<AiBugReport>();
     public DbSet<AiCallback> AiCallbacks => Set<AiCallback>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<AiPipelineEvent> AiPipelineEvents => Set<AiPipelineEvent>();
@@ -78,6 +79,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne<PracticeExposure>().WithMany().HasForeignKey(x => x.ExposureId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        b.Entity<AiBugReport>(e => {
+            e.ToTable("ai_bug_reports"); e.HasKey(x => x.Id);
+            e.Property(x => x.Summary).HasMaxLength(160);
+            e.Property(x => x.Details).HasMaxLength(4000);
+            e.Property(x => x.Category).HasMaxLength(32);
+            e.Property(x => x.Source).HasMaxLength(32);
+            e.Property(x => x.ConsentQuote).HasMaxLength(500);
+            e.Property(x => x.DedupeKey).HasMaxLength(64);
+            e.HasIndex(x => new { x.UserId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.CreatedAt, x.Id });
+            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
         b.Entity<AiCallback>(e => {
             e.ToTable("ai_callbacks"); e.HasKey(x => x.Id);
             e.Property(x => x.RequestKey).HasMaxLength(200);

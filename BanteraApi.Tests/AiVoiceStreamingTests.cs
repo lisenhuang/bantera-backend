@@ -11,6 +11,56 @@ namespace BanteraApi.Tests;
 public class AiVoiceStreamingTests
 {
     [Fact]
+    public async Task ExplicitTextTurnCommitsTextWithoutMicrophoneFrames()
+    {
+        using var socket = new Socket();
+        var input = new AiVoiceInput(textOnly: true);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        const string text = "Explain 行 in 銀行在哪裡？";
+        Assert.False(input.SpeechDetected.IsCompleted);
+        input.Commit(Metadata, text);
+        Assert.True(await input.SpeechDetected);
+        Assert.Equal(0, input.ByteCount);
+        Assert.Equal(text, input.Text);
+        await GeminiLiveService.UploadTranscriptAsync(socket, input, input.Text!, timeout.Token);
+        using var frame = JsonDocument.Parse(await socket.Sent.Reader.ReadAsync(timeout.Token));
+        var content = frame.RootElement.GetProperty("clientContent");
+        Assert.True(content.GetProperty("turnComplete").GetBoolean());
+        var parts = content.GetProperty("turns")[0].GetProperty("parts");
+        Assert.Contains("user sent the text", parts[0].GetProperty("text").GetString());
+        Assert.Equal(text, parts[1].GetProperty("text").GetString());
+        Assert.False(socket.Sent.Reader.TryRead(out _));
+        var chunks = new List<byte[]>();
+        await foreach (var chunk in input.ReadAsync(timeout.Token)) chunks.Add(chunk);
+        Assert.Empty(chunks);
+    }
+
+    [Fact]
+    public async Task VoiceSilenceCannotBeBypassedBySupplyingText()
+    {
+        var voice = new AiVoiceInput();
+        Assert.Throws<InvalidDataException>(() => voice.Commit(Metadata, "invented transcript"));
+        voice.Commit(Metadata);
+        Assert.False(await voice.SpeechDetected);
+        Assert.Null(voice.Text);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void TextRequiresNonemptyBoundedInput(string? text)
+    {
+        var input = new AiVoiceInput(textOnly: true);
+        Assert.Throws<InvalidDataException>(() => input.Commit(Metadata, text));
+        Assert.Throws<InvalidDataException>(() => input.Commit(Metadata, new string('a', AiVoiceInput.MaxTextLength + 1)));
+        Assert.Throws<InvalidDataException>(() => input.Add(new byte[320]));
+        Assert.False(input.Committed.IsCompleted);
+        Assert.False(input.SpeechDetected.IsCompleted);
+        Assert.Throws<InvalidDataException>(() => new AiVoiceInput([new("image/png", "a")], textOnly: true));
+    }
+
+    [Fact]
     public async Task ImagesArePacedWhileAudioStreamsAndCommitWaitsForAllImages()
     {
         using var socket = new Socket();

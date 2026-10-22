@@ -19,6 +19,23 @@ public class SpeakingLeaderboardTests
         Assert.Equal(DateOnly.Parse(from), window.From);
         Assert.Equal(DateOnly.Parse(through), window.Through);
     }
+    [Theory]
+    [InlineData("2026-10-22T00:00:00Z", "2026-09-23")]
+    [InlineData("2026-01-01T00:00:00Z", "2025-12-03")]
+    [InlineData("2024-03-01T23:59:59Z", "2024-02-01")]
+    public void ThirtyDayWindowIncludesTodayAndPreviousTwentyNineDays(string now, string from)
+    {
+        var window = SpeakingLeaderboardService.Window(DateTime.Parse(now).ToUniversalTime(), 30);
+        Assert.Equal(DateOnly.Parse(from), window.From);
+        Assert.Equal(29, window.Through.DayNumber - window.From.DayNumber);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(31)]
+    public void InvalidWindowIsRejected(int days) =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => SpeakingLeaderboardService.Window(DateTime.UtcNow, days));
+
     [Fact]
     public void SnapshotValidationRejectsDuplicateLanguageAliasesAndInvalidCounts()
     {
@@ -82,6 +99,17 @@ public class SpeakingLeaderboardTests
         Assert.Equal("Learner 1", report.Rows[0].Name); Assert.Equal(12450, report.Rows[0].SpokenWords);
         Assert.False(report.Rows[0].ProfileHidden);
         Assert.Equal("fr", report.Rows[0].LearningLanguage);
+        await db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO user_word_activity VALUES
+            ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','2026-09-22',0,7),
+            ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','2026-09-21',0,999999);
+            """);
+        var monthly = await service.GetAsync(me, new DefaultHttpContext(), default, now, days: 30);
+        Assert.Equal(new DateOnly(2026, 9, 22), monthly.FromDate);
+        Assert.Equal(12450 + 999999 + 7, monthly.Rows[0].SpokenWords);
+        Assert.Equal(1, monthly.Rows[0].Rank);
+        var legacy = await service.GetAsync(me, new DefaultHttpContext(), default, now);
+        Assert.Equal(12450, legacy.Rows[0].SpokenWords);
         await db.Database.ExecuteSqlRawAsync("""
             INSERT INTO speaking_devices VALUES ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001',null);
             INSERT INTO speaking_days VALUES ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','2026-10-21','ja',100);

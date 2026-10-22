@@ -110,12 +110,13 @@ public static class BanteraAiEndpoints
             var file = form.Files.GetFile("audio");
             if (text.Length > 4000 || (file is null && text.Length == 0) || (file is not null && (text.Length > 0 || file.Length > 10 * 1024 * 1024)))
                 return Results.BadRequest();
+            metadata = metadata with { ReportSource = file is null ? "text_chat" : "voice_message" };
             var pcm = file is null ? Array.Empty<byte>() : await AiAudioCodec.ReadPcmAsync(file, timeout.Token, allowEmptyRecording: acceptNoSpeech);
             inputBytes = pcm.Length;
             model = await settings.GetModelAsync(timeout.Token);
             metadata = await AiPracticeContext.LoadAsync(db, user, metadata, timeout.Token);
             var reply = await live.ReplyAsync(model, user, pcm, history, timeout.Token, text, snapshot, metadata, call => callbacks.ExecuteAsync(userId, metadata, requestId.ToString(), call.GetProperty("name").GetString()!, call.GetProperty("args"), timeout.Token), voice: await settings.GetVoiceAsync(timeout.Token), reasoning: await settings.GetReasoningAsync(model, timeout.Token));
-            // No database/R2 write: the client owns all history and audio persistence.
+            // The client owns history/audio; consented bug reports and schedules are stored separately.
             return Results.Ok(new { audio = Convert.ToBase64String(AiAudioCodec.Wave(reply.Pcm)),
                 inputText = text.Length > 0 ? text : reply.InputText, outputText = reply.OutputText });
         }
@@ -163,6 +164,7 @@ public static class BanteraAiEndpoints
             if (!start.RootElement.TryGetProperty("type", out var type) || type.GetString() != "start") throw new InvalidDataException();
             var history = AiCallPolicy.ReadHistory(start.RootElement.TryGetProperty("history", out var h) ? h.GetRawText() : null);
             var metadata = AiClientMetadata.Read(start.RootElement.TryGetProperty("metadata", out var m) ? m.GetRawText() : null);
+            metadata = metadata with { ReportSource = "live_call" };
             var resuming = start.RootElement.TryGetProperty("resuming", out var resume) && resume.ValueKind == System.Text.Json.JsonValueKind.True;
             if (resuming) metadata = metadata with { HasMetBanteraAi = true };
             var duration = resuming && start.RootElement.TryGetProperty("remainingSeconds", out var seconds) && seconds.TryGetInt32(out var requested)

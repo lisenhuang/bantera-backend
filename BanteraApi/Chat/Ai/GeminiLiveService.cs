@@ -49,7 +49,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             model = "models/" + model,
             contextWindowCompression = new { slidingWindow = new { } },
             generationConfig = AiLiveModelPolicy.GenerationConfig(model, voice, reasoning),
-            systemInstruction = new { parts = new[] { new { text = prompt + AiCallbackService.CapabilityPolicy + AiConversationTiming.LatestMessagePolicy + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (deviceVocabulary ? AiVocabularyTool.Prompt + (vocabularyVersion >= 2 ? AiVocabularyTool.ReadPrompt : "") : "") + (deviceEmojis ? AiEmojiTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
+            systemInstruction = new { parts = new[] { new { text = prompt + AiBugReportTool.Prompt + AiCallbackService.CapabilityPolicy + AiConversationTiming.LatestMessagePolicy + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (deviceVocabulary ? AiVocabularyTool.Prompt + (vocabularyVersion >= 2 ? AiVocabularyTool.ReadPrompt : "") : "") + (deviceEmojis ? AiEmojiTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
             tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model, deviceWebSearch, deviceVocabulary, deviceEmojis, vocabularyVersion) } },
             inputAudioTranscription = new { }, outputAudioTranscription = new { },
             realtimeInputConfig = new { automaticActivityDetection = voiceMessage
@@ -74,7 +74,8 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         // A fresh session learns its background reference once, in setup. Sending
         // this as an unfinished user turn makes old questions part of new audio input.
         var prompt = resumeHandle is null
-            ? BanteraAiIdentity.Prompt(user) + current.LevelPrompt + AiCallPolicy.IntroductionPolicy(metadata, history, voiceMessage) +
+            ? BanteraAiIdentity.Prompt(user, allowCallLanguageSwitch: current.PhoneCallback) + current.LevelPrompt + AiCallPolicy.IntroductionPolicy(metadata, history, voiceMessage) +
+              AiCapabilityGuide.Prompt(current, history) +
               current.TimePrompt + AiConversationTiming.Prompt(history, current.Clock) +
               (voiceMessage ? AiConversationTiming.VoiceReplyDirective(history, current.Clock, DateTimeOffset.UtcNow) : "") +
               AiConversationTiming.HistoryPrompt(history) + (current.PhoneCallback ? AiCallbackService.PhoneSearchPolicy : "")
@@ -258,7 +259,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             void Annotate(Exception ex) {
                 foreach (var (name, count) in providerEvents) ex.Data[name] = count;
             }
-            var transcriptRecovery = input.Images.Count == 0 && recovering && !string.IsNullOrWhiteSpace(capturedInput) ? capturedInput : null;
+            var transcriptRecovery = input.Text ?? (input.Images.Count == 0 && recovering && !string.IsNullOrWhiteSpace(capturedInput) ? capturedInput : null);
             var attemptInput = new StringBuilder();
             // A transcription proves the audio reached Gemini. On a silent
             // attempt, commit that utterance as a text turn to the SAME Live
@@ -320,7 +321,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         var metadata = await input.Committed.WaitAsync(ct);
         await SendAsync(socket, new { clientContent = new {
             turns = new[] { new { role = "user", parts = new[] {
-                new { text = "[A completed voice message is transcribed below. Answer it aloud once; do not discuss this delivery instruction.]" + AiConversationTiming.CurrentVoiceContext(history ?? [], metadata) },
+                new { text = (input.TextOnly ? "[The user sent the text below. Answer it aloud once; do not discuss this delivery instruction.]" : "[A completed voice message is transcribed below. Answer it aloud once; do not discuss this delivery instruction.]") + AiConversationTiming.CurrentVoiceContext(history ?? [], metadata) },
                 new { text = transcript }
             } } }, turnComplete = true
         } }, ct);

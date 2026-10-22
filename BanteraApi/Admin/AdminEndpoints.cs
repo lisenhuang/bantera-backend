@@ -19,6 +19,12 @@ public static class AdminEndpoints
             return Results.Ok(await rankings.GetAsync(period, metric, limit, offset, ct));
         }).WithName("AdminWordRankings");
 
+        group.MapGet("/bug-reports", async (BanteraApi.Database.AppDbContext db, HttpResponse response,
+            CancellationToken ct, int limit = 20, int offset = 0) => {
+            response.Headers.CacheControl = "private, no-store";
+            return Results.Ok(await AdminBugReports.ListAsync(db, limit, offset, ct));
+        }).WithName("AdminBugReports");
+
         // GET /api/admin/stats
         group.MapGet("/stats", async (AdminService admin) =>
         {

@@ -41,9 +41,12 @@ public static class AiVoiceMessageEndpoint
             var metadata = AiClientMetadata.Read(root.TryGetProperty("metadata", out var m) ? m.GetRawText() : null);
             var streamTranscripts = WantsTranscripts(root);
             acceptNoSpeech = WantsNoSpeech(root);
-            input = new AiVoiceInput(AiVoiceImages.Read(root));
+            var inputMode = root.TryGetProperty("inputMode", out var mode) ? mode.GetString() : "audio";
+            if (inputMode is not ("audio" or "text")) throw new InvalidDataException();
+            metadata = metadata with { ReportSource = inputMode == "text" ? "text_chat" : "voice_message" };
+            input = new AiVoiceInput(AiVoiceImages.Read(root), textOnly: inputMode == "text");
             lifetime.CancelAfter(TimeSpan.FromSeconds(190));
-            await GeminiLiveService.SendAsync(client, new { type = "ready", acceptImages = true }, lifetime.Token);
+            await GeminiLiveService.SendAsync(client, new { type = "ready", acceptImages = true, acceptText = true }, lifetime.Token);
             var deviceTools = (metadata.DeviceWebSearch || metadata.DeviceVocabulary || metadata.DeviceEmojis) ? new AiVoiceDeviceTools() : null;
             receive = ReceiveRecordingAsync(client, input, lifetime, deviceTools);
             model = await settings.GetModelAsync(lifetime.Token);
@@ -59,7 +62,7 @@ public static class AiVoiceMessageEndpoint
                         return deviceTools is null ? new { unavailable = true } : await deviceTools.InvokeAsync(call,
                             frame => GeminiLiveService.SendAsync(client, frame, lifetime.Token), lifetime.Token);
                     if (name is "schedule_callback" or "schedule_reminder") schedulingAttempts++;
-                    return await callbacks.ExecuteAsync(userId, await input.Committed, requestId.ToString(),
+                    return await callbacks.ExecuteAsync(userId, (await input.Committed) with { ReportSource = metadata.ReportSource }, requestId.ToString(),
                         name, call.GetProperty("args"), lifetime.Token);
                 },
                 async bytes => {
@@ -149,7 +152,8 @@ public static class AiVoiceMessageEndpoint
                 continue;
             }
             if (committed || json.RootElement.GetProperty("type").GetString() != "commit") throw new InvalidDataException();
-            input.Commit(AiClientMetadata.Read(json.RootElement.GetProperty("metadata").GetRawText()));
+            input.Commit(AiClientMetadata.Read(json.RootElement.GetProperty("metadata").GetRawText()),
+                json.RootElement.TryGetProperty("text", out var text) ? text.GetString() : null);
             committed = true;
             lifetime.CancelAfter(TimeSpan.FromSeconds(100));
             // Keep reading to detect a cancelled/closed client during generation.

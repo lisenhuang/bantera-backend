@@ -32,16 +32,17 @@ public sealed class SpeakingSqlRow
 
 public sealed class SpeakingLeaderboardService(AppDbContext db, LinkGenerator links, IOptions<JwtSettings> settings)
 {
-    public static (DateOnly From, DateOnly Through) Window(DateTime utcNow)
+    public static (DateOnly From, DateOnly Through) Window(DateTime utcNow, int days = 7)
     {
+        if (days is not (7 or 30)) throw new ArgumentOutOfRangeException(nameof(days));
         var today = DateOnly.FromDateTime(utcNow.ToUniversalTime());
-        return (today.AddDays(-6), today);
+        return (today.AddDays(1 - days), today);
     }
 
-    public async Task<SpeakingReport> GetAsync(Guid owner, HttpContext context, CancellationToken ct, DateTime? at = null, int offset = 0)
+    public async Task<SpeakingReport> GetAsync(Guid owner, HttpContext context, CancellationToken ct, DateTime? at = null, int offset = 0, int days = 7)
     {
         var now = at ?? DateTime.UtcNow;
-        var (from, through) = Window(now);
+        var (from, through) = Window(now, days);
         var end = offset + 100;
         var rows = await db.Database.SqlQuery<SpeakingSqlRow>($"""
             WITH activity AS (
@@ -101,11 +102,12 @@ public static class SpeakingLeaderboardEndpoints
 
     public static void Map(WebApplication app)
     {
-        app.MapGet("/api/speaking-leaderboard", async (ClaimsPrincipal user, SpeakingLeaderboardService service, HttpContext context, int? offset, CancellationToken ct) => {
+        app.MapGet("/api/speaking-leaderboard", async (ClaimsPrincipal user, SpeakingLeaderboardService service, HttpContext context, int? offset, int? days, CancellationToken ct) => {
             if (Owner(user) is not { } owner) return Results.Unauthorized();
             if (offset is < 0 or > 10000000) return Results.BadRequest(new { message = "Invalid ranking page." });
+            if (days is not (null or 7 or 30)) return Results.BadRequest(new { message = "Invalid ranking period." });
             context.Response.Headers.CacheControl = "no-store";
-            return Results.Ok(await service.GetAsync(owner, context, ct, offset: offset ?? 0));
+            return Results.Ok(await service.GetAsync(owner, context, ct, offset: offset ?? 0, days: days ?? 7));
         }).RequireAuthorization();
         // Retain the previous development client's route without accepting a hide
         // request that this release no longer supports. Existing preferences stay stored.

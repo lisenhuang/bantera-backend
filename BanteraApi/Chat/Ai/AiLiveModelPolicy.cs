@@ -33,7 +33,7 @@ public static class AiLiveModelPolicy
         .Concat(deviceWebSearch ? new[] { AiWebSearchTool.Declaration } : Array.Empty<object>())
         .Concat(deviceVocabulary ? new[] { AiVocabularyTool.DeclarationFor(vocabularyVersion) } : Array.Empty<object>())
         .Concat(deviceEmojis ? new[] { AiEmojiTool.Declaration } : Array.Empty<object>())
-        .Concat(AiCallbackService.Declarations).Select(tool => {
+        .Concat(AiCallbackService.Declarations).Append(AiBugReportTool.Declaration).Select(tool => {
             var declaration = JsonSerializer.SerializeToNode(tool)!.AsObject();
             // Older models use blocking tools implicitly and may reject this
             // optional field. Extended Thinking rejects BLOCKING outright.

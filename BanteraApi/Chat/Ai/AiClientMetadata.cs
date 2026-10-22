@@ -10,6 +10,8 @@ public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? Ha
     // Set only by the server's callback path, never by client metadata.
     [System.Text.Json.Serialization.JsonIgnore]
     public bool PhoneCallback { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string ReportSource { get; init; } = "voice_message";
 
     public static AiClientMetadata Read(string? json)
     {
