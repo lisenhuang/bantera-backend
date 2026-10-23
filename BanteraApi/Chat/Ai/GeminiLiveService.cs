@@ -23,11 +23,31 @@ public sealed record AiContextTurn(string Role, string Text, DateTimeOffset? Cre
     string? TimeZone = null,
     [property: System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)] int? UtcOffsetMinutes = null, string? ResumeText = null, string? ContextKind = null);
 
-// One active AI operation per account. Entries are removed, not retained forever.
+// Calls and legacy clients remain exclusive. New voice-message clients may
+// finish earlier replies while sending another message, with bounded concurrency.
 public sealed class BanteraAiSessions
 {
-    private readonly ConcurrentDictionary<Guid, byte> active = new();
-    public IDisposable? TryEnter(Guid user) => active.TryAdd(user, 0) ? new Lease(() => active.TryRemove(user, out _)) : null;
+    private readonly object gate = new();
+    private readonly Dictionary<Guid, int> active = new();
+    public IDisposable? TryEnter(Guid user) => Enter(user, false);
+    public IDisposable? TryEnterVoice(Guid user) => Enter(user, true);
+    private IDisposable? Enter(Guid user, bool overlap)
+    {
+        lock (gate)
+        {
+            var count = active.GetValueOrDefault(user);
+            if (overlap ? count < 0 || count >= 3 : count != 0) return null;
+            active[user] = overlap ? count + 1 : -1;
+            return new Lease(() => {
+                lock (gate)
+                {
+                    var remaining = active[user] - 1;
+                    if (remaining <= 0) active.Remove(user);
+                    else active[user] = remaining;
+                }
+            });
+        }
+    }
     private sealed class Lease(Action release) : IDisposable
     {
         private Action? callback = release;

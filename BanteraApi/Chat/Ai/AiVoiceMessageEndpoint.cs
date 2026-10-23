@@ -14,7 +14,8 @@ public static class AiVoiceMessageEndpoint
         if (!Guid.TryParse(context.User.FindFirst("sub")?.Value, out var userId)) { context.Response.StatusCode = 401; return; }
         var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId && u.DeletedAt == null && u.Status == "active", context.RequestAborted);
         if (user is null || ChatLanguageResolver.Resolve(user.LearningLanguage) is null) { context.Response.StatusCode = 403; return; }
-        using var lease = sessions.TryEnter(userId);
+        using var lease = context.Request.Query["overlap"] == "1"
+            ? sessions.TryEnterVoice(userId) : sessions.TryEnter(userId);
         if (lease is null) { context.Response.StatusCode = 429; return; }
         using var client = await context.WebSockets.AcceptWebSocketAsync();
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
