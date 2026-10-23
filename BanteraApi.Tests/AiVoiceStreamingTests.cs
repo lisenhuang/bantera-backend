@@ -360,6 +360,8 @@ public class AiVoiceStreamingTests
     [InlineData(true, "schedule_callback")]
     [InlineData(false, "send_emojis")]
     [InlineData(true, "send_emojis")]
+    [InlineData(false, "display_formatted_text")]
+    [InlineData(true, "display_formatted_text")]
     public async Task ToolTurnCompletionWaitsForSpokenConfirmation(bool preamble, string toolName)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));

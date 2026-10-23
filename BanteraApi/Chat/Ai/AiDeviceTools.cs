@@ -41,7 +41,7 @@ public sealed class AiPendingTools
         foreach (var call in calls.EnumerateArray()) {
             var name = call.GetProperty("name").GetString()!;
             var id = call.GetProperty("id").GetString()!;
-            if ((!AiDeviceTools.Names.Contains(name) && name != AiWebSearchTool.Name && name != AiVocabularyTool.Name && name != AiEmojiTool.Name) || id.Length > 200 || pending.Count >= 10) throw new InvalidDataException();
+            if ((!AiDeviceTools.Names.Contains(name) && name != AiWebSearchTool.Name && name != AiVocabularyTool.Name && name != AiEmojiTool.Name && name != AiFormattedTextTool.Name) || id.Length > 200 || pending.Count >= 10) throw new InvalidDataException();
             if (!pending.TryAdd(id, name)) throw new InvalidDataException();
         }
     }

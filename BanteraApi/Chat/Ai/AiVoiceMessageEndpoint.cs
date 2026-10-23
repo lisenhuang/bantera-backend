@@ -48,7 +48,7 @@ public static class AiVoiceMessageEndpoint
             input = new AiVoiceInput(AiVoiceImages.Read(root), textOnly: inputMode == "text");
             lifetime.CancelAfter(TimeSpan.FromSeconds(190));
             await GeminiLiveService.SendAsync(client, new { type = "ready", acceptImages = true, acceptText = true }, lifetime.Token);
-            var deviceTools = (metadata.DeviceWebSearch || metadata.DeviceVocabulary || metadata.DeviceEmojis) ? new AiVoiceDeviceTools() : null;
+            var deviceTools = (metadata.DeviceWebSearch || metadata.DeviceVocabulary || metadata.DeviceEmojis || metadata.DeviceFormattedText) ? new AiVoiceDeviceTools() : null;
             receive = ReceiveRecordingAsync(client, input, lifetime, deviceTools);
             model = await settings.GetModelAsync(lifetime.Token);
             voice = await settings.GetVoiceAsync(lifetime.Token);
@@ -59,7 +59,7 @@ public static class AiVoiceMessageEndpoint
                 metadata, voice,
                 async call => {
                     var name = call.GetProperty("name").GetString()!;
-                    if (name is AiWebSearchTool.Name or AiVocabularyTool.Name or AiEmojiTool.Name)
+                    if (name is AiWebSearchTool.Name or AiVocabularyTool.Name or AiEmojiTool.Name or AiFormattedTextTool.Name)
                         return deviceTools is null ? new { unavailable = true } : await deviceTools.InvokeAsync(call,
                             frame => GeminiLiveService.SendAsync(client, frame, lifetime.Token), lifetime.Token);
                     if (name is "schedule_callback" or "schedule_reminder") schedulingAttempts++;

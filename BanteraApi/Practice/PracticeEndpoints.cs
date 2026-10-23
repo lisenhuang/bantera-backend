@@ -125,6 +125,34 @@ public static class PracticeEndpoints
             worker.RequestAhead(userId, locale, language, progress, exposure, request.UseSelectedLevel, request.SupportsA0);
             return exposure is null ? Results.Json(new { status = "preparing", retryAfterSeconds = 4, currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, request.SupportsA0)), practiceLevel = PracticeRules.LevelName(targetLevel) }, statusCode: 202) : Results.Ok(Present(exposure, storage, progress, request.SupportsA0));
         });
+        // Saved reviews reuse the owned content, but never mutate the original
+        // exposure or progression. Presentation always refreshes signed audio URLs.
+        group.MapPost("/{id:guid}/review", async (Guid id, ClaimsPrincipal user, AppDbContext db, R2StorageService storage, CancellationToken ct) =>
+        {
+            var userId = Guid.Parse(user.FindFirstValue("sub")!);
+            var source = await db.Set<PracticeExposure>().AsNoTracking().Include(x => x.Dialogue)
+                .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
+            if (source is null) return Results.NotFound();
+            if (!source.Dialogue.Ready || source.Dialogue.ContentVersion != PracticeRules.ContentVersion)
+                return Results.Json(new { code = "practice_retired" }, statusCode: 410);
+            var progress = await db.Set<PracticeProgress>().AsNoTracking()
+                .FirstOrDefaultAsync(x => x.UserId == userId && x.Language == source.Dialogue.Language, ct)
+                ?? new PracticeProgress { Level = source.Dialogue.Level };
+            return Results.Ok(Present(source, storage, progress, supportsA0: true, savedReview: true));
+        });
+        group.MapPost("/{id:guid}/review/answer", async (Guid id, AnswerRequest request, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) =>
+        {
+            if (request.AttemptId == Guid.Empty || request.Transcript is null || request.Transcript.Length > 1200 || request.Recognition?.Length > 600)
+                return Results.BadRequest();
+            var userId = Guid.Parse(user.FindFirstValue("sub")!);
+            var source = await db.Set<PracticeExposure>().AsNoTracking().Include(x => x.Dialogue)
+                .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
+            if (source is null) return Results.NotFound();
+            if (!source.Dialogue.Ready || source.Dialogue.ContentVersion != PracticeRules.ContentVersion)
+                return Results.Json(new { code = "practice_retired" }, statusCode: 410);
+            var judgement = PracticeAnswerMatcher.Judge(source.Dialogue, source.Swap, request.Transcript, request.Recognition);
+            return Results.Ok(Feedback(new PracticeAttempt { Outcome = judgement.Outcome, Choice = judgement.Choice }, source));
+        }).WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(8192));
         group.MapPost("/{id:guid}/answer", async (Guid id, AnswerRequest request, ClaimsPrincipal user, AppDbContext db, PracticeWorker worker, CancellationToken ct) =>
         {
             if (request.AttemptId == Guid.Empty || request.Transcript is null || request.Transcript.Length > 1200 || request.Recognition?.Length > 600)
@@ -174,7 +202,7 @@ public static class PracticeEndpoints
         if (p is not null) return p;
         p = new() { UserId = userId, Language = language, Level = supportsA0 ? PracticeRules.BeginnerLevel : 0 }; db.Add(p); return p;
     }
-    private static object Present(PracticeExposure e, R2StorageService storage, PracticeProgress progress, bool supportsA0)
+    private static object Present(PracticeExposure e, R2StorageService storage, PracticeProgress progress, bool supportsA0, bool savedReview = false)
     {
         var d = e.Dialogue;
         object Choice(string text, string key) => new { text, audioUrl = storage.GeneratePresignedUrl(key, TimeSpan.FromHours(4)) };
@@ -183,7 +211,7 @@ public static class PracticeEndpoints
         return new { status = "ready", id = e.Id, locale = d.Locale, level = PracticeRules.LevelName(d.Level), cue = d.Cue,
             cueAudioUrl = storage.GeneratePresignedUrl(d.CueAudio, TimeSpan.FromHours(4)), choices,
             deferredScoring = e.DeferredScoring, translationUsed = e.TranslationUsed,
-            currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, supportsA0)), practiceLevel = PracticeRules.LevelName(d.Level), reviewMode = e.ReviewMode };
+            currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, supportsA0)), practiceLevel = PracticeRules.LevelName(d.Level), reviewMode = savedReview || e.ReviewMode };
     }
     private static object Feedback(PracticeAttempt a, PracticeExposure e) => new {
         outcome = a.Outcome, choice = a.Choice,

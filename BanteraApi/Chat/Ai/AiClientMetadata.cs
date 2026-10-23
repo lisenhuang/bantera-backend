@@ -7,6 +7,7 @@ public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? Ha
 {
     [System.Text.Json.Serialization.JsonIgnore]
     public AiPracticeLevel? PracticeLevel { get; init; }
+    public bool DeviceFormattedText { get; init; }
     // Set only by the server's callback path, never by client metadata.
     [System.Text.Json.Serialization.JsonIgnore]
     public bool PhoneCallback { get; init; }
@@ -37,7 +38,9 @@ public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? Ha
         var emojis = doc.RootElement.TryGetProperty("deviceEmojis", out var emojiFlag) && emojiFlag.ValueKind == JsonValueKind.True;
         var vocabularyVersion = vocabulary && doc.RootElement.TryGetProperty("vocabularyVersion", out var v) &&
             v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var version) && version >= 2 ? 2 : 1;
-        return new(clock, token, hasMet, alert, level, search, conversation, vocabulary, emojis, vocabularyVersion);
+        return new(clock, token, hasMet, alert, level, search, conversation, vocabulary, emojis, vocabularyVersion) {
+            DeviceFormattedText = doc.RootElement.TryGetProperty("deviceFormattedText", out var formatted) && formatted.ValueKind == JsonValueKind.True
+        };
     }
     private static string? NormalizeLevel(string? level) => level?.Trim().ToLowerInvariant() switch {
         "beginner" => "beginner", "intermediate" => "intermediate", "advanced" => "advanced", _ => null
