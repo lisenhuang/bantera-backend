@@ -1514,6 +1514,20 @@ namespace BanteraApi.Migrations
                         .HasMaxLength(180)
                         .HasColumnType("character varying(180)");
 
+                    b.Property<int>("PronunciationAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("PronunciationJson")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("PronunciationRequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("PronunciationRetryAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<bool>("Ready")
                         .HasColumnType("boolean");
 
@@ -1534,6 +1548,9 @@ namespace BanteraApi.Migrations
 
                     b.HasIndex("Language", "Fingerprint")
                         .IsUnique();
+
+                    b.HasIndex("PronunciationRetryAt", "CreatedAt")
+                        .HasFilter("\"PronunciationJson\" IS NULL AND \"Ready\" = TRUE");
 
                     b.HasIndex("Locale", "Level", "Ready");
 

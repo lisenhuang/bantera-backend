@@ -17,6 +17,10 @@ public sealed class PracticeDialogue
     public string Reply { get; set; } = "";
     public string Distractor { get; set; } = "";
     public string Explanation { get; set; } = "";
+    public string? PronunciationJson { get; set; }
+    public int PronunciationAttempts { get; set; }
+    public DateTime? PronunciationRetryAt { get; set; }
+    public DateTime? PronunciationRequestedAt { get; set; }
     public string Fingerprint { get; set; } = "";
     public string CueAudio { get; set; } = "";
     public string ReplyAudio { get; set; } = "";
@@ -55,7 +59,7 @@ public sealed class PracticeAttempt
     public string Outcome { get; set; } = "unclear";
     public int? Choice { get; set; }
 }
-public sealed record PracticeDraft(string Topic, string MeaningKey, string Cue, string Reply, string Distractor, string Explanation);
+public sealed record PracticeDraft(string Topic, string MeaningKey, string Cue, string Reply, string Distractor, string Explanation, PracticePronunciationData? Pronunciation = null);
 public sealed record PracticeJudgement(string Outcome, int? Choice);
 public static class PracticeRules
 {

@@ -55,6 +55,20 @@ public class PracticeAnswerMatcherTests
         }
     }
     [Fact]
+    public void JapaneseScreenshotGradesWithBothChoiceOrdersAndKeepsWrongTimesDistinct()
+    {
+        var d = new PracticeDialogue { Locale = "ja-JP", Reply = "午後三時です。", Distractor = "月曜日は晴れです。" };
+        foreach (var swap in new[] { false, true })
+        {
+            Assert.Equal(new PracticeJudgement("correct", swap ? 1 : 0),
+                PracticeAnswerMatcher.Judge(d, swap, "午後3時です。", null));
+            Assert.Equal(new PracticeJudgement("unclear", null),
+                PracticeAnswerMatcher.Judge(d, swap, "午後4時です。", null));
+            Assert.Equal(new PracticeJudgement("unclear", null),
+                PracticeAnswerMatcher.Judge(d, swap, "午後3時です。", "Uncertain words: 3"));
+        }
+    }
+    [Fact]
     public void UnrecognizedConfidenceHintCannotProduceWrongAnswer()
     {
         var d = new PracticeDialogue { Locale = "en-NZ", Reply = "Yes.", Distractor = "No." };

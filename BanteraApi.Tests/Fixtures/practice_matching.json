@@ -1566,5 +1566,139 @@
       "30",
       "可以"
     ]
+  },
+  {
+    "name": "Japanese screenshot digit clock matches kanji hour",
+    "transcript": "午後3時です。",
+    "choices": [
+      "午後三時です。",
+      "月曜日は晴れです。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese screenshot fullwidth digit matches kanji hour",
+    "transcript": "午後３時です。",
+    "choices": [
+      "午後三時です。",
+      "月曜日は晴れです。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese screenshot reverse numeral representation",
+    "transcript": "午後三時です。",
+    "choices": [
+      "午後3時です。",
+      "月曜日は晴れです。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese screenshot shuffled reply preserves index",
+    "transcript": "午後3時です。",
+    "choices": [
+      "月曜日は晴れです。",
+      "午後三時です。"
+    ],
+    "expected": 1,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese screenshot wrong hour remains unclear",
+    "transcript": "午後4時です。",
+    "choices": [
+      "午後三時です。",
+      "月曜日は晴れです。"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese screenshot uncertain hour remains unclear",
+    "transcript": "午後3時です。",
+    "choices": [
+      "午後三時です。",
+      "月曜日は晴れです。"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": [
+      "3"
+    ]
+  },
+  {
+    "name": "Japanese equivalent clock choices remain ambiguous",
+    "transcript": "午後3時です。",
+    "choices": [
+      "午後三時です。",
+      "午後3時です。"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese minutes and seconds normalize",
+    "transcript": "午前12時30分5秒です。",
+    "choices": [
+      "午前十二時三十分五秒です。",
+      "月曜日は晴れです。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese different minute remains unclear",
+    "transcript": "午前12時31分5秒です。",
+    "choices": [
+      "午前十二時三十分五秒です。",
+      "月曜日は晴れです。"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese name kanji must not become a digit",
+    "transcript": "3田さんに会います。",
+    "choices": [
+      "三田さんに会います。",
+      "電車で帰ります。"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese swapped hour and minute remain different",
+    "transcript": "午前6時12分に駅に着きます。",
+    "choices": [
+      "午前十二時六分に駅に着きます。",
+      "明日は家で休みます。"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese AM and PM remain different",
+    "transcript": "午前3時に駅に着きます。",
+    "choices": [
+      "午後三時に駅に着きます。",
+      "明日は家で休みます。"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": []
   }
 ]

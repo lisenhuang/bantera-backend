@@ -163,6 +163,8 @@ public static class PracticeAnswerMatcher
     private static string[] ProtectedSignature(string text, string locale)
     {
         var result = Regex.Matches(text, locale.StartsWith("en", StringComparison.OrdinalIgnoreCase) ? @"[0-9]+(?:decimal[0-9]+)?" : @"\p{N}+").Select(x => x.Value).ToList();
+        if (locale.ToLowerInvariant().Split('-')[0] == "ja")
+            result.AddRange(Regex.Matches(text, @"[0-9]+[時分秒]|午前|午後").Select(m => m.Value));
         if (new[] { "zh", "yue" }.Contains(locale.ToLowerInvariant().Split('-')[0]))
             // Keep hour/minute order meaningful as well as the individual numbers.
             result.AddRange(Regex.Matches(text, @"[0-9]+时[0-9]+分|美元|港元|台币|欧元|英镑|元|负").Select(m => m.Value));

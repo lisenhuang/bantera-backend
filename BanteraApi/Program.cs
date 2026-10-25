@@ -109,6 +109,8 @@ builder.Services.AddHttpClient("gemini", c =>
     c.Timeout = TimeSpan.FromSeconds(180);
 }).AddHttpMessageHandler<BanteraApi.Diagnostics.GeminiModelCallHandler>();
 builder.Services.AddScoped<GeminiService>();
+builder.Services.AddSingleton<PracticePronunciationWorker>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PracticePronunciationWorker>());
 builder.Services.AddSingleton<PracticeWorker>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<PracticeWorker>());
 builder.Services.AddSingleton<IDialogueDurationPlanner, HistoricalDialogueDurationPlanner>();

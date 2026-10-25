@@ -94,6 +94,28 @@ public class PracticeSavedReviewEndpointTests
             Assert.Null(unchanged.FinishedAt);
             Assert.Equal(1, await db.Set<PracticeExposure>().CountAsync(x => x.UserId == userId));
             Assert.False(await db.Set<PracticeAttempt>().AnyAsync(x => x.ExposureId == original.Id));
+            var pronunciationRoute = $"/api/me/practice/{id}/pronunciation";
+            var unsupported = await (await client.PostAsJsonAsync(pronunciationRoute, new {})).Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("unsupported", unsupported.GetProperty("status").GetString());
+            var stored = await db.Set<PracticeDialogue>().SingleAsync(x => x.Id == dialogue.Id);
+            stored.Locale = "zh-CN"; stored.Cue = "你"; stored.Reply = "好"; stored.Distractor = "不";
+            await db.SaveChangesAsync();
+            Assert.False(await PracticePronunciationWorker.Pending(db, DateTime.UtcNow).AnyAsync(x => x.Id == dialogue.Id));
+            var pending = await (await client.PostAsJsonAsync(pronunciationRoute, new {})).Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("preparing", pending.GetProperty("status").GetString());
+            Assert.True(await PracticePronunciationWorker.Pending(db, DateTime.UtcNow).AnyAsync(x => x.Id == dialogue.Id));
+            Assert.NotNull(await db.Set<PracticeDialogue>().AsNoTracking().Where(x => x.Id == dialogue.Id).Select(x => x.PronunciationRequestedAt).SingleAsync());
+            stored.PronunciationJson = JsonSerializer.Serialize(new PracticePronunciationData([new("你","nǐ")], [new("好","hǎo")], [new("不","bù")]), PracticePronunciation.Json);
+            await db.SaveChangesAsync();
+            var ready = await (await client.PostAsJsonAsync(pronunciationRoute, new {})).Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("ready", ready.GetProperty("status").GetString());
+            Assert.Equal("bù", ready.GetProperty("choices")[0][0].GetProperty("reading").GetString());
+            client.DefaultRequestHeaders.Remove("X-Practice-Consent");
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(pronunciationRoute, new {})).StatusCode);
+            client.DefaultRequestHeaders.Add("X-Practice-Consent", "1");
+            client.DefaultRequestHeaders.Remove("X-Test-User"); client.DefaultRequestHeaders.Add("X-Test-User", outsider.ToString());
+            Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync(pronunciationRoute, new {})).StatusCode);
+            client.DefaultRequestHeaders.Remove("X-Test-User"); client.DefaultRequestHeaders.Add("X-Test-User", userId.ToString());
             // Retired content cannot silently open different material.
             await db.Set<PracticeDialogue>().Where(x => x.Id == dialogue.Id).ExecuteUpdateAsync(x => x.SetProperty(d => d.ContentVersion, 0));
             Assert.Equal(HttpStatusCode.Gone, (await client.PostAsJsonAsync(route, new { requestId = Guid.NewGuid() })).StatusCode);

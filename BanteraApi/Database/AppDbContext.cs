@@ -56,6 +56,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.MeaningKey).HasMaxLength(180);
             e.HasIndex(x => new { x.Language, x.Fingerprint }).IsUnique();
             e.HasIndex(x => new { x.Locale, x.Level, x.Ready });
+            e.Property(x => x.PronunciationAttempts).HasDefaultValue(0);
+            e.HasIndex(x => new { x.PronunciationRetryAt, x.CreatedAt }).HasFilter("\"PronunciationJson\" IS NULL AND \"Ready\" = TRUE");
         });
         b.Entity<PracticeExposure>(e => {
             e.ToTable("practice_exposures"); e.HasKey(x => x.Id);

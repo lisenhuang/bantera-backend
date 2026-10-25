@@ -32,6 +32,27 @@ public static class PracticeEndpoints
                 return Results.Json(new { code = "practice_unavailable", message = "Practice is unavailable right now. Please try again." }, statusCode: 503);
             }
         });
+        group.MapPost("/{id:guid}/pronunciation", async (Guid id, ClaimsPrincipal user, AppDbContext db, IServiceProvider services, CancellationToken ct) =>
+        {
+            var userId = Guid.Parse(user.FindFirstValue("sub")!);
+            var exposure = await db.Set<PracticeExposure>().AsNoTracking().Include(x => x.Dialogue)
+                .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
+            if (exposure is null) return Results.NotFound();
+            if (exposure.Dialogue.ContentVersion != PracticeRules.ContentVersion) return Results.StatusCode(410);
+            if (PracticePronunciation.Read(exposure.Dialogue) == null && PracticePronunciation.Scheme(exposure.Dialogue.Locale) != null)
+            {
+                if (exposure.Dialogue.PronunciationAttempts >= 5 && exposure.Dialogue.PronunciationRetryAt <= DateTime.UtcNow)
+                {
+                    await db.Set<PracticeDialogue>().Where(d => d.Id == exposure.DialogueId && d.PronunciationJson == null && d.PronunciationRetryAt <= DateTime.UtcNow)
+                        .ExecuteUpdateAsync(s => s.SetProperty(d => d.PronunciationAttempts, 0).SetProperty(d => d.PronunciationRetryAt, (DateTime?)null), ct);
+                    exposure.Dialogue.PronunciationAttempts = 0;
+                }
+                await db.Set<PracticeDialogue>().Where(d => d.Id == exposure.DialogueId && d.PronunciationJson == null && d.PronunciationRequestedAt == null)
+                    .ExecuteUpdateAsync(s => s.SetProperty(d => d.PronunciationRequestedAt, DateTime.UtcNow), ct);
+                services.GetService<PracticePronunciationWorker>()?.Request(exposure.DialogueId);
+            }
+            return Results.Ok(PracticePronunciation.Present(exposure));
+        });
         group.MapPost("/level", async (LevelRequest request, ClaimsPrincipal user, AppDbContext db, PracticeWorker worker, CancellationToken ct) =>
         {
             var locale = LearningLanguageCatalog.Items.FirstOrDefault(x => x.Identifier.Equals(request.Locale, StringComparison.OrdinalIgnoreCase))?.Identifier;
@@ -210,6 +231,7 @@ public static class PracticeEndpoints
         if (e.Swap) Array.Reverse(choices);
         return new { status = "ready", id = e.Id, locale = d.Locale, level = PracticeRules.LevelName(d.Level), cue = d.Cue,
             cueAudioUrl = storage.GeneratePresignedUrl(d.CueAudio, TimeSpan.FromHours(4)), choices,
+            pronunciation = PracticePronunciation.Present(e),
             deferredScoring = e.DeferredScoring, translationUsed = e.TranslationUsed,
             currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, supportsA0)), practiceLevel = PracticeRules.LevelName(d.Level), reviewMode = savedReview || e.ReviewMode };
     }

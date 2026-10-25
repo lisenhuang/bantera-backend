@@ -52,8 +52,12 @@ public partial class GeminiService
             "Use genuinely different intents and situations from recent material; do not just substitute nouns. Vocabulary may recur. " +
             "Use the given practice difficulty, adapted naturally to the language. A1: very short concrete exchanges; A2: routine situations; B1: reasons and plans; B2: implications; C1/C2: pragmatic nuance while keeping each utterance under 45 words. " +
             (level == PracticeRules.BeginnerLevel ? BeginnerPracticeInstruction : "") +
-            "Self-check that only the reply fits before returning. " + AccentInstructions.GetValueOrDefault(locale, $"Use natural language for {locale}."),
+            "Self-check that only the reply fits before returning. " + PracticePronunciation.Instruction(locale) + AccentInstructions.GetValueOrDefault(locale, $"Use natural language for {locale}."),
             new { locale, level = PracticeRules.LevelName(level), topics, recent }, ct);
+
+    public Task<PracticePronunciationData> GeneratePracticePronunciationAsync(PracticeDialogue d, CancellationToken ct) =>
+        PracticeJsonAsync<PracticePronunciationData>("Return ONLY the pronunciation object for the supplied immutable practice sentences. " +
+            PracticePronunciation.Instruction(d.Locale) + " Return the cue/reply/distractor arrays at the root, without a pronunciation wrapper.", new { d.Locale, d.Cue, d.Reply, d.Distractor }, ct);
 
     public Task<int[]> ValidatePracticeAsync(string locale, int level, object candidates, CancellationToken ct) =>
         PracticeJsonAsync<int[]>("Independently review the supplied language exercises and nearby existing exercises. " +

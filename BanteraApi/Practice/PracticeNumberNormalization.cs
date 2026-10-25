@@ -10,6 +10,10 @@ internal static class PracticeNumberNormalization
     {
         var language = locale.ToLowerInvariant().Split('-')[0];
         if (language == "en") return EnglishCurrency(text);
+        // Match Japanese ASR clock formatting without rewriting names/words.
+        if (language == "ja") return Regex.Replace(text,
+            @"[〇零一二三四五六七八九十百千万億兆]+(?=[時分秒])",
+            m => Normalize(m.Value, "zh"));
         if (language is not ("zh" or "yue")) return text;
         const string digits = "零一二三四五六七八九";
         text = text.Replace('〇', '零').Replace('兩', '二').Replace('两', '二');
