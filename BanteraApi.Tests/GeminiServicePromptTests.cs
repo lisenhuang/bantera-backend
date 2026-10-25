@@ -13,6 +13,37 @@ namespace BanteraApi.Tests;
 
 public class GeminiServicePromptTests
 {
+    [Fact]
+    public async Task MaoriAudioTestRequestsMaoriScriptWithMacrons()
+    {
+        var handler = new CapturingHandler();
+        var session = new GeminiTestSession("text", "tts", []);
+        await CreateService(handler).GenerateDialogueAsync("Māori (New Zealand)", "mi-NZ", "", 60,
+            testSession: session);
+        Assert.Contains("te reo Māori", handler.GetPrompt());
+        Assert.Contains("Use correct macrons", handler.GetPrompt());
+    }
+
+    [Theory]
+    [InlineData("gemini-3.8-flash-tts")]
+    [InlineData("gemini-3.1-flash-tts-preview")]
+    public async Task MaoriAudioTestPassesPronunciationInstructionsToTts(string model)
+    {
+        var handler = new PreviewAudioHandler();
+        var session = new GeminiTestSession("text", model, []);
+        var dialogue = new GeneratedDialogue("Kōrero", "Kore", "Puck",
+            [new("Speaker1", "Kia ora."), new("Speaker2", "Kei te pēhea koe?")], []);
+        var audio = await CreateService(handler).GenerateAudioAsync(dialogue, "mi-NZ", testSession: session);
+        using var request = JsonDocument.Parse(Assert.Single(handler.Requests));
+        var parts = request.RootElement.GetProperty("contents")[0].GetProperty("parts");
+        var instruction = model.Contains("3.8")
+            ? parts[0].GetProperty("speech_metadata").GetProperty("style").GetString()
+            : parts[0].GetProperty("text").GetString();
+        Assert.Contains("te reo Māori", instruction);
+        Assert.Contains("macrons", instruction);
+        Assert.True(audio.Bytes.Length > 0);
+    }
+
     // Expected provider hints audited against Google's language table on 2026-09-29.
     public static TheoryData<string, string?> TranscriptionLocales => new()
     {

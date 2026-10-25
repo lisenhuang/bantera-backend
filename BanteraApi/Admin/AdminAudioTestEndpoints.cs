@@ -63,14 +63,14 @@ public static partial class AdminAudioTestEndpoints
             }
             else
             {
-                var language = LearningLanguageCatalog.Items.FirstOrDefault(l => l.Identifier == request.LanguageCode);
+                var language = AdminAudioTestLanguages.Find(request.LanguageCode);
                 if (language is null || request.DurationSeconds is not (60 or 120 or 180 or 240))
                     return Results.BadRequest(new { error = "Choose a language and a duration from 1 to 4 minutes." });
                 test.LanguageCode = language.Identifier;
                 test.Language = language.DisplayName;
                 test.TargetDurationSeconds = request.DurationSeconds;
             }
-            if (!LearningLanguageCatalog.SupportsAudioDialogues(test.LanguageCode))
+            if (!AdminAudioTestLanguages.Supports(test.LanguageCode))
                 return Results.Json(new { error = "Audio dialogues are not available for this language yet." }, statusCode: 422);
             db.AdminAudioTests.Add(test);
             await db.SaveChangesAsync(ct);

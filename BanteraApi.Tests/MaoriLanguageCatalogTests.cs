@@ -1,8 +1,30 @@
 using BanteraApi;
+using BanteraApi.Admin;
 using Xunit;
 namespace BanteraApi.Tests;
 public class MaoriLanguageCatalogTests
 {
+    [Fact]
+    public void MaoriIsAvailableOnlyForPrivateAudioTests()
+    {
+        var language = Assert.IsType<LearningLanguageItem>(AdminAudioTestLanguages.Find("mi-NZ"));
+        Assert.Equal("Māori (New Zealand)", language.DisplayName);
+        Assert.True(AdminAudioTestLanguages.Supports(language.Identifier));
+        Assert.False(LearningLanguageCatalog.SupportsAudioDialogues(language.Identifier));
+        Assert.DoesNotContain(LearningLanguageCatalog.Items, item => item.Identifier == language.Identifier);
+        Assert.Null(AdminAudioTestLanguages.Find("unknown"));
+    }
+
+    [Fact]
+    public void ExistingAudioTestLanguagesRemainAvailable()
+    {
+        foreach (var language in LearningLanguageCatalog.Items)
+        {
+            Assert.Equal(language, AdminAudioTestLanguages.Find(language.Identifier));
+            Assert.True(AdminAudioTestLanguages.Supports(language.Identifier));
+        }
+    }
+
     [Fact]
     public void RetiredMaoriIsAbsentAndBothLearningCantoneseOptionsRemain()
     {

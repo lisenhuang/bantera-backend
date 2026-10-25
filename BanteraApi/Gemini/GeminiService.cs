@@ -67,6 +67,7 @@ public partial class GeminiService(
 
     private static readonly Dictionary<string, string> AccentInstructions = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["mi-NZ"] = "Write the dialogue entirely in natural te reo Māori as spoken in Aotearoa New Zealand. Use correct macrons (ā, ē, ī, ō, ū) and natural Māori vocabulary and grammar. Do not substitute New Zealand English.",
         ["en-AU"] = "Write the dialogue STRICTLY in Australian English, using Australian spelling and everyday Australian wording. Keep the language plain and widely understood — do NOT lean on Australian slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use New Zealand, British, or American English.",
         ["en-CA"] = "Write the dialogue STRICTLY in Canadian English, using Canadian spelling and everyday Canadian wording. Keep the language plain and widely understood — do NOT lean on Canadian slang or idioms, and do not make regional expressions a feature of the conversation. Do NOT use American or British English.",
         ["en-IN"] = "Write the dialogue STRICTLY in Indian English, using everyday wording and sentence rhythm that read naturally in India. Keep the language plain and widely understood — do NOT lean on Indian English idioms or stock phrases, and do not make regional expressions a feature of the conversation. Do NOT use British, American, or Australian English.",
@@ -102,6 +103,7 @@ public partial class GeminiService(
     // Accent instructions injected into the TTS content so Gemini speaks the right accent.
     private static readonly Dictionary<string, string> TtsAccentInstructions = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["mi-NZ"] = "Both speakers must speak natural te reo Māori with authentic Māori pronunciation. Respect vowel length marked by macrons and pronounce Māori words naturally. Speak only the Māori dialogue, without English translations.",
         ["en-AU"] = "Both speakers must use a natural, authentic Australian accent throughout. Do not use New Zealand, British, or American accents.",
         ["en-CA"] = "Both speakers must use a natural, authentic Canadian English accent throughout.",
         ["en-IN"] = "Both speakers MUST use a very strong, heavily pronounced Indian English accent throughout — this is the most important instruction. The accent must be unmistakably, intensely Indian: use the characteristic retroflex consonants (t and d sounds produced with the tongue curled back), clear syllable-timed rhythm where every syllable is given equal weight with no reduction, strong and distinctive intonation with rising tones, prominent Indian English vowel sounds, and the hallmark stress patterns of Indian English speakers. The accent must be thick and very prominent — not mild, not moderate, not 'slightly Indian'. Do not use British, American, or Australian accents under any circumstances.",
