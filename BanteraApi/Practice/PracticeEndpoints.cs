@@ -172,7 +172,7 @@ public static class PracticeEndpoints
             if (!source.Dialogue.Ready || source.Dialogue.ContentVersion != PracticeRules.ContentVersion)
                 return Results.Json(new { code = "practice_retired" }, statusCode: 410);
             var judgement = PracticeAnswerMatcher.Judge(source.Dialogue, source.Swap, request.Transcript, request.Recognition);
-            return Results.Ok(Feedback(new PracticeAttempt { Outcome = judgement.Outcome, Choice = judgement.Choice }, source));
+            return Results.Ok(Feedback(new PracticeAttempt { Outcome = judgement.Outcome, Choice = judgement.Choice }, source, request.Transcript));
         }).WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(8192));
         group.MapPost("/{id:guid}/answer", async (Guid id, AnswerRequest request, ClaimsPrincipal user, AppDbContext db, PracticeWorker worker, CancellationToken ct) =>
         {
@@ -186,7 +186,7 @@ public static class PracticeEndpoints
             if (exposure.Dialogue.ContentVersion != PracticeRules.ContentVersion)
                 return Results.Json(new { code = "practice_retired" }, statusCode: 410);
             var prior = await db.Set<PracticeAttempt>().FindAsync([request.AttemptId], ct);
-            if (prior is not null) return prior.ExposureId == id ? Results.Ok(Feedback(prior, exposure)) : Results.Conflict();
+            if (prior is not null) return prior.ExposureId == id ? Results.Ok(Feedback(prior, exposure, request.Transcript)) : Results.Conflict();
             if (exposure.Attempts >= 10) return Results.Json(new { code = "practice_attempt_limit" }, statusCode: 429);
             // Correctness comes from the stored choice. No AI service is resolved or called.
             var judgement = PracticeAnswerMatcher.Judge(exposure.Dialogue, exposure.Swap, request.Transcript, request.Recognition);
@@ -198,7 +198,7 @@ public static class PracticeEndpoints
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
             worker.RequestAhead(userId, exposure.Dialogue.Locale, exposure.Dialogue.Language, progress, exposure);
-            return Results.Ok(Feedback(attempt, exposure));
+            return Results.Ok(Feedback(attempt, exposure, request.Transcript));
         }).WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(8192));
 
         group.MapPost("/{id:guid}/translation", async (Guid id, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) =>
@@ -236,8 +236,10 @@ public static class PracticeEndpoints
             deferredScoring = e.DeferredScoring, translationUsed = e.TranslationUsed,
             currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, supportsA0)), practiceLevel = PracticeRules.LevelName(d.Level), reviewMode = savedReview || e.ReviewMode };
     }
-    private static object Feedback(PracticeAttempt a, PracticeExposure e) => new {
+    internal static object Feedback(PracticeAttempt a, PracticeExposure e, string transcript) => new {
         outcome = a.Outcome, choice = a.Choice,
+        textEquivalent = a.Choice is 0 or 1 && PracticeAnswerMatcher.Normalise(transcript, e.Dialogue.Locale) ==
+            PracticeAnswerMatcher.Normalise(a.Choice == (e.Swap ? 1 : 0) ? e.Dialogue.Reply : e.Dialogue.Distractor, e.Dialogue.Locale),
         explanation = a.Outcome == "unclear" ? null : e.Dialogue.Explanation
     };
 }

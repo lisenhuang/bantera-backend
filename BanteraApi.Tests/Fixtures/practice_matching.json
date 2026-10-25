@@ -1700,5 +1700,150 @@
     "expected": null,
     "locale": "ja-JP",
     "uncertainWords": []
+  },
+  {
+    "name": "Japanese age screenshot accepts digits",
+    "transcript": "20歳です。",
+    "choices": [
+      "二十歳です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese age screenshot accepts fullwidth digits",
+    "transcript": "２０歳です。",
+    "choices": [
+      "二十歳です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese age screenshot reversed choices",
+    "transcript": "20歳です。",
+    "choices": [
+      "東京です。",
+      "二十歳です。"
+    ],
+    "expected": 1,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese age screenshot different age stays unclear",
+    "transcript": "21歳です。",
+    "choices": [
+      "二十歳です。",
+      "東京です。"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese age screenshot uncertain age stays unclear",
+    "transcript": "20歳です。",
+    "choices": [
+      "二十歳です。",
+      "東京です。"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": [
+      "20"
+    ]
+  },
+  {
+    "name": "Japanese equivalent ages stay ambiguous",
+    "transcript": "20歳です。",
+    "choices": [
+      "二十歳です。",
+      "20歳です。"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese yen counter accepts digits",
+    "transcript": "300円です。",
+    "choices": [
+      "三百円です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese person counter accepts digits",
+    "transcript": "2人です。",
+    "choices": [
+      "二人です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese item counter accepts digits",
+    "transcript": "20個です。",
+    "choices": [
+      "二十個です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese date counters accept digits",
+    "transcript": "3月20日です。",
+    "choices": [
+      "三月二十日です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese floor counter accepts digits",
+    "transcript": "3階です。",
+    "choices": [
+      "三階です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese duration counter accepts digits",
+    "transcript": "3時間です。",
+    "choices": [
+      "三時間です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese percent counter accepts digits",
+    "transcript": "20パーセントです。",
+    "choices": [
+      "二十パーセントです。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
   }
 ]

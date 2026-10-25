@@ -8,21 +8,34 @@ internal static class PracticeNumberNormalization
 {
     public static string Normalize(string text, string locale)
     {
+        text = PracticeNumericText.Prepare(text, locale);
+        return PracticeNumericText.Finish(NormalizeLegacy(text, locale), locale);
+    }
+
+    private static string NormalizeLegacy(string text, string locale)
+    {
         var language = locale.ToLowerInvariant().Split('-')[0];
         if (language == "en") return EnglishCurrency(text);
         // Match Japanese ASR clock formatting without rewriting names/words.
         if (language == "ja") return Regex.Replace(text,
-            @"[〇零一二三四五六七八九十百千万億兆]+(?=[時分秒])",
-            m => Normalize(m.Value, "zh"));
+            @"[〇零一二三四五六七八九十百千万億兆]+(?=歳|才|円|人|個|本|枚|匹|冊|台|回|階|番|丁目|年|か月|ヶ月|月|日|週間|週|時間|時|分|秒|パーセント)",
+            m => NormalizeLegacy(m.Value, "zh"));
         if (language is not ("zh" or "yue")) return text;
         const string digits = "零一二三四五六七八九";
-        text = text.Replace('〇', '零').Replace('兩', '二').Replace('两', '二');
+        text = text.Replace('〇', '零').Replace('兩', '二').Replace('两', '二').Replace("廿", "二十").Replace("卅", "三十");
         text = Regex.Replace(text, @"[零一二三四五六七八九十百千萬万億亿]+(?:[點点][零一二三四五六七八九]+)?", match =>
         {
             var original = match.Value;
             var parts = Regex.Split(original, "[點点]");
             var whole = parts[0];
-            if (Regex.IsMatch(whole, "[萬万億亿]")) return original;
+            if (Regex.IsMatch(whole, "[萬万億亿]"))
+            {
+                // Do not guess the omitted unit in colloquial 三万五 / 三百五.
+                if (Regex.IsMatch(whole, "[百千萬万億亿][一二三四五六七八九]$")) return original;
+                if (!PracticeNumberSpellout.TryParsePrefix(original, locale, out var large, out var length) || length != original.Length)
+                    return original;
+                return large.ToString("0.############################", CultureInfo.InvariantCulture).Replace(".", "点");
+            }
             long value = 0;
             var pending = 0; var lastUnit = 10000;
             var hasUnit = false; var zeroAfterUnit = false; var hasPending = false;
@@ -57,7 +70,7 @@ internal static class PracticeNumberNormalization
             return value.ToString(CultureInfo.InvariantCulture) + (fraction.Length == 0 ? "" : "点" + fraction);
         });
         // Preserve clock units; do not reinterpret decimal amounts as times.
-        text = Regex.Replace(text, @"(?<![0-9.:])([01]?[0-9]|2[0-3]):([0-5][0-9])(?![0-9.:])",
+        text = Regex.Replace(text, @"(?<![0-9.:])([01]?[0-9]|2[0-3]):([0-5][0-9])(?![0-9:]|\.[0-9])",
             m => int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)
                 + "时" + int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + "分");
         text = Regex.Replace(text, @"(?<![0-9.点點])([01]?[0-9]|2[0-3])[點点]半",
@@ -76,13 +89,16 @@ internal static class PracticeNumberNormalization
         foreach (var (symbol, currency) in symbols)
             text = Regex.Replace(text, symbol + @"\s*" + amount, m => m.Groups[1].Value + currency);
         text = Regex.Replace(text, amount + @"\s*(?:塊錢|块钱|蚊雞|蚊鸡|塊|块|蚊|圓|圆|元)", m => m.Groups[1].Value + "元");
-        return Regex.Replace(text.Replace('負', '负'), @"-\s*(?=[0-9])", "负");
+        return Regex.Replace(text.Replace('負', '负'), @"(?<![0-9])-\s*(?=[0-9])", "负");
     }
 
     private static string EnglishCurrency(string text)
     {
-        text = Regex.Replace(text, @"(?<![0-9])([01]?[0-9]|2[0-3]):00(?![0-9])",
-            m => int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + " oclock");
+        text = Regex.Replace(text, @"\b([0-9]+)\s+(dollars?|euros?|pounds?)\s+(?:and\s+)?([0-9]{1,2})\s+(?:cents?|pence)\b", m =>
+            m.Groups[1].Value + "." + int.Parse(m.Groups[3].Value).ToString("00", CultureInfo.InvariantCulture) + " " + m.Groups[2].Value);
+        text = Regex.Replace(text, @"\b([0-9]+)\s+(?:point|decimal)\s+([0-9]+)\b", "$1.$2");
+        text = Regex.Replace(text, @"(?<![0-9.:])([01]?[0-9]|2[0-3]):00(?![0-9:]|\.[0-9])",
+            m => int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + " oclock ");
         text = Regex.Replace(text, @"\b([ap])\.m\.", m => m.Groups[1].Value + "m");
         text = Regex.Replace(text, @"(?<![0-9,])[0-9]{1,3}(?:,[0-9]{3})+(?![0-9,])", m => m.Value.Replace(",", ""));
         const string amount = @"(-?\s*[0-9]+(?:\.[0-9]+)?)";
@@ -101,6 +117,6 @@ internal static class PracticeNumberNormalization
             var fraction = m.Groups[2].Value.TrimEnd('0');
             return m.Groups[1].Value + (fraction.Length == 0 ? "" : "decimal" + fraction);
         });
-        return Regex.Replace(text, @"-\s*(?=[0-9])", "negative ");
+        return Regex.Replace(text, @"(?<![0-9])-\s*(?=[0-9])", "negative ");
     }
 }

@@ -1,0 +1,1973 @@
+[
+  {
+    "name": "en-US cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-US",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-US different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-US",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-GB cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-GB",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-GB different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-GB",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-AU cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-AU",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-AU different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-AU",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-CA cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-CA",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-CA different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-CA",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-IN cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-IN",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-IN different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-IN",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-NZ cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-NZ different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-IE cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-IE",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-IE different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-IE",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-SG cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-SG",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-SG different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-SG",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-ZA cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-ZA",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-ZA different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-ZA",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-PH cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-PH",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-PH different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-PH",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-AE cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-AE",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-AE different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-AE",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-ID cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-ID",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-ID different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-ID",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-SA cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": 0,
+    "locale": "en-SA",
+    "uncertainWords": []
+  },
+  {
+    "name": "en-SA different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twenty",
+      "thirty"
+    ],
+    "expected": null,
+    "locale": "en-SA",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-MX cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": 0,
+    "locale": "es-MX",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-MX different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": null,
+    "locale": "es-MX",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-ES cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": 0,
+    "locale": "es-ES",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-ES different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": null,
+    "locale": "es-ES",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-419 cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": 0,
+    "locale": "es-419",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-419 different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": null,
+    "locale": "es-419",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-US cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": 0,
+    "locale": "es-US",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-US different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": null,
+    "locale": "es-US",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-CO cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": 0,
+    "locale": "es-CO",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-CO different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": null,
+    "locale": "es-CO",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-CL cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": 0,
+    "locale": "es-CL",
+    "uncertainWords": []
+  },
+  {
+    "name": "es-CL different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "veinte",
+      "treinta"
+    ],
+    "expected": null,
+    "locale": "es-CL",
+    "uncertainWords": []
+  },
+  {
+    "name": "fr-FR cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "vingt",
+      "trente"
+    ],
+    "expected": 0,
+    "locale": "fr-FR",
+    "uncertainWords": []
+  },
+  {
+    "name": "fr-FR different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "vingt",
+      "trente"
+    ],
+    "expected": null,
+    "locale": "fr-FR",
+    "uncertainWords": []
+  },
+  {
+    "name": "fr-CA cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "vingt",
+      "trente"
+    ],
+    "expected": 0,
+    "locale": "fr-CA",
+    "uncertainWords": []
+  },
+  {
+    "name": "fr-CA different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "vingt",
+      "trente"
+    ],
+    "expected": null,
+    "locale": "fr-CA",
+    "uncertainWords": []
+  },
+  {
+    "name": "fr-BE cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "vingt",
+      "trente"
+    ],
+    "expected": 0,
+    "locale": "fr-BE",
+    "uncertainWords": []
+  },
+  {
+    "name": "fr-BE different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "vingt",
+      "trente"
+    ],
+    "expected": null,
+    "locale": "fr-BE",
+    "uncertainWords": []
+  },
+  {
+    "name": "fr-CH cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "vingt",
+      "trente"
+    ],
+    "expected": 0,
+    "locale": "fr-CH",
+    "uncertainWords": []
+  },
+  {
+    "name": "fr-CH different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "vingt",
+      "trente"
+    ],
+    "expected": null,
+    "locale": "fr-CH",
+    "uncertainWords": []
+  },
+  {
+    "name": "de-DE cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "zwanzig",
+      "dreißig"
+    ],
+    "expected": 0,
+    "locale": "de-DE",
+    "uncertainWords": []
+  },
+  {
+    "name": "de-DE different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "zwanzig",
+      "dreißig"
+    ],
+    "expected": null,
+    "locale": "de-DE",
+    "uncertainWords": []
+  },
+  {
+    "name": "de-AT cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "zwanzig",
+      "dreißig"
+    ],
+    "expected": 0,
+    "locale": "de-AT",
+    "uncertainWords": []
+  },
+  {
+    "name": "de-AT different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "zwanzig",
+      "dreißig"
+    ],
+    "expected": null,
+    "locale": "de-AT",
+    "uncertainWords": []
+  },
+  {
+    "name": "de-CH cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "zwanzig",
+      "dreißig"
+    ],
+    "expected": 0,
+    "locale": "de-CH",
+    "uncertainWords": []
+  },
+  {
+    "name": "de-CH different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "zwanzig",
+      "dreißig"
+    ],
+    "expected": null,
+    "locale": "de-CH",
+    "uncertainWords": []
+  },
+  {
+    "name": "it-IT cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "venti",
+      "trenta"
+    ],
+    "expected": 0,
+    "locale": "it-IT",
+    "uncertainWords": []
+  },
+  {
+    "name": "it-IT different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "venti",
+      "trenta"
+    ],
+    "expected": null,
+    "locale": "it-IT",
+    "uncertainWords": []
+  },
+  {
+    "name": "it-CH cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "venti",
+      "trenta"
+    ],
+    "expected": 0,
+    "locale": "it-CH",
+    "uncertainWords": []
+  },
+  {
+    "name": "it-CH different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "venti",
+      "trenta"
+    ],
+    "expected": null,
+    "locale": "it-CH",
+    "uncertainWords": []
+  },
+  {
+    "name": "zh-CN cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "二十",
+      "三十"
+    ],
+    "expected": 0,
+    "locale": "zh-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "zh-CN different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "二十",
+      "三十"
+    ],
+    "expected": null,
+    "locale": "zh-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "zh-TW cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "二十",
+      "三十"
+    ],
+    "expected": 0,
+    "locale": "zh-TW",
+    "uncertainWords": []
+  },
+  {
+    "name": "zh-TW different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "二十",
+      "三十"
+    ],
+    "expected": null,
+    "locale": "zh-TW",
+    "uncertainWords": []
+  },
+  {
+    "name": "zh-HK cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "二十",
+      "三十"
+    ],
+    "expected": 0,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "zh-HK different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "二十",
+      "三十"
+    ],
+    "expected": null,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "yue-CN cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "二十",
+      "三十"
+    ],
+    "expected": 0,
+    "locale": "yue-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "yue-CN different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "二十",
+      "三十"
+    ],
+    "expected": null,
+    "locale": "yue-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "ja-JP cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "二十",
+      "三十"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "ja-JP different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "二十",
+      "三十"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "ko-KR cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "이십",
+      "삼십"
+    ],
+    "expected": 0,
+    "locale": "ko-KR",
+    "uncertainWords": []
+  },
+  {
+    "name": "ko-KR different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "이십",
+      "삼십"
+    ],
+    "expected": null,
+    "locale": "ko-KR",
+    "uncertainWords": []
+  },
+  {
+    "name": "pt-BR cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "vinte",
+      "trinta"
+    ],
+    "expected": 0,
+    "locale": "pt-BR",
+    "uncertainWords": []
+  },
+  {
+    "name": "pt-BR different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "vinte",
+      "trinta"
+    ],
+    "expected": null,
+    "locale": "pt-BR",
+    "uncertainWords": []
+  },
+  {
+    "name": "pt-PT cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "vinte",
+      "trinta"
+    ],
+    "expected": 0,
+    "locale": "pt-PT",
+    "uncertainWords": []
+  },
+  {
+    "name": "pt-PT different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "vinte",
+      "trinta"
+    ],
+    "expected": null,
+    "locale": "pt-PT",
+    "uncertainWords": []
+  },
+  {
+    "name": "ar-SA cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "عشرون",
+      "ثلاثون"
+    ],
+    "expected": 0,
+    "locale": "ar-SA",
+    "uncertainWords": []
+  },
+  {
+    "name": "ar-SA different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "عشرون",
+      "ثلاثون"
+    ],
+    "expected": null,
+    "locale": "ar-SA",
+    "uncertainWords": []
+  },
+  {
+    "name": "ar-AE cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "عشرون",
+      "ثلاثون"
+    ],
+    "expected": 0,
+    "locale": "ar-AE",
+    "uncertainWords": []
+  },
+  {
+    "name": "ar-AE different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "عشرون",
+      "ثلاثون"
+    ],
+    "expected": null,
+    "locale": "ar-AE",
+    "uncertainWords": []
+  },
+  {
+    "name": "ru-RU cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "двадцать",
+      "тридцать"
+    ],
+    "expected": 0,
+    "locale": "ru-RU",
+    "uncertainWords": []
+  },
+  {
+    "name": "ru-RU different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "двадцать",
+      "тридцать"
+    ],
+    "expected": null,
+    "locale": "ru-RU",
+    "uncertainWords": []
+  },
+  {
+    "name": "hi-IN cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "बीस",
+      "तीस"
+    ],
+    "expected": 0,
+    "locale": "hi-IN",
+    "uncertainWords": []
+  },
+  {
+    "name": "hi-IN different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "बीस",
+      "तीस"
+    ],
+    "expected": null,
+    "locale": "hi-IN",
+    "uncertainWords": []
+  },
+  {
+    "name": "id-ID cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "dua puluh",
+      "tiga puluh"
+    ],
+    "expected": 0,
+    "locale": "id-ID",
+    "uncertainWords": []
+  },
+  {
+    "name": "id-ID different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "dua puluh",
+      "tiga puluh"
+    ],
+    "expected": null,
+    "locale": "id-ID",
+    "uncertainWords": []
+  },
+  {
+    "name": "vi-VN cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "hai mươi",
+      "ba mươi"
+    ],
+    "expected": 0,
+    "locale": "vi-VN",
+    "uncertainWords": []
+  },
+  {
+    "name": "vi-VN different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "hai mươi",
+      "ba mươi"
+    ],
+    "expected": null,
+    "locale": "vi-VN",
+    "uncertainWords": []
+  },
+  {
+    "name": "th-TH cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "ยี่สิบ",
+      "สามสิบ"
+    ],
+    "expected": 0,
+    "locale": "th-TH",
+    "uncertainWords": []
+  },
+  {
+    "name": "th-TH different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "ยี่สิบ",
+      "สามสิบ"
+    ],
+    "expected": null,
+    "locale": "th-TH",
+    "uncertainWords": []
+  },
+  {
+    "name": "tr-TR cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "yirmi",
+      "otuz"
+    ],
+    "expected": 0,
+    "locale": "tr-TR",
+    "uncertainWords": []
+  },
+  {
+    "name": "tr-TR different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "yirmi",
+      "otuz"
+    ],
+    "expected": null,
+    "locale": "tr-TR",
+    "uncertainWords": []
+  },
+  {
+    "name": "nl-NL cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twintig",
+      "dertig"
+    ],
+    "expected": 0,
+    "locale": "nl-NL",
+    "uncertainWords": []
+  },
+  {
+    "name": "nl-NL different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twintig",
+      "dertig"
+    ],
+    "expected": null,
+    "locale": "nl-NL",
+    "uncertainWords": []
+  },
+  {
+    "name": "nl-BE cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "twintig",
+      "dertig"
+    ],
+    "expected": 0,
+    "locale": "nl-BE",
+    "uncertainWords": []
+  },
+  {
+    "name": "nl-BE different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "twintig",
+      "dertig"
+    ],
+    "expected": null,
+    "locale": "nl-BE",
+    "uncertainWords": []
+  },
+  {
+    "name": "pl-PL cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "dwadzieścia",
+      "trzydzieści"
+    ],
+    "expected": 0,
+    "locale": "pl-PL",
+    "uncertainWords": []
+  },
+  {
+    "name": "pl-PL different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "dwadzieścia",
+      "trzydzieści"
+    ],
+    "expected": null,
+    "locale": "pl-PL",
+    "uncertainWords": []
+  },
+  {
+    "name": "sv-SE cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "tjugo",
+      "trettio"
+    ],
+    "expected": 0,
+    "locale": "sv-SE",
+    "uncertainWords": []
+  },
+  {
+    "name": "sv-SE different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "tjugo",
+      "trettio"
+    ],
+    "expected": null,
+    "locale": "sv-SE",
+    "uncertainWords": []
+  },
+  {
+    "name": "da-DK cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "tyve",
+      "tredive"
+    ],
+    "expected": 0,
+    "locale": "da-DK",
+    "uncertainWords": []
+  },
+  {
+    "name": "da-DK different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "tyve",
+      "tredive"
+    ],
+    "expected": null,
+    "locale": "da-DK",
+    "uncertainWords": []
+  },
+  {
+    "name": "nb-NO cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "tjue",
+      "tretti"
+    ],
+    "expected": 0,
+    "locale": "nb-NO",
+    "uncertainWords": []
+  },
+  {
+    "name": "nb-NO different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "tjue",
+      "tretti"
+    ],
+    "expected": null,
+    "locale": "nb-NO",
+    "uncertainWords": []
+  },
+  {
+    "name": "fi-FI cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "kaksikymmentä",
+      "kolmekymmentä"
+    ],
+    "expected": 0,
+    "locale": "fi-FI",
+    "uncertainWords": []
+  },
+  {
+    "name": "fi-FI different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "kaksikymmentä",
+      "kolmekymmentä"
+    ],
+    "expected": null,
+    "locale": "fi-FI",
+    "uncertainWords": []
+  },
+  {
+    "name": "uk-UA cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "двадцять",
+      "тридцять"
+    ],
+    "expected": 0,
+    "locale": "uk-UA",
+    "uncertainWords": []
+  },
+  {
+    "name": "uk-UA different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "двадцять",
+      "тридцять"
+    ],
+    "expected": null,
+    "locale": "uk-UA",
+    "uncertainWords": []
+  },
+  {
+    "name": "el-GR cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "είκοσι",
+      "τριάντα"
+    ],
+    "expected": 0,
+    "locale": "el-GR",
+    "uncertainWords": []
+  },
+  {
+    "name": "el-GR different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "είκοσι",
+      "τριάντα"
+    ],
+    "expected": null,
+    "locale": "el-GR",
+    "uncertainWords": []
+  },
+  {
+    "name": "cs-CZ cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "dvacet",
+      "třicet"
+    ],
+    "expected": 0,
+    "locale": "cs-CZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "cs-CZ different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "dvacet",
+      "třicet"
+    ],
+    "expected": null,
+    "locale": "cs-CZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "sk-SK cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "dvadsať",
+      "tridsať"
+    ],
+    "expected": 0,
+    "locale": "sk-SK",
+    "uncertainWords": []
+  },
+  {
+    "name": "sk-SK different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "dvadsať",
+      "tridsať"
+    ],
+    "expected": null,
+    "locale": "sk-SK",
+    "uncertainWords": []
+  },
+  {
+    "name": "hu-HU cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "húsz",
+      "harminc"
+    ],
+    "expected": 0,
+    "locale": "hu-HU",
+    "uncertainWords": []
+  },
+  {
+    "name": "hu-HU different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "húsz",
+      "harminc"
+    ],
+    "expected": null,
+    "locale": "hu-HU",
+    "uncertainWords": []
+  },
+  {
+    "name": "ro-RO cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "douăzeci",
+      "treizeci"
+    ],
+    "expected": 0,
+    "locale": "ro-RO",
+    "uncertainWords": []
+  },
+  {
+    "name": "ro-RO different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "douăzeci",
+      "treizeci"
+    ],
+    "expected": null,
+    "locale": "ro-RO",
+    "uncertainWords": []
+  },
+  {
+    "name": "hr-HR cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "dvadeset",
+      "trideset"
+    ],
+    "expected": 0,
+    "locale": "hr-HR",
+    "uncertainWords": []
+  },
+  {
+    "name": "hr-HR different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "dvadeset",
+      "trideset"
+    ],
+    "expected": null,
+    "locale": "hr-HR",
+    "uncertainWords": []
+  },
+  {
+    "name": "he-IL cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "עשרים",
+      "שלושים"
+    ],
+    "expected": 0,
+    "locale": "he-IL",
+    "uncertainWords": []
+  },
+  {
+    "name": "he-IL different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "עשרים",
+      "שלושים"
+    ],
+    "expected": null,
+    "locale": "he-IL",
+    "uncertainWords": []
+  },
+  {
+    "name": "ms-MY cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "dua puluh",
+      "tiga puluh"
+    ],
+    "expected": 0,
+    "locale": "ms-MY",
+    "uncertainWords": []
+  },
+  {
+    "name": "ms-MY different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "dua puluh",
+      "tiga puluh"
+    ],
+    "expected": null,
+    "locale": "ms-MY",
+    "uncertainWords": []
+  },
+  {
+    "name": "ca-ES cardinal accepts digit spelling",
+    "transcript": "20",
+    "choices": [
+      "vint",
+      "trenta"
+    ],
+    "expected": 0,
+    "locale": "ca-ES",
+    "uncertainWords": []
+  },
+  {
+    "name": "ca-ES different cardinal remains unclear",
+    "transcript": "21",
+    "choices": [
+      "vint",
+      "trenta"
+    ],
+    "expected": null,
+    "locale": "ca-ES",
+    "uncertainWords": []
+  },
+  {
+    "name": "English attached AM clock",
+    "transcript": "It starts at 8:00am.",
+    "choices": [
+      "It starts at eight am.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English AM clock with punctuation",
+    "transcript": "It starts at 08:00 a.m.",
+    "choices": [
+      "It starts at eight am.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English spoken minutes",
+    "transcript": "It starts at 8:30 pm.",
+    "choices": [
+      "It starts at eight thirty pm.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English half past",
+    "transcript": "It starts at 8:30.",
+    "choices": [
+      "It starts at half past eight.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English quarter past",
+    "transcript": "It starts at 8:15.",
+    "choices": [
+      "It starts at quarter past eight.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English quarter to",
+    "transcript": "It starts at 7:45.",
+    "choices": [
+      "It starts at quarter to eight.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English AM and PM differ",
+    "transcript": "The train to the city leaves at 8:00pm.",
+    "choices": [
+      "The train to the city leaves at eight am.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English minute values differ",
+    "transcript": "The train to the city leaves at 8:31pm.",
+    "choices": [
+      "The train to the city leaves at eight thirty pm.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English clock hours and minutes cannot swap",
+    "transcript": "The train to the city leaves at 12:08.",
+    "choices": [
+      "The train to the city leaves at 8:12.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English clock differs from decimal",
+    "transcript": "The train to the city leaves at 8.30.",
+    "choices": [
+      "The train to the city leaves at 8:30.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English clock seconds preserved",
+    "transcript": "The train to the city leaves at 8:30:15.",
+    "choices": [
+      "The train to the city leaves at 8:30.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English whole time uncertain still retries",
+    "transcript": "It starts at 8:00am.",
+    "choices": [
+      "It starts at eight am.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": [
+      "8:00am"
+    ]
+  },
+  {
+    "name": "English compound currency",
+    "transcript": "It costs $12.50.",
+    "choices": [
+      "It costs twelve dollars and fifty cents.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English currency decimal spoken digits",
+    "transcript": "It costs $12.50.",
+    "choices": [
+      "It costs twelve point five dollars.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English larger cardinal",
+    "transcript": "It costs 1250 dollars.",
+    "choices": [
+      "It costs one thousand two hundred fifty dollars.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English hundred and",
+    "transcript": "It costs 120 dollars.",
+    "choices": [
+      "It costs one hundred and twenty dollars.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English different cents cannot pass",
+    "transcript": "The total price for both tickets is $12.05.",
+    "choices": [
+      "The total price for both tickets is twelve dollars and fifty cents.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English different currencies cannot pass",
+    "transcript": "The total price for both tickets is €20.",
+    "choices": [
+      "The total price for both tickets is twenty dollars.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "English different explicit dollars cannot pass",
+    "transcript": "The total price for both tickets is US$20.",
+    "choices": [
+      "The total price for both tickets is NZ$20.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese hiragana age reading",
+    "transcript": "はたちです。",
+    "choices": [
+      "二十歳です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese yen symbol",
+    "transcript": "これは¥300です。",
+    "choices": [
+      "これは三百円です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese large yen amount",
+    "transcript": "これは10000円です。",
+    "choices": [
+      "これは一万円です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese AM clock notation",
+    "transcript": "午前8:00です。",
+    "choices": [
+      "午前八時です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese explicit date counters",
+    "transcript": "2026年10月26日です。",
+    "choices": [
+      "二千二十六年十月二十六日です。",
+      "東京です。"
+    ],
+    "expected": 0,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Japanese wrong counter remains distinct",
+    "transcript": "明日はこの場所に20人が集まります。",
+    "choices": [
+      "明日はこの場所に二十匹が集まります。",
+      "東京です。"
+    ],
+    "expected": null,
+    "locale": "ja-JP",
+    "uncertainWords": []
+  },
+  {
+    "name": "Korean native age",
+    "transcript": "20살입니다.",
+    "choices": [
+      "스무 살입니다.",
+      "서울입니다."
+    ],
+    "expected": 0,
+    "locale": "ko-KR",
+    "uncertainWords": []
+  },
+  {
+    "name": "Korean native count",
+    "transcript": "2개입니다.",
+    "choices": [
+      "두 개입니다.",
+      "서울입니다."
+    ],
+    "expected": 0,
+    "locale": "ko-KR",
+    "uncertainWords": []
+  },
+  {
+    "name": "Korean Sino currency",
+    "transcript": "300원입니다.",
+    "choices": [
+      "삼백 원입니다.",
+      "서울입니다."
+    ],
+    "expected": 0,
+    "locale": "ko-KR",
+    "uncertainWords": []
+  },
+  {
+    "name": "Korean currency symbol",
+    "transcript": "₩300입니다.",
+    "choices": [
+      "삼백 원입니다.",
+      "서울입니다."
+    ],
+    "expected": 0,
+    "locale": "ko-KR",
+    "uncertainWords": []
+  },
+  {
+    "name": "Korean mixed native hour and Sino minutes",
+    "transcript": "오전 8:30입니다.",
+    "choices": [
+      "오전 여덟 시 삼십 분입니다.",
+      "서울입니다."
+    ],
+    "expected": 0,
+    "locale": "ko-KR",
+    "uncertainWords": []
+  },
+  {
+    "name": "Mandarin large amount",
+    "transcript": "一共10000元。",
+    "choices": [
+      "一共一万元。",
+      "明天出发。"
+    ],
+    "expected": 0,
+    "locale": "zh-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "Mandarin zero minutes clock",
+    "transcript": "早上8:00开始。",
+    "choices": [
+      "早上八点开始。",
+      "明天出发。"
+    ],
+    "expected": 0,
+    "locale": "zh-CN",
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese zero minutes clock",
+    "transcript": "朝早8:00開始。",
+    "choices": [
+      "朝早八點開始。",
+      "聽日出發。"
+    ],
+    "expected": 0,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Cantonese 廿 numeral",
+    "transcript": "我今年20歲。",
+    "choices": [
+      "我今年廿歲。",
+      "聽日出發。"
+    ],
+    "expected": 0,
+    "locale": "zh-HK",
+    "uncertainWords": []
+  },
+  {
+    "name": "Arabic native digits",
+    "transcript": "٢٠",
+    "choices": [
+      "عشرون",
+      "ثلاثون"
+    ],
+    "expected": 0,
+    "locale": "ar-SA",
+    "uncertainWords": []
+  },
+  {
+    "name": "Hindi native digits",
+    "transcript": "२०",
+    "choices": [
+      "बीस",
+      "तीस"
+    ],
+    "expected": 0,
+    "locale": "hi-IN",
+    "uncertainWords": []
+  },
+  {
+    "name": "Thai native digits",
+    "transcript": "๒๐",
+    "choices": [
+      "ยี่สิบ",
+      "สามสิบ"
+    ],
+    "expected": 0,
+    "locale": "th-TH",
+    "uncertainWords": []
+  },
+  {
+    "name": "French decimal commas and currency",
+    "transcript": "Cela coûte 12,50 €.",
+    "choices": [
+      "Cela coûte douze virgule cinq euros.",
+      "Demain."
+    ],
+    "expected": 0,
+    "locale": "fr-FR",
+    "uncertainWords": []
+  },
+  {
+    "name": "German decimal commas and currency",
+    "transcript": "Das kostet 12,50 €.",
+    "choices": [
+      "Das kostet zwölf Komma fünf Euro.",
+      "Morgen."
+    ],
+    "expected": 0,
+    "locale": "de-DE",
+    "uncertainWords": []
+  },
+  {
+    "name": "Spanish decimal commas and currency",
+    "transcript": "Cuesta 12,50 €.",
+    "choices": [
+      "Cuesta doce coma cinco euros.",
+      "Mañana."
+    ],
+    "expected": 0,
+    "locale": "es-ES",
+    "uncertainWords": []
+  },
+  {
+    "name": "Portuguese decimal commas",
+    "transcript": "São 12,50.",
+    "choices": [
+      "São doze vírgula cinco.",
+      "Amanhã."
+    ],
+    "expected": 0,
+    "locale": "pt-BR",
+    "uncertainWords": []
+  },
+  {
+    "name": "French grouped decimal",
+    "transcript": "Cela coûte 1 200,50 euros.",
+    "choices": [
+      "Cela coûte 1200,5 euros.",
+      "Demain."
+    ],
+    "expected": 0,
+    "locale": "fr-FR",
+    "uncertainWords": []
+  },
+  {
+    "name": "German grouped decimal",
+    "transcript": "Das kostet 1.200,50 Euro.",
+    "choices": [
+      "Das kostet 1200,5 Euro.",
+      "Morgen."
+    ],
+    "expected": 0,
+    "locale": "de-DE",
+    "uncertainWords": []
+  },
+  {
+    "name": "Indian grouped integer",
+    "transcript": "It costs 1,20,000 rupees.",
+    "choices": [
+      "It costs 120000 rupees.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-IN",
+    "uncertainWords": []
+  },
+  {
+    "name": "Arabic decimal separator",
+    "transcript": "السعر ١٢٫٥٠ ريال.",
+    "choices": [
+      "السعر 12.5 ريال.",
+      "غدا."
+    ],
+    "expected": 0,
+    "locale": "ar-SA",
+    "uncertainWords": []
+  },
+  {
+    "name": "Fraction slash is not a decimal",
+    "transcript": "The recipe needs 1/2 litre of water.",
+    "choices": [
+      "The recipe needs 1.2 litre of water.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Date numeric separators equivalent",
+    "transcript": "The appointment is on 2026/10/26.",
+    "choices": [
+      "The appointment is on 2026-10-26.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Date values cannot swap",
+    "transcript": "The appointment is on 11/10/2026.",
+    "choices": [
+      "The appointment is on 10/11/2026.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Date cannot lose a field",
+    "transcript": "The appointment is on 10/26.",
+    "choices": [
+      "The appointment is on 2026/10/26.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Negative value retains sign",
+    "transcript": "The temperature in the mountains is -20 degrees.",
+    "choices": [
+      "The temperature in the mountains is 20 degrees.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Unicode minus retains sign",
+    "transcript": "The temperature in the mountains is −20 degrees.",
+    "choices": [
+      "The temperature in the mountains is -20 degrees.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Negative word and symbol equivalent",
+    "transcript": "The temperature is -20 degrees.",
+    "choices": [
+      "The temperature is minus twenty degrees.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Percent symbol and words equivalent",
+    "transcript": "The discount is 20%.",
+    "choices": [
+      "The discount is twenty percent.",
+      "Tomorrow."
+    ],
+    "expected": 0,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Percent unit cannot disappear",
+    "transcript": "The total discount for the group is 20%.",
+    "choices": [
+      "The total discount for the group is 20.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Different physical units remain distinct",
+    "transcript": "The total weight of the parcel is 20 kilograms.",
+    "choices": [
+      "The total weight of the parcel is 20 grams.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Values assigned to items cannot swap",
+    "transcript": "Please bring 30 apples and 20 oranges for the party.",
+    "choices": [
+      "Please bring 20 apples and 30 oranges for the party.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  },
+  {
+    "name": "Phone number leading zero is meaningful",
+    "transcript": "My phone number is 0212345678.",
+    "choices": [
+      "My phone number is 212345678.",
+      "Tomorrow."
+    ],
+    "expected": null,
+    "locale": "en-NZ",
+    "uncertainWords": []
+  }
+]

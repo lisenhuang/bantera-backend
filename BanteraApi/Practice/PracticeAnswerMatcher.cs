@@ -162,7 +162,12 @@ public static class PracticeAnswerMatcher
     };
     private static string[] ProtectedSignature(string text, string locale)
     {
-        var result = Regex.Matches(text, locale.StartsWith("en", StringComparison.OrdinalIgnoreCase) ? @"[0-9]+(?:decimal[0-9]+)?" : @"\p{N}+").Select(x => x.Value).ToList();
+        // Values must keep their order: exchanging prices between two items is
+        // not equivalent, even if the sentence contains the same bag of numbers.
+        var values = Regex.Matches(text, @"[0-9]+(?:decimal[0-9]+|点[0-9]+)?").Select(x => x.Value).ToArray();
+        var result = new List<string>();
+        if (values.Length > 0) result.Add("values:" + string.Join("|", values));
+        result.AddRange(PracticeNumericText.Protected(text));
         if (locale.ToLowerInvariant().Split('-')[0] == "ja")
             result.AddRange(Regex.Matches(text, @"[0-9]+[時分秒]|午前|午後").Select(m => m.Value));
         if (new[] { "zh", "yue" }.Contains(locale.ToLowerInvariant().Split('-')[0]))
