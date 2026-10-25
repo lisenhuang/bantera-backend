@@ -30,13 +30,16 @@ public class PracticeReviewLevelTests
         Assert.Equal(1, p.Level); Assert.Equal("11111111111", p.Window);
         Assert.True(e.FirstCorrect); Assert.NotNull(e.FinishedAt);
     }
-    [Fact] public void DowngradeRelocksHigherLevelsAndOldClientsUseEarnedLevel()
+    [Fact] public void DowngradeKeepsEarnedPassesAndAllowsReturningToUnlockedLevel()
     {
         var p = new PracticeProgress { Level = 3, Window = "00000000000", SelectedLevel = 2 };
         Assert.Equal(3, PracticeRules.EffectiveLevel(p, false));
         PracticeRules.Record(p, false);
         Assert.Equal(2, p.Level); Assert.Null(p.SelectedLevel);
-        Assert.False(PracticeRules.SelectLevel(p, "B2"));
+        Assert.Equal(2, p.HighestPassedLevel);
+        Assert.Equal("passed", PracticeRules.LevelStates(p)["A2"]);
+        Assert.True(PracticeRules.SelectLevel(p, "B2"));
+        Assert.Equal(3, p.Level);
     }
     [Fact] public void PrefetchWarmsSelectedReviewWithoutProjectingScoring()
     {

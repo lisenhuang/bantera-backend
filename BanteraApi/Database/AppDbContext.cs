@@ -71,6 +71,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(x => x.Dialogue).WithMany().HasForeignKey(x => x.DialogueId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<PracticeProgress>(e => {
+            e.Property(x => x.HighestPassedLevel).HasDefaultValue(-2);
             e.ToTable("practice_progress"); e.HasKey(x => new { x.UserId, x.Language });
             e.Property(x => x.Language).HasMaxLength(12); e.Property(x => x.Window).HasMaxLength(12);
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);

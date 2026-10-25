@@ -50,6 +50,7 @@ public sealed class PracticeProgress
     public string Language { get; set; } = "";
     public int Level { get; set; }
     public string Window { get; set; } = "";
+    public int HighestPassedLevel { get; set; } = -2;
     public int? SelectedLevel { get; set; }
 }
 public sealed class PracticeAttempt
@@ -97,22 +98,41 @@ public static class PracticeRules
         useSelected && progress.SelectedLevel is { } selected && selected >= BeginnerLevel && selected < progress.Level
             ? selected : progress.Level;
 
+    // A recommendation to review an easier level never removes an earned pass.
+    public static int HighestUnlockedLevel(PracticeProgress progress) =>
+        Math.Max(progress.Level, Math.Min(5, progress.HighestPassedLevel + 1));
+
+    public static Dictionary<string, string> LevelStates(PracticeProgress progress) =>
+        Enumerable.Range(BeginnerLevel, 7).ToDictionary(LevelName, level =>
+            level <= Math.Max(progress.HighestPassedLevel, progress.Level - 1) ? "passed" :
+            level <= HighestUnlockedLevel(progress) ? "practicing" : "locked");
+
     public static bool SelectLevel(PracticeProgress progress, string level)
     {
         var selected = LevelIndex(level);
-        if (selected < BeginnerLevel || selected > progress.Level) return false;
+        if (selected < BeginnerLevel || selected > HighestUnlockedLevel(progress)) return false;
+        if (selected > progress.Level)
+        {
+            progress.Level = selected;
+            progress.Window = "";
+        }
         progress.SelectedLevel = selected == progress.Level ? null : selected;
         return true;
     }
 
     public static void Record(PracticeProgress progress, bool correct, bool supportsA0 = false)
     {
+        progress.HighestPassedLevel = Math.Max(progress.HighestPassedLevel, progress.Level - 1);
         if (progress.SelectedLevel >= progress.Level) progress.SelectedLevel = null;
         progress.Window += correct ? "1" : "0";
         if (progress.Window.Length < 12) return;
         progress.Window = progress.Window[^12..];
         var successes = progress.Window.Count(c => c == '1');
-        if (successes >= 10 && progress.Level < 5) { progress.Level++; progress.Window = ""; }
+        if (successes >= 10)
+        {
+            progress.HighestPassedLevel = Math.Max(progress.HighestPassedLevel, progress.Level);
+            if (progress.Level < 5) { progress.Level++; progress.Window = ""; }
+        }
         else if (successes <= 4 && progress.Level > (supportsA0 ? BeginnerLevel : 0)) { progress.Level--; progress.Window = ""; }
         if (progress.SelectedLevel >= progress.Level) progress.SelectedLevel = null;
     }

@@ -70,7 +70,7 @@ public static class PracticeEndpoints
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
             worker.Request(new(userId, locale, language, PracticeRules.ClientLevel(PracticeRules.EffectiveLevel(progress), request.SupportsA0)));
-            return Results.Ok(new { currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, request.SupportsA0)), practiceLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(PracticeRules.EffectiveLevel(progress), request.SupportsA0)) });
+            return Results.Ok(new { levelStates = PracticeRules.LevelStates(progress), highestUnlockedLevel = PracticeRules.LevelName(PracticeRules.HighestUnlockedLevel(progress)), currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, request.SupportsA0)), practiceLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(PracticeRules.EffectiveLevel(progress), request.SupportsA0)) });
         });
         group.MapPost("/next", async (NextRequest request, ClaimsPrincipal user, AppDbContext db, PracticeWorker worker, R2StorageService storage, CancellationToken ct) =>
         {
@@ -144,7 +144,7 @@ public static class PracticeEndpoints
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
             worker.RequestAhead(userId, locale, language, progress, exposure, request.UseSelectedLevel, request.SupportsA0);
-            return exposure is null ? Results.Json(new { status = "preparing", retryAfterSeconds = 4, currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, request.SupportsA0)), practiceLevel = PracticeRules.LevelName(targetLevel) }, statusCode: 202) : Results.Ok(Present(exposure, storage, progress, request.SupportsA0));
+            return exposure is null ? Results.Json(new { status = "preparing", retryAfterSeconds = 4, levelStates = PracticeRules.LevelStates(progress), highestUnlockedLevel = PracticeRules.LevelName(PracticeRules.HighestUnlockedLevel(progress)), currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, request.SupportsA0)), practiceLevel = PracticeRules.LevelName(targetLevel) }, statusCode: 202) : Results.Ok(Present(exposure, storage, progress, request.SupportsA0));
         });
         // Saved reviews reuse the owned content, but never mutate the original
         // exposure or progression. Presentation always refreshes signed audio URLs.
@@ -221,7 +221,7 @@ public static class PracticeEndpoints
     {
         var p = await db.Set<PracticeProgress>().FindAsync([userId, language], ct);
         if (p is not null) return p;
-        p = new() { UserId = userId, Language = language, Level = supportsA0 ? PracticeRules.BeginnerLevel : 0 }; db.Add(p); return p;
+        p = new() { UserId = userId, Language = language, Level = supportsA0 ? PracticeRules.BeginnerLevel : 0, HighestPassedLevel = supportsA0 ? -2 : -1 }; db.Add(p); return p;
     }
     private static object Present(PracticeExposure e, R2StorageService storage, PracticeProgress progress, bool supportsA0, bool savedReview = false)
     {
@@ -232,6 +232,7 @@ public static class PracticeEndpoints
         return new { status = "ready", id = e.Id, locale = d.Locale, level = PracticeRules.LevelName(d.Level), cue = d.Cue,
             cueAudioUrl = storage.GeneratePresignedUrl(d.CueAudio, TimeSpan.FromHours(4)), choices,
             pronunciation = PracticePronunciation.Present(e),
+            levelStates = PracticeRules.LevelStates(progress), highestUnlockedLevel = PracticeRules.LevelName(PracticeRules.HighestUnlockedLevel(progress)),
             deferredScoring = e.DeferredScoring, translationUsed = e.TranslationUsed,
             currentLevel = PracticeRules.LevelName(PracticeRules.ClientLevel(progress.Level, supportsA0)), practiceLevel = PracticeRules.LevelName(d.Level), reviewMode = savedReview || e.ReviewMode };
     }

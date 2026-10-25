@@ -1626,6 +1626,11 @@ namespace BanteraApi.Migrations
                         .HasMaxLength(12)
                         .HasColumnType("character varying(12)");
 
+                    b.Property<int>("HighestPassedLevel")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(-2);
+
                     b.Property<int>("Level")
                         .HasColumnType("integer");
 
