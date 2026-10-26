@@ -89,6 +89,7 @@ public static class BanteraAiEndpoints
         if (lease is null) return Results.Json(new { message = "Finish your current Bantera AI conversation first." }, statusCode: 429);
         if (!context.Request.HasFormContentType || context.Request.ContentLength > 10 * 1024 * 1024) return Results.BadRequest();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        // Legacy multipart JSON response: leave proxy headroom. New voice messages use WebSockets.
         timeout.CancelAfter(TimeSpan.FromSeconds(100));
         Guid? correlationId = null;
         string? model = null;

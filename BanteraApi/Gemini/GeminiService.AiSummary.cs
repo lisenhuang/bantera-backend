@@ -16,7 +16,7 @@ public partial class GeminiService
                 contents = new[] { new { role = "user", parts = new[] { new { text = JsonSerializer.Serialize(AiConversationSummary.SourceData(request), JsonOpts) } } } }
             };
             using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            attempt.CancelAfter(TimeSpan.FromSeconds(20));
+            attempt.CancelAfter(TimeSpan.FromSeconds(120));
             try {
                 using var response = await SendTextRequestAsync(model, key, body, attempt.Token, reasoning: ReasoningFor(models, model));
                 // Do not pass provider bodies (possibly containing conversation text) to shared logs.

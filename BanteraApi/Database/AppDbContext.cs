@@ -35,6 +35,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AiPipelineEvent> AiPipelineEvents => Set<AiPipelineEvent>();
     public DbSet<AdminAudioTest> AdminAudioTests => Set<AdminAudioTest>();
 
+    public DbSet<BanteraApi.Jobs.AiOperation> AiOperations => Set<BanteraApi.Jobs.AiOperation>();
+
     // Stores a string list as a JSON array. Explicit rather than relying on provider
     // defaults, which map List<string> to text[] unless told otherwise.
     private static readonly ValueConverter<List<string>, string> StringListConverter = new(
@@ -48,6 +50,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.Entity<BanteraApi.Jobs.AiOperation>(e => {
+            e.ToTable("ai_operations"); e.HasKey(x => x.Id);
+            e.Property(x => x.Kind).HasMaxLength(40); e.Property(x => x.Status).HasMaxLength(20);
+            e.Property(x => x.RequestHash).HasMaxLength(64); e.Ignore(x => x.Terminal);
+            e.HasIndex(x => new { x.Status, x.CreatedAt }); e.HasIndex(x => x.ExpiresAt);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
         b.Entity<PracticeDialogue>(e => {
             e.ToTable("practice_dialogues"); e.HasKey(x => x.Id);
             e.Property(x => x.ContentVersion).HasDefaultValue(1);

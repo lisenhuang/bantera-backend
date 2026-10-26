@@ -1,3 +1,4 @@
+using BanteraApi.Jobs;
 using System.Diagnostics;
 using BanteraApi.Auth;
 using BanteraApi.Diagnostics;
@@ -11,7 +12,7 @@ public static class AiSearchTestEndpoint
     public sealed record Request(string? Query);
     public static bool Valid(Request request) => request.Query?.Trim().Length is >= 3 and <= 1000;
 
-    public static void Map(WebApplication app) => app.MapPost("/api/admin/ai-settings/search-test", async (
+    public static void Map(WebApplication app) => app.MapAiOperationPost("/api/admin/ai-settings/search-test", "admin-search", async (
         Request request, GeminiService gemini, IOptions<GeminiSettings> settings, AiModelSettingsService modelSettings,
         AiPipelineEventRecorder events, ILoggerFactory loggers, HttpContext context, CancellationToken ct) => {
         if (!Valid(request)) return Results.BadRequest(new ApiError("invalid_query", "Enter a search query between 3 and 1,000 characters."));
@@ -48,6 +49,6 @@ public static class AiSearchTestEndpoint
             return Results.Ok(new { success = false, code, message = code == "timeout" ? "Search timed out. Try again." : "Search could not complete. Check the diagnostic reference in pipeline events.",
                 provider = GeminiService.IsChatGpt(model) ? "ChatGPT" : "Gemini", model, testId = id, durationMs = clock.ElapsedMilliseconds });
         }
-    }).RequireAuthorization("Admin").RequireRateLimiting("admin-search-test")
+    }, admin: true, minutes: 11).RequireAuthorization("Admin").RequireRateLimiting("admin-search-test")
       .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(8192)).WithName("AdminTestWebSearch");
 }

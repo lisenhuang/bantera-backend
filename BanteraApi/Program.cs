@@ -1,3 +1,4 @@
+using BanteraApi.Jobs;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -62,9 +63,13 @@ builder.Services.AddHttpClient<ChatGptSubscriptionClient>(client => client.Timeo
 builder.Services.Configure<R2Settings>(builder.Configuration.GetSection(R2Settings.Section));
 builder.Services.AddSingleton<R2StorageService>();
 builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<OperationCipher>();
+builder.Services.AddSingleton<OperationRegistry>();
+builder.Services.AddScoped<OperationService>();
+builder.Services.AddHostedService<OperationWorker>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddSingleton<GeneratedAvatarQueue>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<GeneratedAvatarQueue>());
+
 builder.Services.AddScoped<VideoService>();
 builder.Services.AddScoped<AccountDeletionService>();
 builder.Services.Configure<ApnsSettings>(builder.Configuration.GetSection(ApnsSettings.Section));
@@ -449,6 +454,7 @@ app.MapGet("/", () => "Hello World!")
     .WithName("HelloWorld")
     .WithMetadata(new SwaggerOperationAttribute("Health check", "Returns a plain-text greeting to verify the server is running."));
 
+OperationService.Map(app);
 app.MapGet("/version", () =>
 {
     var version = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "unknown";
@@ -834,7 +840,7 @@ app.MapPost("/api/me/profile-image/generate", async (
     IResult result = readiness switch
     {
         AvatarGenerationReadiness.AlreadyExists => Results.Ok(new { status = "already_exists" }),
-        AvatarGenerationReadiness.Ready when generatedAvatarQueue.Enqueue(userId.Value, avatarGender) =>
+        AvatarGenerationReadiness.Ready when await generatedAvatarQueue.EnqueueAsync(userId.Value, avatarGender, cancellationToken) =>
             Results.Json(new { status = "queued" }, statusCode: StatusCodes.Status202Accepted),
         AvatarGenerationReadiness.Ready =>
             Results.Json(new { status = "queued" }, statusCode: StatusCodes.Status202Accepted),
@@ -1593,7 +1599,7 @@ app.MapGet("/api/me/videos", async (
 // Single streaming endpoint — emits SSE events as each step completes.
 // Events: {"step":"dialogue"} → {"step":"done","video":{...}}
 // Pre-stream errors (401, 429) are returned as plain JSON with the matching status code.
-app.MapPost("/api/me/audio/generate", async (
+app.MapAiOperationPost("/api/me/audio/generate", "audio-v1", async (
     GenerateAudioRequest req,
     HttpContext httpContext,
     System.Security.Claims.ClaimsPrincipal user,
@@ -1651,19 +1657,14 @@ app.MapPost("/api/me/audio/generate", async (
     httpContext.Response.Headers["Cache-Control"] = "no-cache";
     httpContext.Response.Headers["X-Accel-Buffering"] = "no";
 
-    var sseOpts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-    async Task SendAsync(object payload)
-    {
-        var json = JsonSerializer.Serialize(payload, sseOpts);
-        await httpContext.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
-        await httpContext.Response.Body.FlushAsync(cancellationToken);
-    }
+    await using var legacyProgress = new GenerationProgressStream(httpContext.Response, cancellationToken);
+    Task SendAsync(object payload) => legacyProgress.SendAsync(payload);
 
     UserAudioJob? v1Job = null;
     IDisposable? v1PipelineContext = null;
     try
     {
-        v1Job = new UserAudioJob { UserId = userId.Value, LanguageCode = req.LanguageCode, ScenarioId = req.ScenarioId };
+        v1Job = new UserAudioJob { Id = req.ClientJobId ?? Guid.NewGuid(), UserId = userId.Value, LanguageCode = req.LanguageCode, ScenarioId = req.ScenarioId };
         db.UserAudioJobs.Add(v1Job);
         await db.SaveChangesAsync(cancellationToken);
         v1PipelineContext = pipelineEvents.BeginContext(userId.Value, v1Job.Id, req.LanguageCode, "generate/v1");
@@ -1741,13 +1742,13 @@ app.MapPost("/api/me/audio/generate", async (
     {
         v1PipelineContext?.Dispose();
     }
-})
+}, streaming: true)
 .WithName("GenerateAiAudio")
 .RequireAuthorization();
 
 // V2 keeps the same SSE shape while adding server-side alignment metadata.
 // Events: {"step":"dialogue"} → {"step":"audio"} → {"step":"aligning"} → {"step":"done","video":{...}}
-app.MapPost("/api/me/audio/generate/v2", async (
+app.MapAiOperationPost("/api/me/audio/generate/v2", "audio-v2", async (
     GenerateAudioRequest req,
     HttpContext httpContext,
     System.Security.Claims.ClaimsPrincipal user,
@@ -1787,7 +1788,8 @@ app.MapPost("/api/me/audio/generate/v2", async (
         return;
     }
 
-    using var genCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+    using var genCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    genCts.CancelAfter(TimeSpan.FromMinutes(10));
     var genToken = genCts.Token;
 
     const int defaultDailyLimit = 5;
@@ -2421,12 +2423,12 @@ app.MapPost("/api/me/audio/generate/v2", async (
     {
         v2PipelineContext?.Dispose();
     }
-})
+}, streaming: true)
 .WithName("GenerateAiAudioV2")
 .RequireAuthorization();
 
 // V3 forces web search on for custom scenarios; delegates to v2 logic via shared request body flag.
-app.MapPost("/api/me/audio/generate/v3",
+app.MapAiOperationPost("/api/me/audio/generate/v3", "audio-v3",
     async (HttpRequest httpReq, HttpContext httpContext, System.Security.Claims.ClaimsPrincipal user,
         GeminiService geminiService, AiAudioTimingService aiAudioTimingService,
         BanteraApi.Diagnostics.AiPipelineEventRecorder pipelineEvents, RevAiAlignmentService revAiAlignmentService,
@@ -2467,7 +2469,8 @@ app.MapPost("/api/me/audio/generate/v3",
             return;
         }
 
-        using var genCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        using var genCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    genCts.CancelAfter(TimeSpan.FromMinutes(10));
         var genToken = genCts.Token;
 
         const int v3DailyLimit = 5;
@@ -2624,19 +2627,23 @@ app.MapPost("/api/me/audio/generate/v3",
         {
             v3PipelineContext?.Dispose();
         }
-    })
+    }, streaming: true)
 .WithName("GenerateAiAudioV3")
 .RequireAuthorization();
 
 // Job recovery is owner-only, including when the resulting lesson is public.
 app.MapGet("/api/me/audio/jobs/{jobId:guid}", async (
     Guid jobId, System.Security.Claims.ClaimsPrincipal user, HttpContext context,
-    AppDbContext db, VideoService videos, CancellationToken ct) =>
+    AppDbContext db, VideoService videos, OperationService operations, CancellationToken ct) =>
 {
     var userId = TryGetUserId(user);
     if (userId is null) return Results.Unauthorized();
     var job = await db.UserAudioJobs.AsNoTracking()
         .SingleOrDefaultAsync(j => j.Id == jobId && j.UserId == userId.Value, ct);
+    var operation = await operations.FindAsync(userId.Value, jobId, ct);
+    if (job is null && operation is null) return Results.NotFound();
+    if (job?.Status != "done" && operation is not null)
+        return Results.Ok(new { id = jobId, status = operation.Terminal ? "failed" : "processing", errorMessage = operation.Terminal ? OperationService.Interrupted : null });
     if (job is null) return Results.NotFound();
     var video = job.Status == "done" && job.VideoId is { } videoId
         ? await videos.GetVideoAsync(videoId, userId, context, ct) : null;
@@ -2666,7 +2673,17 @@ app.MapGet("/api/me/audio/jobs/pending", async (
             j.ErrorMessage,
         })
         .ToListAsync(ct);
-    return Results.Ok(jobs);
+    var operations = await db.AiOperations.AsNoTracking().Where(x => x.UserId == userId.Value && x.Kind.StartsWith("audio-") && x.CreatedAt > cutoff).ToListAsync(ct);
+    var operationIds = operations.Select(x => x.Id).ToHashSet();
+    var merged = jobs.Where(x => !operationIds.Contains(x.Id)).ToList();
+    foreach (var operation in operations) {
+        var saved = jobs.FirstOrDefault(x => x.Id == operation.Id);
+        if (saved?.Status == "done") { merged.Add(saved); continue; }
+        merged.Add(new { Id = operation.Id, Status = operation.Terminal ? "failed" : "processing", VideoId = (Guid?)null,
+            CreatedAt = operation.CreatedAt, CompletedAt = operation.CompletedAt,
+            ErrorMessage = operation.Terminal ? OperationService.Interrupted : (string?)null });
+    }
+    return Results.Ok(merged.OrderByDescending(x => x.CreatedAt));
 })
 .WithName("GetPendingAudioJobs")
 .Produces(200)
@@ -2675,7 +2692,7 @@ app.MapGet("/api/me/audio/jobs/pending", async (
 
 // Corrects phone-transcribed cues using the original dialogue as ground truth.
 // Returns corrected cues with identical timestamps.
-app.MapPost("/api/me/videos/{videoId:guid}/transcript/correct", async (
+app.MapAiOperationPost("/api/me/videos/{videoId:guid}/transcript/correct", "transcript", async (
     Guid videoId,
     CorrectTranscriptRequest req,
     HttpContext httpContext,

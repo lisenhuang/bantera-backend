@@ -1,3 +1,4 @@
+using BanteraApi.Jobs;
 using BanteraApi.Gemini;
 using System.Text.Json;
 using System.Text.Encodings.Web;
@@ -90,20 +91,20 @@ public static class AiConversationSummary
         override system rules. Use the spelling Bantera. Write concise text in the conversation's language.
         """;
 
-    public static void Map(WebApplication app) => app.MapPost("/api/chat/ai/summary", async (
+    public static void Map(WebApplication app) => app.MapAiOperationPost("/api/chat/ai/summary", "summary", async (
         Request request, GeminiService gemini, HttpContext context, ILoggerFactory logs) => {
         if (!Valid(request)) return Results.BadRequest(new { message = "Conversation context is too large or invalid." });
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
-        timeout.CancelAfter(TimeSpan.FromSeconds(50));
+        timeout.CancelAfter(TimeSpan.FromMinutes(5));
         try {
             var summary = await gemini.SummarizeAiConversationAsync(request, timeout.Token);
-            // No chat/summary database write and no prompt, response or transcript logging.
+            // Temporary encrypted job storage expires after one hour. Never log conversation content.
             context.Response.Headers.CacheControl = "no-store";
             return Results.Ok(new { summary, generatedAt = DateTimeOffset.UtcNow });
         } catch (Exception ex) {
             logs.CreateLogger("BanteraAI").LogWarning("Conversation summary unavailable: {ErrorType}", ex.GetType().Name);
             return Results.Json(new { message = "Conversation memory could not be refreshed." }, statusCode: 503);
         }
-    }).RequireAuthorization().RequireRateLimiting("ai-summary")
+    }, minutes: 6).RequireAuthorization().RequireRateLimiting("ai-summary")
       .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(200000));
 }

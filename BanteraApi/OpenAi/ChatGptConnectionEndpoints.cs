@@ -1,3 +1,4 @@
+using BanteraApi.Jobs;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -36,12 +37,12 @@ public static class ChatGptConnectionEndpoints
             return Results.Ok(new { cancelled = true });
         });
         group.MapGet("/models", (ChatGptSubscriptionClient service, CancellationToken ct) => service.ModelsAsync(ct));
-        group.MapPost("/test", async (TestRequest body, ChatGptSubscriptionClient service, CancellationToken ct) => {
+        group.MapAiOperationPost("/test", "admin-gpt", async (TestRequest body, ChatGptSubscriptionClient service, CancellationToken ct) => {
             if (body.Prompt?.Trim().Length is not (>= 1 and <= 2000) || body.Model?.Length is not (>= 1 and <= 128))
                 return Results.BadRequest(new { code = "invalid_request", message = "Choose a model and enter a prompt of up to 2,000 characters." });
             try { return Results.Ok(await service.TestAsync(body.Model, body.Reasoning, body.Prompt.Trim(), body.Search, ct)); }
             catch (TimeoutException) { return Results.Json(new { code = "response_timeout", message = "The GPT response reached your configured timeout. Try a lower reasoning level or increase the timeout in model settings." }, statusCode: 504); }
-        }).RequireRateLimiting("admin-search-test");
+        }, admin: true, minutes: 6).RequireRateLimiting("admin-search-test");
         group.MapPost("/start", async (StartRequest body, ClaimsPrincipal user, ChatGptConnection service, CancellationToken ct) =>
             Results.Ok(new { authorizationUrl = await service.StartAsync(Admin(user), body.BrowserBinding ?? "", ct) }));
         group.MapPost("/complete", async (CompleteRequest body, ClaimsPrincipal user, ChatGptConnection service, CancellationToken ct) => {

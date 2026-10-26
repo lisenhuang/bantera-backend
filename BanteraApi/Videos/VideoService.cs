@@ -22,7 +22,8 @@ public class VideoService(
     LinkGenerator linkGenerator,
     CloudflareImageService cloudflareImageService,
     CueTimingSettingsService cueTimingSettings,
-    ILogger<VideoService> logger)
+    ILogger<VideoService> logger,
+    BanteraApi.Jobs.OperationService? operations = null)
 {
     private static readonly JsonSerializerOptions TranscriptJsonOptions = new(JsonSerializerDefaults.Web);
     private const string HighlightStart = "\u001b[30;103m";
@@ -123,7 +124,8 @@ public class VideoService(
         if (video is null || !CanAccess(video, requesterUserId))
             return null;
 
-        await EnsureAiAudioCoverAsync(video, cancellationToken);
+        if (ShouldGenerateAiAudioCover(video) && operations is not null)
+            await operations.QueueInternalAsync(video.UserId, "cover", video.Id.ToString(), new { videoId = video.Id }, cancellationToken);
         return BuildResponse(video, httpContext);
     }
 
@@ -549,6 +551,12 @@ public class VideoService(
         db.UserVideos.Add(video);
         await db.SaveChangesAsync(cancellationToken);
         return BuildResponse(video, httpContext);
+    }
+
+    public async Task GenerateMissingCoverAsync(Guid id, Guid owner, CancellationToken cancellationToken)
+    {
+        var video = await db.UserVideos.SingleOrDefaultAsync(x => x.Id == id && x.UserId == owner, cancellationToken);
+        if (video is not null) await EnsureAiAudioCoverAsync(video, cancellationToken);
     }
 
     private async Task EnsureAiAudioCoverAsync(

@@ -1591,7 +1591,10 @@ TRANSCRIPT WORDS (index<TAB>word<TAB>speaker):
     }
 
     /// <summary>The models these keys can use right now, straight from Gemini (not cached).</summary>
-    public async Task<GeminiModelCatalog> ListModelsAsync(CancellationToken cancellationToken = default)
+    public Task<GeminiModelCatalog> ListModelsAsync(CancellationToken cancellationToken = default) =>
+        ModelCatalogCache.GetAsync(ListModelsUncachedAsync, cancellationToken);
+
+    private async Task<GeminiModelCatalog> ListModelsUncachedAsync(CancellationToken cancellationToken)
     {
         return await WithGeminiKeyAsync("list models", async key =>
         {
