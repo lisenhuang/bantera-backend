@@ -2481,3 +2481,61 @@ which indexes stored levels through the old six-level array. See
 [the compatibility and rollback notes](practice-a0.md). Never restore the old
 database as an application rollback. No Git commit/push or store submission was
 performed.
+
+## 27 October 2026: AI reminder cleanup and vocabulary instructions
+
+Release **bantera-20261027-3**, backend **1.44.0**, completed successfully at
+00:28:50 UTC. Adds authenticated reminder-history listing/removal and bulk
+removal. Pending schedules and generated media are removed atomically; worker
+conditional updates cannot revive deleted entries. Already-ringing calls remain
+visible. Existing reminder cancellation endpoints are unchanged. Vocabulary tool
+instructions request very simple definitions and a short example sentence.
+
+**GO for published apps:** additive routes, no migration, no new configuration
+or secrets. Website source/image remains 0.22.0, with a cloned container pointed
+at the new backend. API 18163, web 13054, connector readiness 12092. A verified
+8,620,509-byte database backup preceded staging. Local backend validation:
+535 AI tests passed, 14 optional integration tests skipped; the isolated local
+PostgreSQL removal/race/account-isolation test passed. Candidate and live checks
+passed 12 contracts each; all 138 monitored public responses returned 200.
+Post-release retention preserved the current and previous release, and left
+112 GB free. Public checks passed again after cleanup. No Git push occurred.
+
+Signed app 3.25.0 (482) was installed and verified on the user's iPhone without
+launching it. 114 app tests passed, including cleanup, localized layout,
+leaderboard, audio, memory, vocabulary and callback/CallKit tests. Locked-screen
+physical CallKit acceptance remains unverified.
+
+Rollback preserves database writes:
+`python3 /home/ubuntu/releases/bantera-20261027-3/deploy.py rollback`
+
+## 27 October 2026: Admin location and simplified user list
+
+Release **bantera-20261027-4**, backend **1.45.0** and website **0.23.0**,
+completed at **01:18:14 UTC**. Admin responses add latest known country and
+catalogue language flags to user lists, and country/city/activity date to user
+details. No raw IP address is exposed. Activity recording now updates the
+location tuple together so a country-only visit cannot retain an earlier city
+from another country. Missing location headers preserve the known tuple.
+
+**GO for existing published apps:** response fields are additive; no database
+migration, new environment variable, secret or DI dependency. City depends on
+the existing Cloudflare visitor-location headers; missing data is displayed as
+unavailable. Recording remains periodic, so this is an approximate last recorded
+location, not a live tracking guarantee.
+
+Backend build and 31 focused tests passed, including isolated PostgreSQL tests
+for user isolation, country/flag projections and location updates. Website build,
+focused lint and 25 tests passed. Candidate and live smoke checks each passed
+14 contracts. All **130/130** monitored public responses returned 200. No
+authenticated production dashboard session or real-user impersonation was used.
+
+API loopback 18164, website 13055 and connector readiness 12093. Database backup
+verified at **8,598,539 bytes**. Source archives, hashes and rollout proofs remain
+in the release directory. Retention preserved release 4 and rollback release 3;
+disk free space was 112 GB before building and 111 GB after cleanup. Public
+checks passed again after cleanup. No Git commit/push occurred.
+
+Rollback preserves database writes and restores backend 1.44.0 plus the prior
+website image (whose public marker remains `bantera-20261027-2`):
+`python3 /home/ubuntu/releases/bantera-20261027-4/deploy.py rollback`

@@ -36,8 +36,8 @@ public class UserActivityRecorder(IMemoryCache cache, ILogger<UserActivityRecord
 
         try
         {
-            // Location keeps the latest non-null value for the day, so a request that
-            // arrives without Cloudflare headers never erases a known location.
+            // Keep each location together: a country-only update must not retain
+            // a city from an earlier visit. Missing headers preserve the whole prior location.
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO user_activity_daily
                     ("UserId","Date","FirstSeenAt","LastSeenAt","TouchCount","MessagesSent","Source",
@@ -47,9 +47,9 @@ public class UserActivityRecorder(IMemoryCache cache, ILogger<UserActivityRecord
                 ON CONFLICT ("UserId","Date") DO UPDATE
                     SET "LastSeenAt"  = EXCLUDED."LastSeenAt",
                         "TouchCount"  = user_activity_daily."TouchCount" + 1,
-                        "CountryCode" = COALESCE(EXCLUDED."CountryCode", user_activity_daily."CountryCode"),
-                        "Region"      = COALESCE(EXCLUDED."Region", user_activity_daily."Region"),
-                        "City"        = COALESCE(EXCLUDED."City", user_activity_daily."City")
+                        "CountryCode" = CASE WHEN {geo.IsEmpty} THEN user_activity_daily."CountryCode" ELSE EXCLUDED."CountryCode" END,
+                        "Region"      = CASE WHEN {geo.IsEmpty} THEN user_activity_daily."Region" ELSE EXCLUDED."Region" END,
+                        "City"        = CASE WHEN {geo.IsEmpty} THEN user_activity_daily."City" ELSE EXCLUDED."City" END
                 """, ct);
         }
         catch (Exception ex)

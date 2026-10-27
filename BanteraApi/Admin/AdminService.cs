@@ -22,11 +22,16 @@ public record AdminUserListItem(
     DateTime CreatedAt,
     DateTime? LastLoginAt,
     int VideoCount,
-    string? AvatarUrl);
+    string? AvatarUrl,
+    string? CountryCode = null,
+    string? NativeLanguageFlag = null,
+    string? LearningLanguageFlag = null);
 
 public record AdminIdentityInfo(string Provider, string? ProviderEmail, DateTime CreatedAt);
 
 public record AdminUserStats(int UploadCount, int VideoCount);
+
+public record AdminUserLocation(string? CountryCode, string? City, DateOnly ActivityDate);
 
 public record AdminUserDetail(
     Guid Id,
@@ -42,7 +47,8 @@ public record AdminUserDetail(
     IReadOnlyList<AdminIdentityInfo> Identities,
     AdminUserStats Stats,
     string? AvatarUrl,
-    bool AlwaysOnline);
+    bool AlwaysOnline,
+    AdminUserLocation? LastLocation = null);
 
 public record AdminVideoListItem(
     Guid Id,
@@ -173,6 +179,11 @@ public class AdminService(
                 x.VideoCount,
                 x.User.AvatarObjectKey,
                 x.User.AvatarUpdatedAt,
+                CountryCode = db.UserActivityDaily
+                    .Where(a => a.UserId == x.User.Id && a.CountryCode != null)
+                    .OrderByDescending(a => a.Date)
+                    .Select(a => a.CountryCode)
+                    .FirstOrDefault(),
             })
             .ToListAsync();
 
@@ -188,7 +199,10 @@ public class AdminService(
                 x.CreatedAt,
                 x.LastLoginAt,
                 x.VideoCount,
-                BuildAvatarUrl(x.Id, x.AvatarObjectKey, x.AvatarUpdatedAt)))
+                BuildAvatarUrl(x.Id, x.AvatarObjectKey, x.AvatarUpdatedAt),
+                x.CountryCode,
+                LanguageFlags.For(x.NativeLanguage),
+                LanguageFlags.For(x.LearningLanguage)))
             .ToList();
 
         return new AdminPagedResult<AdminUserListItem>(items, total);
@@ -222,8 +236,18 @@ public class AdminService(
             identities,
             new AdminUserStats(videoCount, videoCount),
             BuildAvatarUrl(user.Id, user.AvatarObjectKey, user.AvatarUpdatedAt),
-            user.AlwaysOnline);
+            user.AlwaysOnline,
+            await GetLastLocationAsync(db, userId));
     }
+
+    // Read the most recent known location from the same activity row. Never
+    // combine an older city's value with a newer country's value.
+    public static Task<AdminUserLocation?> GetLastLocationAsync(AppDbContext db, Guid userId)
+        => db.UserActivityDaily.AsNoTracking()
+            .Where(a => a.UserId == userId && (a.CountryCode != null || a.City != null))
+            .OrderByDescending(a => a.Date)
+            .Select(a => new AdminUserLocation(a.CountryCode, a.City, a.Date))
+            .FirstOrDefaultAsync();
 
     public async Task<bool> PatchUserAsync(
         Guid userId,
