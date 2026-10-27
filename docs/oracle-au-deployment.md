@@ -2678,3 +2678,141 @@ physical-device testing, production test rows, Git commit/push or store submissi
 
 Rollback preserves newer database writes:
 `python3 /home/ubuntu/releases/bantera-20261027-9/deploy.py rollback`
+
+
+## 27 October 2026: Private Māori model evaluation dashboard
+
+Release **bantera-20261027-10** completed at **05:47:21 UTC**. Backend
+**1.48.0**, website **0.24.0**, and private model service **1.0.1** are deployed.
+Dashboard: `https://bantera.app/dashboard/model-tests`. API loopback 18170,
+website 13061, connector readiness 12099. Current release 10 and rollback
+release 9 are retained. No mobile source, build or installation was changed;
+no Git commit or push was performed.
+
+**GO for existing published apps:** additive admin-only routes, no PostgreSQL
+schema migration. New backend settings `LocalModelTests__BaseUrl` and
+`LocalModelTests__ServiceKey` are installed server-side. Existing API contracts
+are unchanged. The 8,819,462-byte PostgreSQL backup was verified before staging.
+The current active admin role is checked for every route, and worker jobs/results,
+cancellation and assessments are owner-only. The website enforces same-origin
+writes; the private worker requires a service key and backend-provided owner.
+
+Model container `bantera-model-service-1` uses an internal Docker network shared
+only with the backend, no published ports, a non-root user, read-only root,
+Docker init, no added capabilities, no swap, two CPU cores and 8 GiB memory.
+One durable background job runs at a time. Audio is capped at 8 MiB/60 seconds;
+translation at 1,000 characters/256 input tokens and 128 output tokens. Jobs
+have a 900-second inference deadline and 24-hour result retention. Temporary
+audio is removed after completion, failure/cancellation and startup recovery.
+Do not remove `/home/ubuntu/bantera-model-data` or `bantera-model-state` in build
+cleanup. Server-only service credentials stay in the 0600 `service.env` file.
+
+Exact model files: multilingual Whisper Small Q5_1 and large-v3 Q5_0 from the
+whisper.cpp distribution revision `5359861c739e955e79d9a303bcbc70fb988958b1`;
+Google MADLAD-400-3B-MT Q4_K GGUF revision
+`fa184c675da0b5c9e1c8694fccd4e12e2d422094`. Runtimes: whisper.cpp 1.9.5 and
+Candle 0.9.1. Exact SHA-256, image/binary hashes, source archive and full licence
+notices are retained in the model-service proof and source snapshot.
+
+Two existing synthetic Māori Practice cues (2.184 s and 1.440 s) were benchmarked.
+Small took 18.5–20.9 s, large-v3 128.1–129.2 s and MADLAD 7.4–9.6 s. Both
+Whisper sizes had 100% and 66.7% WER on these clips; MADLAD had meaning errors.
+These results do not justify mobile integration or establish native-speaker
+accuracy. Detailed benchmarks are in backend `docs/model-tests/`.
+
+Validation: backend build/3 gateway tests, website build/typecheck/focused lint
+and 25 tests; 15 Linux worker tests. Forced container restart terminated running
+inference, failed queued work clearly and removed temporary audio. Candidate
+and public checks each passed 17 existing HTTP contracts and 38 dashboard/auth
+checks; real transcription, translation and assessment saving passed through
+both candidate and public website proxies. Public job creation returned in
+46–56 ms. All **132/132** handover availability samples returned 200. The browser
+verified the unauthenticated login gate; authenticated behaviour was verified
+through HTTP, not a logged-in visual browser session.
+
+Post-release cleanup retained the previous application/connector release and
+working model rollback image. Disposable model build directories and temporary
+benchmark audio copies were removed; model weights, state, backups and original
+Bantera source audio were preserved. Free disk was 112 GiB before preparation
+and approximately 102 GiB after final cleanup; both public services passed again.
+
+Rollback preserves database writes:
+`python3 /home/ubuntu/releases/bantera-20261027-10/deploy.py rollback`
+
+The previous backend has no model-testing routes. The private model worker can
+remain idle or be stopped separately on application rollback. Never restore an
+old database as part of application rollback.
+
+## Generated Māori round-trip dashboard: 27 October 2026
+
+Release **bantera-20261027-11** publishes API **1.49.0**, website **0.25.0**,
+and private model service **1.1.0** at `/dashboard/model-tests`. Admins choose
+5–60 Māori words and either local Whisper size. The app's shared text provider
+writes the passage and English reference; its Māori Practice Gemini TTS path
+creates audio; Whisper explicitly recognises `mi`; MADLAD translates the
+Whisper transcript. Results include actual model names, word count, timings,
+audio playback, WER and manual translation assessment. Machine references and
+synthetic recordings are explicitly labelled as not human-verified truth.
+
+**GO for existing published apps:** additive admin routes and hosted worker;
+existing app API contracts remain unchanged. No PostgreSQL migration, new
+secret, mobile source change, build or installation. Existing private model
+service settings remain valid. The SQLite queue received additive columns;
+both PostgreSQL (8,899,354 bytes) and SQLite (28,672 bytes) were backed up first.
+
+Generation has one global claim, a renewable 60-second lease and a ten-minute
+deadline. Provider handoffs are private and cannot be reached through the public
+gateways. Current active-admin checks apply to all public endpoints, including
+settings and audio; jobs and generated audio are owner-only. Cancellation and
+lease expiry prevent late provider responses from reviving a job. Local
+inference remains serial, capped at 2 CPUs / 8 GiB RAM with no swap. Generated
+successful audio is retained for 24 hours; cancelled/failed audio and inference
+temporary files are deleted. Cloud preparation can overlap one local inference.
+
+Validation: backend build and 174 focused tests; website build/typecheck/focused
+lint and 25 tests; 38 isolated Linux test executions. Candidate and public
+existing API/website smoke checks passed (17 each), plus admin endpoint checks.
+The real 10-word pipeline used `chatgpt/gpt-6-luna` and
+`gemini-2.5-flash-preview-tts` with Kore: text 3.744 s, TTS 5.675 s, Whisper Small
+19.937 s, MADLAD 10.267 s. Submission took 39 ms. Public audio playback/range
+seeking, role rejection and assessment persistence passed. An initial public
+audio probe without the standard verification User-Agent failed; the same
+endpoint passed with the standard verification headers. Authenticated
+behaviour was verified over HTTP, not in a logged-in visual browser session.
+Whisper WER was 70% on this synthetic example; translation remains unassessed.
+See backend `docs/model-tests/` for exact models, licences and full measurements.
+
+The connector handover passed **132/132 HTTP 200** availability samples. Cleanup
+retained release 10 as the application rollback and model image 1.0.1 as the
+model rollback. Free disk changed from about 102 GiB to 100.4 GiB. The builder
+was stopped after deployment. Existing databases, volumes, model files and
+unrelated services were preserved. No commit or push was performed.
+
+Containers: `bantera-api-20261027-11` (loopback 18171),
+`bantera-website-20261027-11` (13062), `cloudflared-20261027-11` (12100), and
+`bantera-model-service-2` (no published port, internal Docker network).
+
+Rollback: `python3 /home/ubuntu/releases/bantera-20261027-11/deploy.py rollback`.
+Keep model service 1.1.0 on application rollback because it remains compatible
+with manual jobs; do not restore SQLite or PostgreSQL over newer writes.
+Never start both model-service containers against the same state directory.
+Model binaries/weights are unchanged from 1.0.1. Canonical server sources and
+notices remain under `/home/ubuntu/bantera-model-service`; protected runtime
+snapshots and proofs are in the immutable release directory.
+
+## 27 October 2026: pronunciation alignment and message avatar payloads
+
+Verified release `bantera-20261027-12` on Oracle AU: backend **1.50.0**, retaining the existing website **0.25.0** image and its `bantera-20261027-11` public deployment marker. The website container's internal API origin now points to `bantera-api-20261027-12`; no website source was changed by this release.
+
+- Current containers: `bantera-api-20261027-12`, `bantera-website-20261027-12`, `cloudflared-20261027-12`.
+- Loopback test ports: API 18172, website 13063, tunnel readiness 12101.
+- Rollback release: `bantera-20261027-11`, retained with its source/runtime snapshots and images. Old API and website stopped after handover.
+- Reviewed working-tree backend archive SHA-256: `32a58230023e7770a1a7e78195a57339944cf1cb4548f444b820ff91ad3c2fd8`. Existing model-testing source matched the live release and was preserved.
+- Migration `20261027080246_PronunciationAlignmentVersion` applied after a verified server-side database backup. No destructive schema/data change.
+- `PracticePronunciation__RepairExisting=true` enables the bounded/resumable sweep. At the first post-release aggregate check, all 188 previously saved mappings were marked checked, 162 had accepted readings and 26 were queued for regeneration/retry. This does not claim every queued repair has completed. See [repair behavior](pronunciation-alignment.md).
+- Existing pronunciation advisory lock was held briefly across staging and promotion to prevent old workers rewriting repaired mappings; released after the old API stopped. Other jobs/API traffic continued. Automatic rollback preserved database writes.
+- Both public domains verified after promotion and cleanup. Handover monitor recorded **156 HTTP 200 checks**, no failures. Public API returned 1.50.0; website returned its retained marker/version. Authentication gates and public lesson listing passed.
+- Cleanup retained current plus one rollback release and did not delete volumes or database backups. Free disk space: approximately 101 GiB before and after, usage reduced from 49% to 48%.
+- Message payloads add sender metadata and opt eligible alerts into the iOS notification service extension; existing clients retain the original alert. Actual avatar presentation requires a future signed app release. CallKit provider icon handling was not changed.
+
+App **3.31.0 (498)** was built without signing and verified in simulators only. No physical-phone install/test, commit/push or app-store submission occurred as part of this task.

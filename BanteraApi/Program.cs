@@ -46,6 +46,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection(JwtSettings.Section));
 builder.Services.AddSingleton<JwtService>();
 builder.Services.Configure<AppleSignInSettings>(builder.Configuration.GetSection(AppleSignInSettings.Section));
+builder.Services.AddHttpClient("local-model-tests", client => client.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddHttpClient<AppleIdentityTokenValidator>();
 builder.Services.Configure<GoogleSignInSettings>(builder.Configuration.GetSection(GoogleSignInSettings.Section));
 builder.Services.AddHttpClient<GoogleIdentityTokenValidator>();
@@ -121,6 +122,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<PracticeWorker>())
 builder.Services.AddSingleton<IDialogueDurationPlanner, HistoricalDialogueDurationPlanner>();
 builder.Services.AddSingleton<GeminiVoiceCatalog>();
 builder.Services.AddHostedService<AdminAudioTestWorker>();
+builder.Services.AddHostedService<LocalModelGenerationWorker>();
 builder.Services.AddSingleton<GeminiPaidFallback>();
 builder.Services.AddSingleton<GeminiRegularKeyStore>();
 builder.Services.AddSingleton<GeminiKeyHealthService>();
@@ -3202,6 +3204,7 @@ AiSearchTestEndpoint.Map(app);
 ChatCallSettingsEndpoints.Map(app);
 BanteraAiEndpoints.Map(app);
 AdminAudioTestEndpoints.Map(app);
+LocalModelTestEndpoints.Map(app);
 AiPipelineEndpoints.Map(app);
 AdminPipelineRunEndpoints.Map(app);
 McpOAuthEndpoints.Map(app);

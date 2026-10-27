@@ -264,6 +264,9 @@ public class ChatService(
                 {
                     ["threadId"] = thread.Id.ToString(),
                     ["threadType"] = ChatThreadTypes.DirectMessage,
+                    ["senderId"] = sender.Id.ToString(),
+                    ["senderName"] = string.IsNullOrWhiteSpace(sender.Name) ? "Bantera user" : sender.Name,
+                    ["senderAvatarUrl"] = BuildAvatarUrl(sender, httpContext) ?? string.Empty,
                     ["messageId"] = message.Id.ToString(),
                 },
                 cancellationToken);
@@ -409,6 +412,10 @@ public class ChatService(
                 {
                     ["threadId"] = thread.Id.ToString(),
                     ["threadType"] = ChatThreadTypes.Group,
+                    ["senderId"] = sender.Id.ToString(),
+                    ["senderName"] = string.IsNullOrWhiteSpace(sender.Name) ? "Bantera user" : sender.Name,
+                    ["senderAvatarUrl"] = BuildAvatarUrl(sender, httpContext) ?? string.Empty,
+                    ["messageKind"] = image ? "image" : "audio",
                 },
                 cancellationToken);
         }

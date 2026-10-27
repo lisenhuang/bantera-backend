@@ -126,19 +126,23 @@ public class ChatPushNotificationService(
         return normalized.Length <= 8 ? normalized : normalized[^8..];
     }
 
-    private static Dictionary<string, object?> BuildPayload(
+    internal static Dictionary<string, object?> BuildPayload(
         string title,
         string body,
         IReadOnlyDictionary<string, string> data)
     {
         var payload = new Dictionary<string, object?>
         {
-            ["aps"] = new
+            ["aps"] = new Dictionary<string, object?>
             {
-                alert = new { title, body },
-                sound = "default",
+                ["alert"] = new { title, body },
+                ["sound"] = "default",
             },
         };
+
+        if (data.TryGetValue("senderId", out var senderId) && Guid.TryParse(senderId, out _) &&
+            data.ContainsKey("threadId") && data.ContainsKey("senderAvatarUrl"))
+            ((Dictionary<string, object?>)payload["aps"]!)["mutable-content"] = 1;
 
         foreach (var pair in data)
         {

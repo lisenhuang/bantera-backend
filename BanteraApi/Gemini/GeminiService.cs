@@ -805,7 +805,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
             if (!response.IsSuccessStatusCode)
             {
                 throw new HttpRequestException(
-                    $"Gemini TTS failed with status {(int)response.StatusCode} for model '{audioModel}'. Body: {TruncateForLog(json)}",
+                    privateModelEvaluation.Value ? "Test audio generation was unavailable." : $"Gemini TTS failed with status {(int)response.StatusCode} for model '{audioModel}'. Body: {TruncateForLog(json)}",
                     null,
                     response.StatusCode);
             }
@@ -842,7 +842,7 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
         if (!isRawPcm)
         {
             logger.LogWarning("Gemini TTS returned unexpected audio type {MimeType}; storing it unchanged as WAV.", mimeType);
-            return new GeneratedAudio(pcm, "audio/wav", ".wav", durationMs);
+            return new GeneratedAudio(pcm, "audio/wav", ".wav", durationMs) { ActualModel = actualModel, Voice = actualVoice1 };
         }
 
         // Encoding runs outside the key loop: an encoder problem must not burn Gemini keys.
@@ -854,9 +854,9 @@ Return ONLY valid JSON in this exact format, no markdown fences, no extra keys:
                 mp3Encoder.IsAvailable ? "mp3_encode_failed" : "mp3_encoder_missing",
                 "Stored the audio as WAV instead of MP3.");
         }
-        return mp3 is not null
+        return (mp3 is not null
             ? new GeneratedAudio(mp3, Mp3Encoder.ContentType, ".mp3", durationMs)
-            : new GeneratedAudio(PcmToWav(pcm, sampleRate), "audio/wav", ".wav", durationMs);
+            : new GeneratedAudio(PcmToWav(pcm, sampleRate), "audio/wav", ".wav", durationMs)) with { ActualModel = actualModel, Voice = actualVoice1 };
     }
 
     private static bool IsRawPcmMimeType(string mimeType) =>
@@ -1894,6 +1894,10 @@ public class ContentRejectedException(string message, string reason = "unspecifi
     }
 }
 
-public record GeneratedAudio(byte[] Bytes, string ContentType, string FileExtension, int DurationMs);
+public record GeneratedAudio(byte[] Bytes, string ContentType, string FileExtension, int DurationMs)
+{
+    [JsonIgnore] public string? ActualModel { get; init; }
+    [JsonIgnore] public string? Voice { get; init; }
+}
 
 public record GeminiModelCatalog(IReadOnlyList<string> TextModels, IReadOnlyList<string> AudioModels, IReadOnlyList<string>? LiveModels = null);

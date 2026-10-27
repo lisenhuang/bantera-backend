@@ -1,0 +1,117 @@
+{
+  "passed": true,
+  "live": false,
+  "jobId": "eb374fc1-5152-4441-9dec-5e47fec0a1a3",
+  "checks": [
+    "shared app settings",
+    "actual generation and local round trip",
+    "owner audio playback",
+    "audio seeking",
+    "audio role rejection",
+    "assessment persistence",
+    "temporary inference audio removed",
+    "new dashboard rendered"
+  ],
+  "settings": {
+    "textModel": "chatgpt/gpt-6-luna",
+    "audioModel": "gemini-2.5-flash-preview-tts",
+    "fallbackTextModel": "gemini-flash-latest",
+    "fallbackAudioModel": "gemini-3.8-flash-lite-tts",
+    "minWordCount": 5,
+    "maxWordCount": 60,
+    "voice": "App Practice voice",
+    "generationTimeoutSeconds": 600
+  },
+  "generation": {
+    "wordCount": 10,
+    "actualTextModel": "chatgpt/gpt-6-luna",
+    "configuredTextModel": "chatgpt/gpt-6-luna",
+    "fallbackTextModel": "gemini-flash-latest",
+    "textSeconds": 3.7436736,
+    "audioDurationMs": 3450,
+    "audioSeconds": 5.6748214,
+    "configuredAudioModel": "gemini-2.5-flash-preview-tts",
+    "fallbackAudioModel": "gemini-3.8-flash-lite-tts",
+    "actualAudioModel": "gemini-2.5-flash-preview-tts",
+    "voice": "Kore",
+    "audioContentType": "audio/mpeg"
+  },
+  "speech": {
+    "language": "mi",
+    "audioSeconds": 3.504,
+    "realTimeFactor": 5.69,
+    "wer": {
+      "rate": 0.7,
+      "edits": 7,
+      "referenceWords": 10,
+      "normalization": "NFC, lowercase, punctuation ignored; macrons retained"
+    },
+    "processingSeconds": 19.937,
+    "cpuSeconds": 39.11,
+    "averageCpuPercent": 196.2,
+    "processPeakRssBytes": 482025472,
+    "serviceMemoryPeakSampledBytes": 557047808,
+    "model": {
+      "id": "whisper-small",
+      "name": "Whisper Small (multilingual)",
+      "source": "https://huggingface.co/ggerganov/whisper.cpp",
+      "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "file": "ggml-small-q5_1.bin",
+      "quantization": "Q5_1",
+      "license": "MIT",
+      "runtime": "whisper.cpp 1.9.5",
+      "status": "ready",
+      "sizeBytes": 190085487,
+      "sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"
+    }
+  },
+  "translation": {
+    "outputTruncated": false,
+    "processingSeconds": 10.267,
+    "cpuSeconds": 12.6,
+    "averageCpuPercent": 122.7,
+    "processPeakRssBytes": 3080454144,
+    "serviceMemoryPeakSampledBytes": 4282478592,
+    "model": {
+      "id": "madlad",
+      "name": "Google MADLAD-400-3B-MT",
+      "source": "https://huggingface.co/google/madlad400-3b-mt",
+      "revision": "fa184c675da0b5c9e1c8694fccd4e12e2d422094",
+      "file": "model-q4k.gguf",
+      "quantization": "Q4_K GGUF",
+      "license": "Apache-2.0",
+      "runtime": "Candle 0.9.1",
+      "status": "ready",
+      "sizeBytes": 1654597280,
+      "sha256": "ea6e5531a3e95213c7f0635988d119e078a655c09306e47851e15d4c0c3f9c37"
+    }
+  },
+  "audioBytes": 28032,
+  "states": [
+    [
+      "queued",
+      "text"
+    ],
+    [
+      "running",
+      "text"
+    ],
+    [
+      "running",
+      "tts"
+    ],
+    [
+      "running",
+      "stt"
+    ],
+    [
+      "running",
+      "translation"
+    ],
+    [
+      "completed",
+      "translation"
+    ]
+  ],
+  "submissionSeconds": 0.03889469802379608
+}

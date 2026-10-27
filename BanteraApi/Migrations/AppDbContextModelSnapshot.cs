@@ -1638,6 +1638,9 @@ namespace BanteraApi.Migrations
                         .HasMaxLength(180)
                         .HasColumnType("character varying(180)");
 
+                    b.Property<int>("PronunciationAlignmentVersion")
+                        .HasColumnType("integer");
+
                     b.Property<int>("PronunciationAttempts")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")

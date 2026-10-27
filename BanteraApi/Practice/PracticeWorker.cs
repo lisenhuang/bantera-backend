@@ -110,7 +110,7 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
             var logContext = new PracticeLogContext(demand.RunId, demand.Locale, demand.Level, Batch: batch + 1);
             var generated = await diagnostics.RunAsync("text", logContext,
                 () => ai.GeneratePracticeAsync(demand.Locale, demand.Level, topics, recent, ct));
-            var drafts = generated.Take(5).Where(PracticeRules.Valid).Where(d => PracticePronunciation.Scheme(demand.Locale) == null || PracticePronunciation.Valid(d.Pronunciation, d.Cue, d.Reply, d.Distractor)).Where(d => !history.Any(h => PracticeRules.Duplicate(d, h))).ToArray();
+            var drafts = generated.Take(5).Where(PracticeRules.Valid).Where(d => !history.Any(h => PracticeRules.Duplicate(d, h))).ToArray();
             if (drafts.Length != generated.Length)
                 await diagnostics.NoteAsync("text", "candidates_filtered", logContext, new { generated = generated.Length, eligible = drafts.Length });
             if (drafts.Length == 0) return;
@@ -126,12 +126,15 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
             {
                 var draft = drafts[i];
                 if (!approved.Contains(i) || history.Any(h => PracticeRules.Duplicate(draft, h))) continue;
+                var pronunciation = PracticePronunciation.Valid(draft.Pronunciation, draft.Cue, draft.Reply, draft.Distractor, demand.Locale) ? draft.Pronunciation : null;
                 var row = new PracticeDialogue { ContentVersion = PracticeRules.ContentVersion, Locale = demand.Locale, Language = demand.Language, Level = demand.Level,
                     Topic = draft.Topic, MeaningKey = draft.MeaningKey, Cue = draft.Cue, Reply = draft.Reply,
                     Distractor = draft.Distractor, Explanation = draft.Explanation,
                     MaoriEnglishJson = MaoriPracticeTranslation.Applies(demand.Locale) && MaoriPracticeTranslation.Valid(draft.EnglishTranslation)
                         ? System.Text.Json.JsonSerializer.Serialize(draft.EnglishTranslation) : null,
-                    PronunciationJson = draft.Pronunciation == null ? null : System.Text.Json.JsonSerializer.Serialize(draft.Pronunciation, PracticePronunciation.Json), Fingerprint = PracticeRules.Fingerprint(draft.Cue, draft.Reply) };
+                    PronunciationAlignmentVersion = PracticePronunciation.AlignmentVersion,
+                    PronunciationRequestedAt = pronunciation == null && PracticePronunciation.Scheme(demand.Locale) != null ? DateTime.UtcNow : null,
+                    PronunciationJson = pronunciation == null ? null : System.Text.Json.JsonSerializer.Serialize(pronunciation, PracticePronunciation.Json), Fingerprint = PracticeRules.Fingerprint(draft.Cue, draft.Reply) };
                 // Reserve the fingerprint before paying for speech synthesis.
                 writer.Add(row);
                 try { await writer.SaveChangesAsync(ct); }

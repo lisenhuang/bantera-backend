@@ -1,0 +1,7 @@
+bin/
+whisper/
+translator/target/
+__pycache__/
+.venv/
+
+*.env

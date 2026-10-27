@@ -110,6 +110,29 @@ public class PracticeSavedReviewEndpointTests
             var ready = await (await client.PostAsJsonAsync(pronunciationRoute, new {})).Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("ready", ready.GetProperty("status").GetString());
             Assert.Equal("bù", ready.GetProperty("choices")[0][0].GetProperty("reading").GetString());
+            // A saved broad mapping is hidden immediately, queued without
+            // touching progress, then repaired once with a persisted marker.
+            stored.Cue = "朋友";
+            stored.PronunciationJson = JsonSerializer.Serialize(new PracticePronunciationData([new("朋友", "péng you")], [new("好", "hǎo")], [new("不", "bù")]), PracticePronunciation.Json);
+            stored.PronunciationAttempts = 5;
+            await db.SaveChangesAsync();
+            var invalid = await (await client.PostAsJsonAsync(pronunciationRoute, new {})).Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("preparing", invalid.GetProperty("status").GetString());
+            Assert.Equal(JsonValueKind.Null, invalid.GetProperty("cue").ValueKind);
+            Assert.True(await PracticePronunciationWorker.Pending(db, DateTime.UtcNow).AnyAsync(x => x.Id == dialogue.Id));
+            Assert.True(PracticePronunciationRepair.Inspect(stored, DateTime.UtcNow));
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+            stored = await db.Set<PracticeDialogue>().SingleAsync(x => x.Id == dialogue.Id);
+            Assert.False(PracticePronunciationRepair.Inspect(stored, DateTime.UtcNow));
+            Assert.Equal(0, stored.PronunciationAttempts);
+            stored.PronunciationAttempts = 5;
+            stored.PronunciationRetryAt = DateTime.UtcNow.AddDays(-1);
+            await db.SaveChangesAsync();
+            var exhausted = await (await client.PostAsJsonAsync(pronunciationRoute, new {})).Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("unavailable", exhausted.GetProperty("status").GetString());
+            Assert.False(await PracticePronunciationWorker.Pending(db, DateTime.UtcNow).AnyAsync(x => x.Id == dialogue.Id));
+            Assert.Equal(5, await db.Set<PracticeDialogue>().AsNoTracking().Where(x => x.Id == dialogue.Id).Select(x => x.PronunciationAttempts).SingleAsync());
             client.DefaultRequestHeaders.Remove("X-Practice-Consent");
             Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(pronunciationRoute, new {})).StatusCode);
             client.DefaultRequestHeaders.Add("X-Practice-Consent", "1");

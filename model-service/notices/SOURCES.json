@@ -1,0 +1,9 @@
+{
+  "WHISPER-LICENSE": "https://raw.githubusercontent.com/openai/whisper/main/LICENSE",
+  "WHISPER-CPP-LICENSE": "https://raw.githubusercontent.com/ggml-org/whisper.cpp/v1.9.5/LICENSE",
+  "CANDLE-LICENSE-MIT": "https://raw.githubusercontent.com/huggingface/candle/0.9.1/LICENSE-MIT",
+  "CANDLE-LICENSE-APACHE": "https://raw.githubusercontent.com/huggingface/candle/0.9.1/LICENSE-APACHE",
+  "MADLAD-LICENSE": "https://raw.githubusercontent.com/google-research/google-research/master/LICENSE",
+  "MADLAD-MODEL-CARD.md": "https://huggingface.co/google/madlad400-3b-mt/raw/fa184c675da0b5c9e1c8694fccd4e12e2d422094/README.md",
+  "WHISPER-MODEL-CARD.md": "https://raw.githubusercontent.com/openai/whisper/main/model-card.md"
+}

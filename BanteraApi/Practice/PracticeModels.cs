@@ -18,6 +18,7 @@ public sealed class PracticeDialogue
     public string Distractor { get; set; } = "";
     public string Explanation { get; set; } = "";
     public string? PronunciationJson { get; set; }
+    public int PronunciationAlignmentVersion { get; set; }
     public int PronunciationAttempts { get; set; }
     public DateTime? PronunciationRetryAt { get; set; }
     public DateTime? PronunciationRequestedAt { get; set; }

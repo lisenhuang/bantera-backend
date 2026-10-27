@@ -1,0 +1,59 @@
+{
+  "sourceSha256": "1897197c81fe829edc2231490cbe5b35b305935c1815a7c1126e1a60bec95593",
+  "imageId": "sha256:9d9b39b1526e9a53ff949726991f317a50dec1f75b734eb221f46c3c51496840",
+  "image": "bantera-model-service:1.0.1",
+  "cpuLimit": 2.0,
+  "memoryLimit": 8589934592,
+  "init": true,
+  "ports": {},
+  "networks": [
+    "bantera-model-private"
+  ],
+  "models": [
+    {
+      "id": "whisper-small",
+      "name": "Whisper Small (multilingual)",
+      "source": "https://huggingface.co/ggerganov/whisper.cpp",
+      "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "file": "ggml-small-q5_1.bin",
+      "quantization": "Q5_1",
+      "license": "MIT",
+      "runtime": "whisper.cpp 1.9.5",
+      "status": "ready",
+      "sizeBytes": 190085487,
+      "sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"
+    },
+    {
+      "id": "whisper-large-v3",
+      "name": "Whisper large-v3 (multilingual)",
+      "source": "https://huggingface.co/ggerganov/whisper.cpp",
+      "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "file": "ggml-large-v3-q5_0.bin",
+      "quantization": "Q5_0",
+      "license": "MIT",
+      "runtime": "whisper.cpp 1.9.5",
+      "status": "ready",
+      "sizeBytes": 1081140203,
+      "sha256": "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1"
+    },
+    {
+      "id": "madlad",
+      "name": "Google MADLAD-400-3B-MT",
+      "source": "https://huggingface.co/google/madlad400-3b-mt",
+      "revision": "fa184c675da0b5c9e1c8694fccd4e12e2d422094",
+      "file": "model-q4k.gguf",
+      "quantization": "Q4_K GGUF",
+      "license": "Apache-2.0",
+      "runtime": "Candle 0.9.1",
+      "status": "ready",
+      "sizeBytes": 1654597280,
+      "sha256": "ea6e5531a3e95213c7f0635988d119e078a655c09306e47851e15d4c0c3f9c37"
+    }
+  ],
+  "runtimeSha256": {
+    "whisper-cli": "bab8558c32bf0051f51427e90d9fcf11db99175450ddcb4cd8eb1f51a95606ad",
+    "bantera-translate": "81c2a69a61414c1bc4e446cb0324a33a2fda74639195a2aeaf242f90394b857a"
+  },
+  "restartRecoveryPassed": true,
+  "linuxTestsPassed": 15
+}

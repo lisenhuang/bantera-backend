@@ -1,0 +1,644 @@
+[
+  {
+    "locale": "zh-CN",
+    "text": "朋友，你好！",
+    "segments": [
+      {
+        "text": "朋",
+        "reading": "péng"
+      },
+      {
+        "text": "友",
+        "reading": "you"
+      },
+      {
+        "text": "，",
+        "reading": ""
+      },
+      {
+        "text": "你",
+        "reading": "nǐ"
+      },
+      {
+        "text": "好",
+        "reading": "hǎo"
+      },
+      {
+        "text": "！",
+        "reading": ""
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "zh-TW",
+    "text": "學校。",
+    "segments": [
+      {
+        "text": "學",
+        "reading": "xué"
+      },
+      {
+        "text": "校",
+        "reading": "xiào"
+      },
+      {
+        "text": "。",
+        "reading": ""
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "zh-HK",
+    "text": "香港。",
+    "segments": [
+      {
+        "text": "香",
+        "reading": "hoeng1"
+      },
+      {
+        "text": "港",
+        "reading": "gong2"
+      },
+      {
+        "text": "。",
+        "reading": ""
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "yue-HK",
+    "text": "你好",
+    "segments": [
+      {
+        "text": "你",
+        "reading": "nei5"
+      },
+      {
+        "text": "好",
+        "reading": "hou2"
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "ko-KR",
+    "text": "국물 안녕",
+    "segments": [
+      {
+        "text": "국",
+        "reading": "gung"
+      },
+      {
+        "text": "물",
+        "reading": "mul"
+      },
+      {
+        "text": " ",
+        "reading": ""
+      },
+      {
+        "text": "안",
+        "reading": "an"
+      },
+      {
+        "text": "녕",
+        "reading": "nyeong"
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "ja-JP",
+    "text": "学校へ行く。",
+    "segments": [
+      {
+        "text": "学校",
+        "reading": "gakkō"
+      },
+      {
+        "text": "へ",
+        "reading": "e"
+      },
+      {
+        "text": "行く",
+        "reading": "iku"
+      },
+      {
+        "text": "。",
+        "reading": ""
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "th-TH",
+    "text": "สวัสดี ครับ",
+    "segments": [
+      {
+        "text": "ส",
+        "reading": "sà"
+      },
+      {
+        "text": "วัส",
+        "reading": "wàt"
+      },
+      {
+        "text": "ดี",
+        "reading": "dii"
+      },
+      {
+        "text": " ",
+        "reading": ""
+      },
+      {
+        "text": "ครับ",
+        "reading": "khráp"
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "hi-IN",
+    "text": "नमस्ते दुनिया",
+    "segments": [
+      {
+        "text": "नमस्ते",
+        "reading": "namaste"
+      },
+      {
+        "text": " ",
+        "reading": ""
+      },
+      {
+        "text": "दुनिया",
+        "reading": "duniyā"
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "ar-SA",
+    "text": "مَرْحَبًا بك!",
+    "segments": [
+      {
+        "text": "مَرْحَبًا",
+        "reading": "marḥaban"
+      },
+      {
+        "text": " ",
+        "reading": ""
+      },
+      {
+        "text": "بك",
+        "reading": "bika"
+      },
+      {
+        "text": "!",
+        "reading": ""
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "he-IL",
+    "text": "שָׁלוֹם עולם",
+    "segments": [
+      {
+        "text": "שָׁלוֹם",
+        "reading": "shalóm"
+      },
+      {
+        "text": " ",
+        "reading": ""
+      },
+      {
+        "text": "עולם",
+        "reading": "olám"
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "ru-RU",
+    "text": "Приве́т, мир!",
+    "segments": [
+      {
+        "text": "Приве́т",
+        "reading": "privét"
+      },
+      {
+        "text": ", ",
+        "reading": ""
+      },
+      {
+        "text": "мир",
+        "reading": "mir"
+      },
+      {
+        "text": "!",
+        "reading": ""
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "uk-UA",
+    "text": "Привіт, світе!",
+    "segments": [
+      {
+        "text": "Привіт",
+        "reading": "pryvít"
+      },
+      {
+        "text": ", ",
+        "reading": ""
+      },
+      {
+        "text": "світе",
+        "reading": "svíte"
+      },
+      {
+        "text": "!",
+        "reading": ""
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "el-GR",
+    "text": "Καλημέρα κόσμε!",
+    "segments": [
+      {
+        "text": "Καλημέρα",
+        "reading": "kaliméra"
+      },
+      {
+        "text": " ",
+        "reading": ""
+      },
+      {
+        "text": "κόσμε",
+        "reading": "kósme"
+      },
+      {
+        "text": "!",
+        "reading": ""
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "zh-CN",
+    "text": "USB 20元，8:00。",
+    "segments": [
+      {
+        "text": "USB",
+        "reading": "USB"
+      },
+      {
+        "text": " ",
+        "reading": ""
+      },
+      {
+        "text": "20",
+        "reading": "èr shí"
+      },
+      {
+        "text": "元",
+        "reading": "yuán"
+      },
+      {
+        "text": "，",
+        "reading": ""
+      },
+      {
+        "text": "8:00",
+        "reading": "bā diǎn"
+      },
+      {
+        "text": "。",
+        "reading": ""
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "zh-CN",
+    "text": "𠀀你︀🙂",
+    "segments": [
+      {
+        "text": "𠀀",
+        "reading": "hē"
+      },
+      {
+        "text": "你︀",
+        "reading": "nǐ"
+      },
+      {
+        "text": "🙂",
+        "reading": ""
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "zh-CN",
+    "text": "朋友",
+    "segments": [
+      {
+        "text": "朋友",
+        "reading": "péng you"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "zh-TW",
+    "text": "學校",
+    "segments": [
+      {
+        "text": "學校",
+        "reading": "xué xiào"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "zh-HK",
+    "text": "香港",
+    "segments": [
+      {
+        "text": "香港",
+        "reading": "hoeng1 gong2"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "ko-KR",
+    "text": "안녕하세요",
+    "segments": [
+      {
+        "text": "안녕하세요",
+        "reading": "annyeonghaseyo"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "th-TH",
+    "text": "สวัสดี",
+    "segments": [
+      {
+        "text": "สวัสดี",
+        "reading": "sawatdi"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "th-TH",
+    "text": "สวัสดี",
+    "segments": [
+      {
+        "text": "สวัสดี",
+        "reading": "sà-wàt-dii"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "ja-JP",
+    "text": "これはとても長い文章ですから",
+    "segments": [
+      {
+        "text": "これはとても長い文章ですから",
+        "reading": "korewatotemonagaibunshōdesukara"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "ar-SA",
+    "text": "سلام",
+    "segments": [
+      {
+        "text": "س",
+        "reading": "s"
+      },
+      {
+        "text": "لام",
+        "reading": "alām"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "he-IL",
+    "text": "שלום",
+    "segments": [
+      {
+        "text": "ש",
+        "reading": "s"
+      },
+      {
+        "text": "לום",
+        "reading": "halóm"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "ru-RU",
+    "text": "привет",
+    "segments": [
+      {
+        "text": "п",
+        "reading": "p"
+      },
+      {
+        "text": "ривет",
+        "reading": "rivét"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "uk-UA",
+    "text": "привіт",
+    "segments": [
+      {
+        "text": "п",
+        "reading": "p"
+      },
+      {
+        "text": "ривіт",
+        "reading": "ryvít"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "el-GR",
+    "text": "κόσμε",
+    "segments": [
+      {
+        "text": "κ",
+        "reading": "k"
+      },
+      {
+        "text": "όσμε",
+        "reading": "ósme"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "hi-IN",
+    "text": "नमस्ते दुनिया",
+    "segments": [
+      {
+        "text": "नमस्ते दुनिया",
+        "reading": "namaste duniyā"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "zh-CN",
+    "text": "你好",
+    "segments": [
+      {
+        "text": "你",
+        "reading": "nǐ hǎo"
+      },
+      {
+        "text": "好",
+        "reading": "hǎo"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "zh-HK",
+    "text": "香港",
+    "segments": [
+      {
+        "text": "香",
+        "reading": "hoeng"
+      },
+      {
+        "text": "港",
+        "reading": "gong2"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "hi-IN",
+    "text": "कि",
+    "segments": [
+      {
+        "text": "क",
+        "reading": "ka"
+      },
+      {
+        "text": "ि",
+        "reading": "i"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "ar-SA",
+    "text": "سلام",
+    "segments": [
+      {
+        "text": "سلام",
+        "reading": "שלום"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "zh-CN",
+    "text": "你！",
+    "segments": [
+      {
+        "text": "你",
+        "reading": "nǐ"
+      },
+      {
+        "text": "！",
+        "reading": "bang"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "ru-RU",
+    "text": "другой",
+    "segments": [
+      {
+        "text": "привет",
+        "reading": "privét"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "zh-CN",
+    "text": "20元",
+    "segments": [
+      {
+        "text": "2",
+        "reading": "èr"
+      },
+      {
+        "text": "0",
+        "reading": "líng"
+      },
+      {
+        "text": "元",
+        "reading": "yuán"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "ja-JP",
+    "text": "私は学生です",
+    "segments": [
+      {
+        "text": "私は学生です",
+        "reading": "watashiwagakuseidesu"
+      }
+    ],
+    "valid": false
+  },
+  {
+    "locale": "th-TH",
+    "text": "ไม่",
+    "segments": [
+      {
+        "text": "ไม่",
+        "reading": "mâi"
+      }
+    ],
+    "valid": true
+  },
+  {
+    "locale": "ru-RU",
+    "text": "достопримечательностями",
+    "segments": [
+      {
+        "text": "достопримечательностями",
+        "reading": "dostoprimechátelnostyami"
+      }
+    ],
+    "valid": true
+  }
+]

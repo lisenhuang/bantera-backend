@@ -22,6 +22,7 @@
     <EmbeddedResource Include="Fixtures/Voice/*.pcm" />
   </ItemGroup>
   <ItemGroup>
+    <None Update="Fixtures/pronunciation_alignment.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/practice_matching.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/practice_numeric_matching.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

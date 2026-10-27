@@ -1,0 +1,298 @@
+[
+  {
+    "sample": {
+      "file": "sample-1.audio",
+      "reference": "Ko wai tō ingoa?",
+      "source": "Existing Bantera generated Maori Practice cue",
+      "dialogueId": "32406b3b-0acb-4a7d-a8a3-09a70a0a0f3b",
+      "sha256": "38025eba9766263ef4eabf7b8511f609e5276e93afda1991185b1c45cbf71f9c",
+      "limitation": "Synthetic TTS, not native-speaker accuracy validation"
+    },
+    "acceptedSeconds": 0.065,
+    "job": {
+      "id": "87d1326f-d4f0-43f8-b99c-c90bf66a5219",
+      "model": "whisper-small",
+      "status": "completed",
+      "created": 1793079276.6660767,
+      "started": 1793079276.7573965,
+      "finished": 1793079295.485635,
+      "result": {
+        "text": "kōwai to īmoa",
+        "language": "mi",
+        "audioSeconds": 2.184,
+        "realTimeFactor": 8.479,
+        "reference": "Ko wai tō ingoa?",
+        "wer": {
+          "rate": 1.0,
+          "edits": 4,
+          "referenceWords": 4,
+          "normalization": "NFC, lowercase, punctuation ignored; macrons retained"
+        },
+        "processingSeconds": 18.519,
+        "cpuSeconds": 36.14,
+        "averageCpuPercent": 195.1,
+        "processPeakRssBytes": 481529856,
+        "serviceMemoryPeakSampledBytes": 644833280,
+        "model": {
+          "id": "whisper-small",
+          "name": "Whisper Small (multilingual)",
+          "source": "https://huggingface.co/ggerganov/whisper.cpp",
+          "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+          "file": "ggml-small-q5_1.bin",
+          "quantization": "Q5_1",
+          "license": "MIT",
+          "runtime": "whisper.cpp 1.9.5",
+          "status": "ready",
+          "sizeBytes": 190085487,
+          "sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"
+        }
+      },
+      "error": null,
+      "assessment": null
+    }
+  },
+  {
+    "sample": {
+      "file": "sample-1.audio",
+      "reference": "Ko wai tō ingoa?",
+      "source": "Existing Bantera generated Maori Practice cue",
+      "dialogueId": "32406b3b-0acb-4a7d-a8a3-09a70a0a0f3b",
+      "sha256": "38025eba9766263ef4eabf7b8511f609e5276e93afda1991185b1c45cbf71f9c",
+      "limitation": "Synthetic TTS, not native-speaker accuracy validation"
+    },
+    "acceptedSeconds": 0.007,
+    "job": {
+      "id": "312bd75d-3637-4f3d-a424-b1cd3c676a85",
+      "model": "whisper-large-v3",
+      "status": "completed",
+      "created": 1793079296.7291152,
+      "started": 1793079296.7438853,
+      "finished": 1793079426.0426164,
+      "result": {
+        "text": "Kauai to imoa.",
+        "language": "mi",
+        "audioSeconds": 2.184,
+        "realTimeFactor": 59.153,
+        "reference": "Ko wai tō ingoa?",
+        "wer": {
+          "rate": 1.0,
+          "edits": 4,
+          "referenceWords": 4,
+          "normalization": "NFC, lowercase, punctuation ignored; macrons retained"
+        },
+        "processingSeconds": 129.191,
+        "cpuSeconds": 244.18,
+        "averageCpuPercent": 189.0,
+        "processPeakRssBytes": 2069864448,
+        "serviceMemoryPeakSampledBytes": 2853052416,
+        "model": {
+          "id": "whisper-large-v3",
+          "name": "Whisper large-v3 (multilingual)",
+          "source": "https://huggingface.co/ggerganov/whisper.cpp",
+          "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+          "file": "ggml-large-v3-q5_0.bin",
+          "quantization": "Q5_0",
+          "license": "MIT",
+          "runtime": "whisper.cpp 1.9.5",
+          "status": "ready",
+          "sizeBytes": 1081140203,
+          "sha256": "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1"
+        }
+      },
+      "error": null,
+      "assessment": null
+    }
+  },
+  {
+    "sample": {
+      "file": "sample-1.audio",
+      "reference": "Ko wai tō ingoa?",
+      "source": "Existing Bantera generated Maori Practice cue",
+      "dialogueId": "32406b3b-0acb-4a7d-a8a3-09a70a0a0f3b",
+      "sha256": "38025eba9766263ef4eabf7b8511f609e5276e93afda1991185b1c45cbf71f9c",
+      "limitation": "Synthetic TTS, not native-speaker accuracy validation"
+    },
+    "acceptedSeconds": 0.008,
+    "job": {
+      "id": "04f102aa-f106-4bd8-aad7-a7e991379f95",
+      "model": "madlad",
+      "status": "completed",
+      "created": 1793079427.0047653,
+      "started": 1793079427.054978,
+      "finished": 1793079436.6542892,
+      "result": {
+        "outputTruncated": false,
+        "text": "Who has a name?",
+        "sourceText": "Ko wai tō ingoa?",
+        "processingSeconds": 9.591,
+        "cpuSeconds": 7.0,
+        "averageCpuPercent": 73.0,
+        "processPeakRssBytes": 3075530752,
+        "serviceMemoryPeakSampledBytes": 4964679680,
+        "model": {
+          "id": "madlad",
+          "name": "Google MADLAD-400-3B-MT",
+          "source": "https://huggingface.co/google/madlad400-3b-mt",
+          "revision": "fa184c675da0b5c9e1c8694fccd4e12e2d422094",
+          "file": "model-q4k.gguf",
+          "quantization": "Q4_K GGUF",
+          "license": "Apache-2.0",
+          "runtime": "Candle 0.9.1",
+          "status": "ready",
+          "sizeBytes": 1654597280,
+          "sha256": "ea6e5531a3e95213c7f0635988d119e078a655c09306e47851e15d4c0c3f9c37"
+        }
+      },
+      "error": null,
+      "assessment": null
+    }
+  },
+  {
+    "sample": {
+      "file": "sample-2.audio",
+      "reference": "He wai māu?",
+      "source": "Existing Bantera generated Maori Practice cue",
+      "dialogueId": "1189886f-7b64-426e-a423-9fd6b4e03727",
+      "sha256": "a8694ee92aaf59ec2c1a7377dd55d0f92b83eb87e02b963a58e2cedada904789",
+      "limitation": "Synthetic TTS, not native-speaker accuracy validation"
+    },
+    "acceptedSeconds": 0.013,
+    "job": {
+      "id": "21b1bd2f-85c6-4817-9d64-be240dc1efba",
+      "model": "whisper-small",
+      "status": "completed",
+      "created": 1793079437.0399952,
+      "started": 1793079437.1631668,
+      "finished": 1793079459.051187,
+      "result": {
+        "text": "He wa imo?",
+        "language": "mi",
+        "audioSeconds": 1.44,
+        "realTimeFactor": 14.495,
+        "reference": "He wai māu?",
+        "wer": {
+          "rate": 0.6666666666666666,
+          "edits": 2,
+          "referenceWords": 3,
+          "normalization": "NFC, lowercase, punctuation ignored; macrons retained"
+        },
+        "processingSeconds": 20.873,
+        "cpuSeconds": 35.65,
+        "averageCpuPercent": 170.8,
+        "processPeakRssBytes": 481619968,
+        "serviceMemoryPeakSampledBytes": 2699714560,
+        "model": {
+          "id": "whisper-small",
+          "name": "Whisper Small (multilingual)",
+          "source": "https://huggingface.co/ggerganov/whisper.cpp",
+          "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+          "file": "ggml-small-q5_1.bin",
+          "quantization": "Q5_1",
+          "license": "MIT",
+          "runtime": "whisper.cpp 1.9.5",
+          "status": "ready",
+          "sizeBytes": 190085487,
+          "sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"
+        }
+      },
+      "error": null,
+      "assessment": null
+    }
+  },
+  {
+    "sample": {
+      "file": "sample-2.audio",
+      "reference": "He wai māu?",
+      "source": "Existing Bantera generated Maori Practice cue",
+      "dialogueId": "1189886f-7b64-426e-a423-9fd6b4e03727",
+      "sha256": "a8694ee92aaf59ec2c1a7377dd55d0f92b83eb87e02b963a58e2cedada904789",
+      "limitation": "Synthetic TTS, not native-speaker accuracy validation"
+    },
+    "acceptedSeconds": 0.007,
+    "job": {
+      "id": "fb8f1057-2dab-4705-8bf6-2f88af5cd6d5",
+      "model": "whisper-large-v3",
+      "status": "completed",
+      "created": 1793079459.0927012,
+      "started": 1793079459.3080072,
+      "finished": 1793079587.5318425,
+      "result": {
+        "text": "He waimo?",
+        "language": "mi",
+        "audioSeconds": 1.44,
+        "realTimeFactor": 88.967,
+        "reference": "He wai māu?",
+        "wer": {
+          "rate": 0.6666666666666666,
+          "edits": 2,
+          "referenceWords": 3,
+          "normalization": "NFC, lowercase, punctuation ignored; macrons retained"
+        },
+        "processingSeconds": 128.113,
+        "cpuSeconds": 236.78,
+        "averageCpuPercent": 184.8,
+        "processPeakRssBytes": 2069614592,
+        "serviceMemoryPeakSampledBytes": 4595871744,
+        "model": {
+          "id": "whisper-large-v3",
+          "name": "Whisper large-v3 (multilingual)",
+          "source": "https://huggingface.co/ggerganov/whisper.cpp",
+          "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+          "file": "ggml-large-v3-q5_0.bin",
+          "quantization": "Q5_0",
+          "license": "MIT",
+          "runtime": "whisper.cpp 1.9.5",
+          "status": "ready",
+          "sizeBytes": 1081140203,
+          "sha256": "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1"
+        }
+      },
+      "error": null,
+      "assessment": null
+    }
+  },
+  {
+    "sample": {
+      "file": "sample-2.audio",
+      "reference": "He wai māu?",
+      "source": "Existing Bantera generated Maori Practice cue",
+      "dialogueId": "1189886f-7b64-426e-a423-9fd6b4e03727",
+      "sha256": "a8694ee92aaf59ec2c1a7377dd55d0f92b83eb87e02b963a58e2cedada904789",
+      "limitation": "Synthetic TTS, not native-speaker accuracy validation"
+    },
+    "acceptedSeconds": 0.141,
+    "job": {
+      "id": "3d202d15-90cf-42c9-ba1b-0cd2e3072be2",
+      "model": "madlad",
+      "status": "completed",
+      "created": 1793079589.4232814,
+      "started": 1793079589.562384,
+      "finished": 1793079596.956941,
+      "result": {
+        "outputTruncated": false,
+        "text": "Who are you?",
+        "sourceText": "He wai māu?",
+        "processingSeconds": 7.356,
+        "cpuSeconds": 5.95,
+        "averageCpuPercent": 80.9,
+        "processPeakRssBytes": 3077742592,
+        "serviceMemoryPeakSampledBytes": 5878697984,
+        "model": {
+          "id": "madlad",
+          "name": "Google MADLAD-400-3B-MT",
+          "source": "https://huggingface.co/google/madlad400-3b-mt",
+          "revision": "fa184c675da0b5c9e1c8694fccd4e12e2d422094",
+          "file": "model-q4k.gguf",
+          "quantization": "Q4_K GGUF",
+          "license": "Apache-2.0",
+          "runtime": "Candle 0.9.1",
+          "status": "ready",
+          "sizeBytes": 1654597280,
+          "sha256": "ea6e5531a3e95213c7f0635988d119e078a655c09306e47851e15d4c0c3f9c37"
+        }
+      },
+      "error": null,
+      "assessment": null
+    }
+  }
+]

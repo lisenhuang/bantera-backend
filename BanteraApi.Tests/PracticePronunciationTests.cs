@@ -19,13 +19,13 @@ public class PracticePronunciationTests
     }
     [Fact] public void ValidatesExactSourceAndLatinReadingsWithoutSplittingGraphemes()
     {
-        Assert.True(PracticePronunciation.ValidSegments([new("你", "nǐ"), new("好", "hǎo"), new("！", "")], "你好！"));
-        Assert.True(PracticePronunciation.ValidSegments([new("שלום", "shalóm")], "שלום"));
-        Assert.False(PracticePronunciation.ValidSegments([new("你好", "hello")], "你好！"));
-        Assert.False(PracticePronunciation.ValidSegments([new("你好", "你好")], "你好"));
-        Assert.False(PracticePronunciation.ValidSegments([new("你好", "")], "你好"));
-        Assert.False(PracticePronunciation.ValidSegments([new("a", "a"), new("\u0301", "")], "a\u0301"));
-        Assert.False(PracticePronunciation.ValidSegments([new("你好", new string('a', 161))], "你好"));
+        Assert.True(PracticePronunciation.ValidSegments([new("你", "nǐ"), new("好", "hǎo"), new("！", "")], "你好！", "zh-CN"));
+        Assert.True(PracticePronunciation.ValidSegments([new("שלום", "shalóm")], "שלום", "he-IL"));
+        Assert.False(PracticePronunciation.ValidSegments([new("你好", "hello")], "你好！", "zh-CN"));
+        Assert.False(PracticePronunciation.ValidSegments([new("你好", "你好")], "你好", "zh-CN"));
+        Assert.False(PracticePronunciation.ValidSegments([new("你好", "")], "你好", "zh-CN"));
+        Assert.False(PracticePronunciation.ValidSegments([new("a", "a"), new("\u0301", "")], "a\u0301", "zh-CN"));
+        Assert.False(PracticePronunciation.ValidSegments([new("你好", new string('a', 161))], "你好", "zh-CN"));
     }
     [Fact] public void PresentationKeepsReadingsWithSwappedChoicesAndRejectsStaleContent()
     {

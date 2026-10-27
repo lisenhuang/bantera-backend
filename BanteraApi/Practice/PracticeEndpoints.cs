@@ -71,13 +71,9 @@ public static class PracticeEndpoints
             if (exposure.Dialogue.ContentVersion != PracticeRules.ContentVersion) return Results.StatusCode(410);
             if (PracticePronunciation.Read(exposure.Dialogue) == null && PracticePronunciation.Scheme(exposure.Dialogue.Locale) != null)
             {
-                if (exposure.Dialogue.PronunciationAttempts >= 5 && exposure.Dialogue.PronunciationRetryAt <= DateTime.UtcNow)
-                {
-                    await db.Set<PracticeDialogue>().Where(d => d.Id == exposure.DialogueId && d.PronunciationJson == null && d.PronunciationRetryAt <= DateTime.UtcNow)
-                        .ExecuteUpdateAsync(s => s.SetProperty(d => d.PronunciationAttempts, 0).SetProperty(d => d.PronunciationRetryAt, (DateTime?)null), ct);
-                    exposure.Dialogue.PronunciationAttempts = 0;
-                }
-                await db.Set<PracticeDialogue>().Where(d => d.Id == exposure.DialogueId && d.PronunciationJson == null && d.PronunciationRequestedAt == null)
+                // A request may queue invalid saved JSON, but never reset an
+                // exhausted retry budget. The worker resets once per repair version.
+                await db.Set<PracticeDialogue>().Where(d => d.Id == exposure.DialogueId && d.PronunciationRequestedAt == null)
                     .ExecuteUpdateAsync(s => s.SetProperty(d => d.PronunciationRequestedAt, DateTime.UtcNow), ct);
                 services.GetService<PracticePronunciationWorker>()?.Request(exposure.DialogueId);
             }

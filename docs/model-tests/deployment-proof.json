@@ -1,0 +1,13 @@
+{
+  "release": "bantera-20261027-10",
+  "passed": true,
+  "availableDiskBytes": 109180030976,
+  "availabilitySamples": 132,
+  "successfulSamples": 132,
+  "databaseBackupBytes": 8819462,
+  "modelTests": 15,
+  "forcedRestartRecovery": true,
+  "modelNetworkPrivate": true,
+  "mobileChanged": false,
+  "committedOrPushed": false
+}

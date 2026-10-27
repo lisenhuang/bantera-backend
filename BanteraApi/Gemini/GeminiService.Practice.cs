@@ -66,7 +66,7 @@ public partial class GeminiService
 
     public Task<PracticePronunciationData> GeneratePracticePronunciationAsync(PracticeDialogue d, CancellationToken ct) =>
         PracticeJsonAsync<PracticePronunciationData>("Return ONLY the pronunciation object for the supplied immutable practice sentences. " +
-            PracticePronunciation.Instruction(d.Locale) + " Return the cue/reply/distractor arrays at the root, without a pronunciation wrapper.", new { d.Locale, d.Cue, d.Reply, d.Distractor }, ct);
+            PracticePronunciation.Instruction(d.Locale) + " Return the cue/reply/distractor arrays at the root, without a pronunciation wrapper. This can be a repair request: re-derive all mappings from the immutable source sentences, not from previous romanization. Validate that Chinese has one Han character per segment, Korean one syllable block, Thai one syllable, and word-based scripts have no fragmented words before returning.", new { d.Locale, d.Cue, d.Reply, d.Distractor }, ct);
 
     public Task<int[]> ValidatePracticeAsync(string locale, int level, object candidates, CancellationToken ct) =>
         PracticeJsonAsync<int[]>("Independently review the supplied language exercises and nearby existing exercises. " +
