@@ -2816,3 +2816,68 @@ Verified release `bantera-20261027-12` on Oracle AU: backend **1.50.0**, retaini
 - Message payloads add sender metadata and opt eligible alerts into the iOS notification service extension; existing clients retain the original alert. Actual avatar presentation requires a future signed app release. CallKit provider icon handling was not changed.
 
 App **3.31.0 (498)** was built without signing and verified in simulators only. No physical-phone install/test, commit/push or app-store submission occurred as part of this task.
+
+## 27 October 2026: human-call cancellation and TURN guidance
+
+Release **bantera-20261027-13** publishes API **1.50.1** and website **0.25.1**.
+API loopback 18173, website 13064, connector readiness 12102. Current release 13
+and rollback release 12 are retained. Verified database backup: 9,061,179 bytes.
+Post-cleanup free disk: approximately 98 GiB, compared with 101 GiB before builds.
+No database volumes, uploads or backups were removed.
+
+**GO for published apps:** additive, short-lived capability-based ringing-status
+endpoint and payload fields; original call signaling and authenticated state
+endpoints remain. No database migration, new environment variable or secret.
+APNs work now uses a bounded hosted queue so the caller's socket can process
+cancellation during push delivery. Stale socket sends are bounded. Native iOS
+monitoring requires app 3.31.1 (499); older apps retain existing behavior.
+
+Production call settings were verified as `relay` with six TURN/TURNS URLs and
+no STUN URLs. The authenticated public Calls dashboard shows the recommendation
+and enabled switch. TURN was already enabled before this release; cancellation
+is a separate signaling problem. No real call or production chat test was sent.
+
+Backend tests: 1,728 passed, 29 environment-dependent tests skipped. Final focused
+network/call tests: 44 passed. Website type checking, focused lint and 25 tests
+passed. Candidate/public route checks, capability rejection and no-cache headers
+passed. All 128 public availability samples returned HTTP 200; both version
+markers and authenticated settings/page checks passed after cleanup. A simulator
+build-cache conflict during the app's final rerun did not affect server promotion.
+
+Rollback preserves database writes and the current TURN setting:
+`python3 /home/ubuntu/releases/bantera-20261027-13/deploy.py rollback`.
+No Git commit/push or store submission is included in this release.
+
+App delivery completed after public verification: **3.31.1 (499)** installed and
+confirmed in Ethan's iPhone inventory, without launch/testing. Final debug/release
+builds and signatures passed; 27 Flutter and eight native simulator call/audio
+regressions passed. The simulator cache conflict was resolved by sequential builds.
+Physical Redmi-to-iPhone cancellation and locked-screen audio remain owner checks.
+
+## Call rollback: 27 October 2026
+
+At the owner's request, call cancellation work is paused after continued ringing
+and immediate termination after answering were reported. Activation record
+`bantera-20261027-14` restores the retained release-12 containers: API **1.50.0**,
+website **0.25.0** (its original website marker is `bantera-20261027-11`), and
+`cloudflared-20261027-12`. This is an image rollback, not a new source build.
+Source versions are bumped to API 1.50.2 / website 0.25.2 for the rollback diff.
+
+Local preflight, public API/version, website marker, homepage, download, login,
+public content and admin-auth checks passed. Both public markers remained healthy
+through a two-minute stability window. Completion: **2026-10-27 10:13:09 UTC**.
+The active record references release 14's manifest and the restored release 12
+containers; its previous-release record retains release 13 as an operational
+fallback. Release 13's call behavior is known to be problematic and must not be
+reintroduced as a call fix without further authorized investigation.
+
+No database restore, migration or user-data deletion occurred. The pre-existing
+TURN-only policy remains. **Compatible with published apps:** the restored API
+is their previous contract; the short-lived ringing-status extension was not
+published to either app store and is removed from the replacement iPhone build.
+No new configuration or secrets are required.
+
+Cleanup kept both retained application sets and their mounted configurations,
+removed no volumes/data, and left **98 GB free (50% used)**, unchanged from before
+the rollback. Public version checks passed again after cleanup. Historical
+release-13 entries above describe the reverted deployment, not the active code.
