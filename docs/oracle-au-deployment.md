@@ -1,5 +1,51 @@
 # Bantera deployment on Oracle AU
 
+## 28 October 2026: same-session AI voice transcript refinement
+
+API **1.51.0** adds a backend-handled `refine_input_transcript` tool to AI
+voice-message sessions. The current Gemini Live model uses the recording and
+established conversation to conservatively correct recognition, intended words
+and small grammar errors, including the name Bantera. It must preserve language,
+meaning, names, numbers and negation, leaving uncertain wording unchanged.
+No second AI model or separate transcription request is used. One accepted,
+bounded refinement is returned through the existing final `inputText`; streaming
+captions remain provisional. If refinement is omitted, rejected or uncertain,
+the original transcript remains. Provider compliance and semantic accuracy are
+not guaranteed. Existing stored chats are not rewritten.
+
+Real-time calls, Practice and human DMs do not receive this tool. Resumption
+context version 12 ensures old voice sessions cannot retain stale instructions.
+The backend validates structure, length and a minimum self-reported confidence
+of 0.9; this score is not an independent accuracy measurement. Interrupted
+provisional refinements are discarded and repeated replacements rejected.
+
+**GO for published apps:** existing endpoints, auth and response shapes are
+unchanged. Current apps already replace voice-message text from final
+`inputText`. No database migration, new configuration, secret or app install is
+required. The website source remains unchanged. The paused human-call rollback
+remains intact.
+
+Validation: 1,742 backend tests passed (30 environment-dependent skips), 27
+Flutter callback/CallKit/audio regressions passed, and a real Gemini 3.8 Live
+synthetic voice check accepted one refinement and returned spoken audio in the
+same session: “Yesterday I go to the bank and buy two book” became “Yesterday I
+went to the bank and bought two books.” No physical-device testing was performed.
+Release **bantera-20261028-1** is **SUCCESS**. API runs in
+`bantera-api-20261028-1` (loopback 18174), with the unchanged website image in
+`bantera-website-20261028-1` (13065), through `cloudflared-20261028-1` (12103).
+The website remains **0.25.0**, marker `bantera-20261027-11`. All **128/128**
+public availability samples returned HTTP 200 through the two-minute stability
+window. Candidate/public content and authentication gates passed. Both public
+version markers were rechecked after cleanup. The verified PostgreSQL backup is
+**9,333,719 bytes**; source archive hashes and private runtime snapshots are
+retained in the release directory. Free disk remains approximately **98 GB**.
+Cleanup preserved data/volumes/backups and the verified release-12 application
+and connector containers as the restartable rollback. No commit/push or app
+installation was performed.
+
+Rollback, preserving subsequent database writes:
+`python3 /home/ubuntu/releases/bantera-20261028-1/deploy.py rollback`.
+
 ## Speaking leaderboard: 22 October 2026
 
 Release **bantera-20261021-9** publishes API **1.32.2** and website **0.17.1**.

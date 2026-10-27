@@ -69,8 +69,8 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             model = "models/" + model,
             contextWindowCompression = new { slidingWindow = new { } },
             generationConfig = AiLiveModelPolicy.GenerationConfig(model, voice, reasoning),
-            systemInstruction = new { parts = new[] { new { text = prompt + AiBugReportTool.Prompt + AiCallbackService.CapabilityPolicy + AiConversationTiming.LatestMessagePolicy + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (deviceVocabulary ? AiVocabularyTool.Prompt + (vocabularyVersion >= 2 ? AiVocabularyTool.ReadPrompt : "") : "") + (deviceEmojis ? AiEmojiTool.Prompt : "") + (deviceFormattedText ? AiFormattedTextTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage : AiCallPolicy.TurnTaking) } } },
-            tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model, deviceWebSearch, deviceVocabulary, deviceEmojis, vocabularyVersion, deviceFormattedText) } },
+            systemInstruction = new { parts = new[] { new { text = prompt + AiBugReportTool.Prompt + AiCallbackService.CapabilityPolicy + AiConversationTiming.LatestMessagePolicy + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (deviceVocabulary ? AiVocabularyTool.Prompt + (vocabularyVersion >= 2 ? AiVocabularyTool.ReadPrompt : "") : "") + (deviceEmojis ? AiEmojiTool.Prompt : "") + (deviceFormattedText ? AiFormattedTextTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage + AiInputTranscriptTool.Prompt : AiCallPolicy.TurnTaking) } } },
+            tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model, deviceWebSearch, deviceVocabulary, deviceEmojis, vocabularyVersion, deviceFormattedText, refineInputTranscript: voiceMessage) } },
             inputAudioTranscription = new { }, outputAudioTranscription = new { },
             realtimeInputConfig = new { automaticActivityDetection = voiceMessage
                 ? (object)new { disabled = true }
@@ -295,7 +295,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             }, upload, async (role, text) => {
                 if (role == "user") { attemptInput.Append(text); capturedInput = attemptInput.ToString(); }
                 if (transcript is not null) await transcript(role, text);
-            }, AiLiveModelPolicy.RequiresInteractionIdle(model), Observe);
+            }, AiLiveModelPolicy.RequiresInteractionIdle(model), Observe, refineInputTranscript: input.Text is null);
             try {
                 var first = await Task.WhenAny(upload, reply);
                 try { await first; }
@@ -317,7 +317,8 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                     catch { /* A missing checkpoint cannot invalidate an already complete voice reply. */ }
                 }
                 succeeded = true;
-                return transcriptRecovery is null ? result : result with { InputText = transcriptRecovery };
+                return transcriptRecovery is null || !string.IsNullOrWhiteSpace(result.InputText)
+                    ? result : result with { InputText = transcriptRecovery };
             }
             catch (OperationCanceledException) when (watchdog.TimedOut && !token.IsCancellationRequested) {
                 logger.LogWarning("Bantera AI voice reply stalled after Send; canReplay={CanReplay}; not marking quota.", !receivedAudio);
@@ -393,7 +394,8 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
     public static async Task<AiVoiceReply> ReadReplyAsync(WebSocket socket, JsonElement snapshot,
         Func<JsonElement, Task<object>>? executeTool, CancellationToken ct,
         Func<byte[]?, Task>? stream = null, Task? uploaded = null,
-        Func<string, string, Task>? transcript = null, bool requiresInteractionIdle = false, Action<string>? observe = null)
+        Func<string, string, Task>? transcript = null, bool requiresInteractionIdle = false, Action<string>? observe = null,
+        bool refineInputTranscript = false)
     {
         using var audio = new MemoryStream();
         var input = new StringBuilder();
@@ -402,6 +404,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         var toolRounds = 0;
         var inputSent = 0;
         var outputSent = 0;
+        string? refinedInput = null;
         var completion = new AiLiveCompletion(requiresInteractionIdle);
         while (true)
         {
@@ -415,7 +418,12 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 foreach (var call in toolCall.GetProperty("functionCalls").EnumerateArray())
                 {
                     var name = call.GetProperty("name").GetString()!;
-                    if ((AiCallbackService.ToolNames.Contains(name) || name == AiWebSearchTool.Name || name == AiVocabularyTool.Name || name == AiEmojiTool.Name || name == AiFormattedTextTool.Name) && executeTool is not null)
+                    if (name == AiInputTranscriptTool.Name) {
+                        var candidate = refineInputTranscript && refinedInput is null ? AiInputTranscriptTool.Read(call) : null;
+                        if (candidate is not null) { refinedInput = candidate; observe?.Invoke("inputTranscriptRefinements"); }
+                        responses.Add(new { id = call.GetProperty("id").GetString(), name,
+                            response = new { accepted = candidate is not null } });
+                    } else if ((AiCallbackService.ToolNames.Contains(name) || name == AiWebSearchTool.Name || name == AiVocabularyTool.Name || name == AiEmojiTool.Name || name == AiFormattedTextTool.Name) && executeTool is not null)
                         responses.Add(new { id = call.GetProperty("id").GetString(), name, response = new { result = await executeTool(call) } });
                     else responses.Add(AiDeviceTools.SnapshotResponse(call, snapshot));
                 }
@@ -430,6 +438,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 AppendTranscript(interruptedContent, "inputTranscription", input);
                 audio.SetLength(0);
                 output.Clear();
+                refinedInput = null;
                 inputSent = outputSent = 0;
                 completion = new AiLiveCompletion(requiresInteractionIdle);
                 if (stream is not null) await stream(null);
@@ -480,7 +489,9 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             }
         }
         if (audio.Length == 0) throw new InvalidDataException("AI returned no audio.");
-        return new(audio.ToArray(), input.ToString(), output.ToString());
+        // Keep streaming the provider's original captions unchanged. Published
+        // apps replace them with this final inputText when the reply completes.
+        return new(audio.ToArray(), refinedInput ?? input.ToString(), output.ToString());
     }
 
     public static void AppendTranscript(JsonElement content, string name, StringBuilder text)

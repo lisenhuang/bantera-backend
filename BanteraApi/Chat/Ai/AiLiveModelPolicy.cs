@@ -29,7 +29,8 @@ public static class AiLiveModelPolicy
         return config;
     }
 
-    public static object[] Tools(string model, bool deviceWebSearch = false, bool deviceVocabulary = false, bool deviceEmojis = false, int vocabularyVersion = 1, bool deviceFormattedText = false) => AiDeviceTools.Declarations
+    public static object[] Tools(string model, bool deviceWebSearch = false, bool deviceVocabulary = false, bool deviceEmojis = false, int vocabularyVersion = 1, bool deviceFormattedText = false, bool refineInputTranscript = false) => AiDeviceTools.Declarations
+        .Concat(refineInputTranscript ? new[] { AiInputTranscriptTool.Declaration } : Array.Empty<object>())
         .Concat(deviceWebSearch ? new[] { AiWebSearchTool.Declaration } : Array.Empty<object>())
         .Concat(deviceVocabulary ? new[] { AiVocabularyTool.DeclarationFor(vocabularyVersion) } : Array.Empty<object>())
         .Concat(deviceEmojis ? new[] { AiEmojiTool.Declaration } : Array.Empty<object>())
