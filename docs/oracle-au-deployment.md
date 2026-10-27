@@ -2539,3 +2539,142 @@ checks passed again after cleanup. No Git commit/push occurred.
 Rollback preserves database writes and restores backend 1.44.0 plus the prior
 website image (whose public marker remains `bantera-20261027-2`):
 `python3 /home/ubuntu/releases/bantera-20261027-4/deploy.py rollback`
+
+
+## 27 October 2026: Rolling leaderboard and Māori listening Practice
+
+Release **bantera-20261027-6**, backend **1.47.0**, is verified live. API loopback
+18166, website 13057, connector readiness 12095. The website reuses the unchanged
+**0.23.0** image (public release marker remains `bantera-20261027-5`) with its
+backend origin updated. Current and rollback release 5 are retained.
+
+**GO for existing published apps:** rolling `hours` and `until` are additive;
+legacy calendar `days` behavior is preserved. Two additive migrations create
+`speaking_events` and nullable `MaoriEnglishJson` plus indexes. No new environment
+variables or secrets. Backup verified before migration: **8,628,913 bytes**.
+
+Rolling 24H/7-day/30-day responses end at the refresh timestamp. New mobile
+speaking counts upload idempotent timestamped events; old daily totals supplement
+only full interior dates. Exact old boundary-hour counts cannot be recovered.
+Māori remains admin-only, supports listening-level selection without earned test
+passes, and stores New Zealand English meanings automatically. Other languages
+retain on-device translation.
+
+Local checks: 848 backend tests passed in the focused suite (3 optional skips),
+then 3 real database/admin endpoint integration tests passed without skips.
+New migrations applied to a disposable local database. Flutter focused suites,
+callback/CallKit and audio regressions passed; analysis has no errors/warnings
+(existing informational lint remains). Signed/debug iOS builds passed. Candidate
+and live checks each passed 17 route contracts plus 7 read-only authenticated
+rolling/migration checks. All **158/158** handover availability samples were 200.
+Cleanup preserved current/rollback and left **113 GB free**, compared with
+111 GB before building; both public services passed again afterward.
+
+App **3.28.0 (487)** was installed after backend verification, without launching
+or testing on the physical iPhone. Locked-screen callback acceptance remains
+unverified on hardware. No Git commit/push or store submission was performed.
+
+Rollback keeps all newer database writes:
+`python3 /home/ubuntu/releases/bantera-20261027-6/deploy.py rollback`
+
+
+## 27 October 2026: Restore current-day rolling leaderboard counts
+
+Release **bantera-20261027-7**, backend **1.47.1**, is verified live. Rolling
+windows now include existing UTC counters from the current day, across every
+spoken language. Timestamped events remain deduplicated. First partial historical
+days still cannot be reconstructed from daily counters. Candidate and live
+read-only probes confirmed the affected account's 67 words in 24H, including
+English, Japanese and Cantonese despite its current Māori learning language.
+
+**GO for published apps:** query correction only; no additional migration,
+configuration, secret or response-contract change. Database backup verified at
+**8,655,460 bytes**. API loopback 18167, website 13058, connector readiness 12096.
+Website source/image remains 0.23.0 with marker `bantera-20261027-5`; its backend
+origin now points at release 7. Current release 7 and rollback release 6 retained.
+
+Backend build and 15 focused tests passed, including real PostgreSQL coverage.
+App 78 tests passed, including callback/CallKit and updated Practice layout
+snapshots. Focused analysis, debug build, signed release and code-signature
+verification passed. Candidate/live checks passed 17 contracts and 7 authenticated
+read-only checks. All **130/130** public availability samples returned 200.
+Post-cleanup checks passed again; disk free space changed from 113 GB to 112 GB.
+
+App **3.28.1 (488)** installed and confirmed in the iPhone app inventory only after
+backend verification. Includes top-left Practice language flag/code and Māori
+NZ group flag. No physical-device launch or tests; callback hardware acceptance
+remains user-controlled. No commit, push or store submission performed.
+
+Rollback preserves database writes:
+`python3 /home/ubuntu/releases/bantera-20261027-7/deploy.py rollback`
+
+
+## 27 October 2026: Local-day bounds for rolling speaking totals
+
+Release **bantera-20261027-8**, backend **1.47.2**, verified live. API loopback
+18168, website 13059, connector readiness 12097. Website source/image is unchanged
+at 0.23.0 (marker `bantera-20261027-5`), with its origin targeting API release 8.
+Current release 8 and rollback release 7 remain available.
+
+**GO for published apps:** optional `localDay` payload and additive migration
+`20261027034039_SpeakingLocalDayWindows`. Existing payloads and calendar-day
+queries retain their contracts. No new configuration or secrets. Backup verified
+at **8,668,722 bytes** before staging applied the migration.
+
+Whole local-day intervals supplement UTC counters and timestamped events using
+per-device/per-language maximum candidates, not duplicate sums. Exact events
+outside each interval still contribute. Unknown partial historical intervals
+remain excluded. New app sync is required: the read-only production checks still
+showed 67 before installation because the phone had not uploaded local bounds.
+The 258-word local-day scenario was verified locally, not claimed as already
+restored in production. No fabricated speech timestamps or production test rows.
+
+Validation: 15 backend tests passed against disposable PostgreSQL, including
+cross-language totals, retry deduplication, multiple devices, interval expiration
+and exact events outside intervals. Migration and build passed. 97 app tests,
+including callback/CallKit and audio regressions, passed. Analysis had no errors
+or warnings (5 existing informational style notices). Debug and signed release
+builds and signature verification passed. Candidate/live checks passed 17 route
+contracts and 8 read-only authenticated/schema checks. All **130/130** public
+availability samples returned 200. Post-cleanup checks passed again; free disk
+remained **112 GB**. Physical callback acceptance was not performed.
+
+App **3.28.2 (489)** installed after backend verification and confirmed in device
+inventory, without launch/testing. Includes NZ-first English learning accents
+and current-profile language for the owner's cached leaderboard row. Opening
+online will sync local-day bounds. No Git commit/push or store submission.
+
+Rollback preserves the additive table and newer writes:
+`python3 /home/ubuntu/releases/bantera-20261027-8/deploy.py rollback`
+
+## 27 October 2026: Include older clients in rolling speaking rankings
+
+Release **bantera-20261027-9**, backend **1.47.3**, verified live. API loopback
+18169, website 13060, connector readiness 12098. Website source/image remains
+0.23.0 (marker `bantera-20261027-5`), with its origin targeting API release 9.
+Current release 9 and working rollback release 8 are retained after cleanup.
+
+**GO for published apps:** backward-compatible query correction. No new migration,
+configuration, secrets or client update required. The additive local-day table
+from release 8 remains in place. Database backup verified at **8,756,118 bytes**.
+
+Older clients' local calendar totals now contribute when their entire possible
+UTC interval lies inside the requested rolling window. This includes clients
+already reporting UTC daily snapshots. Multiple eligible local days are combined;
+timestamped events outside those intervals contribute without double counting.
+Unknown partial historical dates remain excluded rather than inventing speech
+timestamps. Totals continue to span all spoken languages and participants.
+
+Fifteen focused backend tests passed against disposable PostgreSQL, including
+three-user 24/168/720-hour regressions, multiple older local days, exact-event
+deduplication and expiring boundaries. Build passed. Candidate and public checks
+passed 17 contracts and 8 authenticated read-only checks. Production 24H results
+verified all three reported participants at 384, 258 and 6 words, with the owner
+ranked second. All **130/130** public availability samples returned 200.
+Post-cleanup public checks passed again; free disk remained **112 GB**.
+
+App **3.28.2 (489)** is unchanged and already installed. No new installation,
+physical-device testing, production test rows, Git commit/push or store submission.
+
+Rollback preserves newer database writes:
+`python3 /home/ubuntu/releases/bantera-20261027-9/deploy.py rollback`

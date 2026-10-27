@@ -161,6 +161,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("speaking_devices"); e.HasKey(x => new { x.UserId, x.DeviceId });
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
+        b.Entity<SpeakingEvent>(e => {
+            e.ToTable("speaking_events"); e.HasKey(x => new { x.UserId, x.DeviceId, x.EventId });
+            e.Property(x => x.Language).HasMaxLength(3);
+            e.HasIndex(x => x.OccurredAt);
+            e.HasIndex(x => new { x.UserId, x.DeviceId, x.OccurredAt });
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<SpeakingDayWindow>(e => {
+            e.ToTable("speaking_day_windows"); e.HasKey(x => new { x.UserId, x.DeviceId, x.Date, x.Language });
+            e.Property(x => x.Language).HasMaxLength(3);
+            e.HasIndex(x => x.ThroughUtc);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
         b.Entity<SpeakingDay>(e => {
             e.ToTable("speaking_days"); e.HasKey(x => new { x.UserId, x.DeviceId, x.Date, x.Language });
             e.Property(x => x.Language).HasMaxLength(3);

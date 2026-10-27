@@ -804,7 +804,12 @@ public class ChatService(
         if (message is null)
             return (false, ChatErrorCodes.ChatNotFound);
         if (message.SenderUserId != userId)
-            return (false, ChatErrorCodes.ChatForbidden);
+        {
+            // Moderation is limited to groups. A received DM can only be removed locally.
+            var admin = message.Thread.Type == ChatThreadTypes.Group && await db.Users.AsNoTracking()
+                .AnyAsync(u => u.Id == userId && u.Role == "admin" && u.Status == "active" && u.DeletedAt == null, cancellationToken);
+            if (!admin) return (false, ChatErrorCodes.ChatForbidden);
+        }
 
         var memberIds = await db.ChatThreadMemberships
             .Where(m => m.ThreadId == message.ThreadId && m.DeletedAt == null)

@@ -22,6 +22,7 @@ public sealed class PracticeDialogue
     public DateTime? PronunciationRetryAt { get; set; }
     public DateTime? PronunciationRequestedAt { get; set; }
     public string Fingerprint { get; set; } = "";
+    public string? MaoriEnglishJson { get; set; }
     public string CueAudio { get; set; } = "";
     public string ReplyAudio { get; set; } = "";
     public string DistractorAudio { get; set; } = "";
@@ -60,7 +61,7 @@ public sealed class PracticeAttempt
     public string Outcome { get; set; } = "unclear";
     public int? Choice { get; set; }
 }
-public sealed record PracticeDraft(string Topic, string MeaningKey, string Cue, string Reply, string Distractor, string Explanation, PracticePronunciationData? Pronunciation = null);
+public sealed record PracticeDraft(string Topic, string MeaningKey, string Cue, string Reply, string Distractor, string Explanation, PracticePronunciationData? Pronunciation = null, MaoriEnglishTranslation? EnglishTranslation = null);
 public sealed record PracticeJudgement(string Outcome, int? Choice);
 public static class PracticeRules
 {

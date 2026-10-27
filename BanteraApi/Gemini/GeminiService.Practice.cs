@@ -52,8 +52,17 @@ public partial class GeminiService
             "Use genuinely different intents and situations from recent material; do not just substitute nouns. Vocabulary may recur. " +
             "Use the given practice difficulty, adapted naturally to the language. A1: very short concrete exchanges; A2: routine situations; B1: reasons and plans; B2: implications; C1/C2: pragmatic nuance while keeping each utterance under 45 words. " +
             (level == PracticeRules.BeginnerLevel ? BeginnerPracticeInstruction : "") +
-            "Self-check that only the reply fits before returning. " + PracticePronunciation.Instruction(locale) + AccentInstructions.GetValueOrDefault(locale, $"Use natural language for {locale}."),
+            "Self-check that only the reply fits before returning. " + MaoriPracticeTranslation.Instruction(locale) + PracticePronunciation.Instruction(locale) + AccentInstructions.GetValueOrDefault(locale, $"Use natural language for {locale}."),
             new { locale, level = PracticeRules.LevelName(level), topics, recent }, ct);
+
+    public Task<MaoriEnglishTranslation> GenerateMaoriEnglishAsync(PracticeDialogue d, CancellationToken ct)
+    {
+        if (!MaoriPracticeTranslation.Applies(d.Locale)) throw new InvalidOperationException("Server practice translation is restricted to Maori.");
+        return PracticeJsonAsync<MaoriEnglishTranslation>(
+            "Translate the three supplied Maori sentences into natural New Zealand English (en-NZ). Preserve their meaning and differences. " +
+            "Return {cue, reply, distractor} containing the English translations only. Do not change the source sentences.",
+            new { d.Cue, d.Reply, d.Distractor }, ct);
+    }
 
     public Task<PracticePronunciationData> GeneratePracticePronunciationAsync(PracticeDialogue d, CancellationToken ct) =>
         PracticeJsonAsync<PracticePronunciationData>("Return ONLY the pronunciation object for the supplied immutable practice sentences. " +

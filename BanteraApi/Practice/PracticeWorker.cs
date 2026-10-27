@@ -10,7 +10,7 @@ namespace BanteraApi.Practice;
 
 public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<PracticeWorker> logger, AiPipelineEventRecorder events) : BackgroundService
 {
-    public sealed record Demand(Guid UserId, string Locale, string Language, int Level)
+    public sealed record Demand(Guid UserId, string Locale, string Language, int Level, Guid? TranslationDialogueId = null)
     {
         public Guid RunId { get; } = Guid.NewGuid();
     }
@@ -80,6 +80,14 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
         Task<int> ReadyCount() => writer.Set<PracticeDialogue>().CountAsync(d => d.Locale == demand.Locale && d.Level == demand.Level &&
             d.Ready && d.ContentVersion == PracticeRules.ContentVersion &&
             !writer.Set<PracticeExposure>().Any(e => e.UserId == demand.UserId && e.DialogueId == d.Id), ct);
+        if (MaoriPracticeTranslation.Applies(demand.Locale))
+        {
+            var existing = await writer.Set<PracticeDialogue>().Where(d => d.Locale == demand.Locale && d.Level == demand.Level &&
+                d.Ready && d.MaoriEnglishJson == null && d.ContentVersion == PracticeRules.ContentVersion)
+                .OrderByDescending(d => d.Id == demand.TranslationDialogueId).ThenBy(d => d.CreatedAt)
+                .Take(PracticePreparation.ReadyTarget).ToListAsync(ct);
+            foreach (var row in existing) await EnsureMaoriTranslationAsync(row, writer, ct);
+        }
         if (await ReadyCount() >= PracticePreparation.ReadyTarget) return;
         // Resume approved material before paying for more text. A temporary
         // speech-provider failure must not discard completed clips or drafts.
@@ -121,6 +129,8 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
                 var row = new PracticeDialogue { ContentVersion = PracticeRules.ContentVersion, Locale = demand.Locale, Language = demand.Language, Level = demand.Level,
                     Topic = draft.Topic, MeaningKey = draft.MeaningKey, Cue = draft.Cue, Reply = draft.Reply,
                     Distractor = draft.Distractor, Explanation = draft.Explanation,
+                    MaoriEnglishJson = MaoriPracticeTranslation.Applies(demand.Locale) && MaoriPracticeTranslation.Valid(draft.EnglishTranslation)
+                        ? System.Text.Json.JsonSerializer.Serialize(draft.EnglishTranslation) : null,
                     PronunciationJson = draft.Pronunciation == null ? null : System.Text.Json.JsonSerializer.Serialize(draft.Pronunciation, PracticePronunciation.Json), Fingerprint = PracticeRules.Fingerprint(draft.Cue, draft.Reply) };
                 // Reserve the fingerprint before paying for speech synthesis.
                 writer.Add(row);
@@ -139,8 +149,19 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
         }
         await transaction.CommitAsync(ct);
     }
+    private async Task EnsureMaoriTranslationAsync(PracticeDialogue row, AppDbContext writer, CancellationToken ct)
+    {
+        if (!MaoriPracticeTranslation.Applies(row.Locale) || MaoriPracticeTranslation.Read(row) != null) return;
+        await using var scope = scopes.CreateAsyncScope();
+        var translation = await scope.ServiceProvider.GetRequiredService<GeminiService>().GenerateMaoriEnglishAsync(row, ct);
+        if (!MaoriPracticeTranslation.Valid(translation)) throw new InvalidDataException("Incomplete Maori English translation");
+        row.MaoriEnglishJson = System.Text.Json.JsonSerializer.Serialize(translation);
+        await writer.SaveChangesAsync(ct);
+    }
+
     private async Task CompleteAudioAsync(PracticeDialogue row, AppDbContext writer, Guid runId, CancellationToken ct)
     {
+        await EnsureMaoriTranslationAsync(row, writer, ct);
         var texts = new[] { row.Cue, row.Reply, row.Distractor };
         await PracticeAudioPreparation.CompleteAsync(row, async part =>
         {

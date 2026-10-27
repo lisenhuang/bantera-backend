@@ -107,6 +107,11 @@ public class ProfileService(
         if (user is null)
             return (null, ErrorCodes.Unauthorized);
 
+        if ((hasNativeLanguage && !LearningLanguageCatalog.CanSelectProfileLanguage(normalizedNativeLanguage, true, user.Role == "admin")) ||
+            (hasLearningLanguage && !LearningLanguageCatalog.CanSelectProfileLanguage(normalizedLearningLanguage, false, user.Role == "admin")))
+            return (null, ErrorCodes.InvalidProfile);
+        if (LearningLanguageCatalog.IsMaori(normalizedLearningLanguage)) normalizedLearningLanguage = "mi-NZ";
+
         if (hasName)
             user.Name = normalizedName;
         if (hasTranslationLanguage)

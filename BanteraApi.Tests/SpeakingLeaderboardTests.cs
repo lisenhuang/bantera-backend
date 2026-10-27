@@ -4,6 +4,7 @@ using BanteraApi.Profile;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using System.Security.Claims;
 using Xunit;
 
 namespace BanteraApi.Tests;
@@ -28,6 +29,16 @@ public class SpeakingLeaderboardTests
         var window = SpeakingLeaderboardService.Window(DateTime.Parse(now).ToUniversalTime(), 30);
         Assert.Equal(DateOnly.Parse(from), window.From);
         Assert.Equal(29, window.Through.DayNumber - window.From.DayNumber);
+    }
+
+    [Theory]
+    [InlineData("2026-10-27T00:00:00Z", "2026-10-27")]
+    [InlineData("2026-10-27T23:59:59Z", "2026-10-27")]
+    public void TodayUsesOneUtcCalendarDate(string now, string today)
+    {
+        var window = SpeakingLeaderboardService.Window(DateTime.Parse(now).ToUniversalTime(), 1);
+        Assert.Equal(DateOnly.Parse(today), window.From);
+        Assert.Equal(window.From, window.Through);
     }
 
     [Theory]
@@ -58,6 +69,8 @@ public class SpeakingLeaderboardTests
             CREATE TEMP TABLE user_language_word_activity (LIKE user_word_activity); ALTER TABLE user_language_word_activity ADD COLUMN "Language" text;
             CREATE TEMP TABLE speaking_visibility ("UserId" uuid PRIMARY KEY, "ShowProfile" boolean);
             CREATE TEMP TABLE speaking_devices ("UserId" uuid, "DeviceId" uuid, "LegacyThroughDate" date, PRIMARY KEY ("UserId", "DeviceId"));
+            CREATE TEMP TABLE speaking_day_windows ("UserId" uuid, "DeviceId" uuid, "Date" date, "Language" text, "FromUtc" timestamptz, "ThroughUtc" timestamptz, "SpokenWords" bigint, PRIMARY KEY ("UserId","DeviceId","Date","Language"));
+            CREATE TEMP TABLE speaking_events ("UserId" uuid, "DeviceId" uuid, "EventId" uuid, "OccurredAt" timestamptz, "Language" text, "SpokenWords" bigint);
             CREATE TEMP TABLE speaking_days ("UserId" uuid, "DeviceId" uuid, "Date" date, "Language" text, "SpokenWords" bigint);
             INSERT INTO users SELECT ('00000000-0000-0000-0000-' || lpad(i::text,12,'0'))::uuid, 'Learner '||i, 'user', 'active', null, null, null, 'ja' FROM generate_series(1,105) i;
             INSERT INTO user_language_word_activity ("UserId", "DeviceId", "Date", "Language", "ListenedWords", "SpokenWords")
@@ -72,6 +85,19 @@ public class SpeakingLeaderboardTests
         var now = new DateTime(2026,10,21,12,0,0,DateTimeKind.Utc);
         var me = Guid.Parse("00000000-0000-0000-0000-000000000105");
         var report = await service.GetAsync(me, new DefaultHttpContext(), default, now);
+        Assert.False(report.CanChoosePeriod);
+        Assert.All(report.Rows, row => Assert.Null(row.AdminUserId));
+        Assert.DoesNotContain("AdminUserId", JsonSerializer.Serialize(report));
+        var adminContext = new DefaultHttpContext {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "admin")], "test"))
+        };
+        var today = await service.GetAsync(me, adminContext, default, now, days: 1);
+        Assert.True(today.CanChoosePeriod);
+        Assert.Equal(today.FromDate, today.ThroughDate);
+        Assert.Equal(12450, today.Rows[0].SpokenWords);
+        Assert.Equal(8000, today.Rows.Single(row => row.Name == "Learner 1").SpokenWords);
+        Assert.All(today.Rows, row => Assert.NotNull(row.AdminUserId));
+        Assert.Equal(me, today.You.AdminUserId);
         Assert.Equal(100, report.Rows.Length); Assert.Equal(105, report.Participants);
         Assert.True(report.HasMore);
         var next = await service.GetAsync(me, new DefaultHttpContext(), default, now, offset: 100);

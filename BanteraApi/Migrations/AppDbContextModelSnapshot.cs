@@ -897,6 +897,37 @@ namespace BanteraApi.Migrations
                     b.ToTable("speaking_days", (string)null);
                 });
 
+            modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingDayWindow", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Language")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime>("FromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("SpokenWords")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("ThroughUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("UserId", "DeviceId", "Date", "Language");
+
+                    b.HasIndex("ThroughUtc");
+
+                    b.ToTable("speaking_day_windows", (string)null);
+                });
+
             modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingDevice", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -911,6 +942,37 @@ namespace BanteraApi.Migrations
                     b.HasKey("UserId", "DeviceId");
 
                     b.ToTable("speaking_devices", (string)null);
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingEvent", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("SpokenWords")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("UserId", "DeviceId", "EventId");
+
+                    b.HasIndex("OccurredAt");
+
+                    b.HasIndex("UserId", "DeviceId", "OccurredAt");
+
+                    b.ToTable("speaking_events", (string)null);
                 });
 
             modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingVisibility", b =>
@@ -1568,6 +1630,9 @@ namespace BanteraApi.Migrations
                         .HasMaxLength(35)
                         .HasColumnType("character varying(35)");
 
+                    b.Property<string>("MaoriEnglishJson")
+                        .HasColumnType("text");
+
                     b.Property<string>("MeaningKey")
                         .IsRequired()
                         .HasMaxLength(180)
@@ -1947,7 +2012,25 @@ namespace BanteraApi.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingDayWindow", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingDevice", b =>
+                {
+                    b.HasOne("BanteraApi.Database.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("BanteraApi.Database.Entities.SpeakingEvent", b =>
                 {
                     b.HasOne("BanteraApi.Database.Entities.User", null)
                         .WithMany()

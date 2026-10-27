@@ -12,6 +12,17 @@ public sealed record LearningLanguageItem(
 
 public static class LearningLanguageCatalog
 {
+    public static bool IsMaori(string? locale) =>
+        string.Equals(locale?.Trim().Replace('_', '-').Split('-')[0], "mi", StringComparison.OrdinalIgnoreCase);
+
+    public static string? ResolvePracticeLocale(string? locale, bool isAdmin) =>
+        isAdmin && string.Equals(locale?.Replace('_', '-'), "mi-NZ", StringComparison.OrdinalIgnoreCase)
+            ? "mi-NZ"
+            : Items.FirstOrDefault(x => x.Identifier.Equals(locale, StringComparison.OrdinalIgnoreCase))?.Identifier;
+
+    public static bool CanSelectProfileLanguage(string? locale, bool nativeLanguage, bool isAdmin) =>
+        !IsMaori(locale) || (!nativeLanguage && isAdmin);
+
     // Profile selection does not imply that the dialogue timing/transcription pipeline supports it.
     public static bool SupportsAudioDialogues(string? locale) =>
         !string.Equals(locale?.Trim().Replace('_', '-').Split('-')[0], "mi", StringComparison.OrdinalIgnoreCase);
