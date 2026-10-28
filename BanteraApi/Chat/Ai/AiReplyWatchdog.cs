@@ -13,14 +13,18 @@ public sealed class AiReplyWatchdog : IAsyncDisposable
     private readonly CancellationTokenSource stop;
     private readonly CancellationToken parent;
     private readonly TimeSpan idle;
+    private readonly TimeProvider clock;
+    private readonly ITimer deadline;
     private readonly Task arm;
-    private readonly System.Diagnostics.Stopwatch playback = new();
+    private long? playbackStarted;
     private double audioSeconds;
-    public AiReplyWatchdog(Task committed, CancellationToken parent, TimeSpan? idle = null)
+    public AiReplyWatchdog(Task committed, CancellationToken parent, TimeSpan? idle = null, TimeProvider? timeProvider = null)
     {
         this.parent = parent;
         this.idle = idle ?? TimeSpan.FromSeconds(20);
+        clock = timeProvider ?? TimeProvider.System;
         stop = CancellationTokenSource.CreateLinkedTokenSource(parent);
+        deadline = clock.CreateTimer(_ => stop.Cancel(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         arm = ArmAsync(committed);
     }
     public CancellationToken Token => stop.Token;
@@ -31,13 +35,16 @@ public sealed class AiReplyWatchdog : IAsyncDisposable
     public void AudioProgress(int bytes)
     {
         if (bytes <= 2) return; // Do not treat the resume keepalive as speech.
-        if (!playback.IsRunning) playback.Start();
+        playbackStarted ??= clock.GetTimestamp();
         audioSeconds += bytes / 48000d;
         Progress();
     }
-    public void ResetAudio() { audioSeconds = 0; playback.Reset(); Progress(); }
-    public void Progress() => stop.CancelAfter(idle + TimeSpan.FromSeconds(
-        Math.Max(0, audioSeconds - playback.Elapsed.TotalSeconds)));
+    public void ResetAudio() { audioSeconds = 0; playbackStarted = null; Progress(); }
+    public void Progress()
+    {
+        var elapsed = playbackStarted is long started ? clock.GetElapsedTime(started).TotalSeconds : 0;
+        deadline.Change(idle + TimeSpan.FromSeconds(Math.Max(0, audioSeconds - elapsed)), Timeout.InfiniteTimeSpan);
+    }
     private async Task ArmAsync(Task committed)
     {
         try { await committed.WaitAsync(stop.Token); Progress(); }
@@ -47,6 +54,7 @@ public sealed class AiReplyWatchdog : IAsyncDisposable
     {
         await stop.CancelAsync();
         await arm;
+        await deadline.DisposeAsync();
         stop.Dispose();
     }
 }

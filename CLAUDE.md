@@ -5,6 +5,15 @@
 - **Do not run `git commit` (or `git push`) automatically.** Committing is a human task.
 - Make and stage edits as needed, but leave the actual commit/push to the user — only commit if they explicitly ask you to in that request.
 
+## CI/CD checks before and after pushing
+
+- Before every push, inspect the latest GitHub Actions runs for this repository and the current remote branch head. Read any failed job logs and address unresolved failures as part of the work; an obsolete failed run superseded by a successful replacement does not need to be rerun.
+- Run the relevant checks from `.github/workflows/` locally before pushing (including the required callback/CallKit regressions for app code changes). Preserve meaningful assertions; do not skip tests, disable checks or reduce coverage just to obtain a green result.
+- After an authorized push, inspect GitHub Actions for the **exact pushed commit SHA** and wait for all required jobs to complete. A local pass or successful `git push` is not CI success.
+- If CI/CD fails, diagnose the failure, fix its cause, verify locally and push the authorized fix, then check the replacement run. Continue until the required checks pass or a concrete external blocker requires user action. Clearly report pending, failed or inaccessible checks rather than claiming completion.
+- Bantera has three independent repositories: `lisenhuang/bantera-app`, `lisenhuang/bantera-backend` and `lisenhuang/bantera-website`. When the user asks to push/check all codebases, verify each one separately.
+- Prefer the connected GitHub tools for run status and job logs; use the GitHub CLI or browser when necessary. CI repair does not authorize production deployment, app installation or app-store submission.
+
 ## Sync with remote before modifying code
 
 - **Before making any code change, check GitHub for newer commits and pull them first.** Run, from this directory:

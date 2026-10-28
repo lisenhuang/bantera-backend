@@ -403,29 +403,36 @@ public class AiVoiceStreamingTests
     [Fact]
     public async Task ReplyDeadlineStartsAtCommitAndAudioProgressExtendsIt()
     {
+        var clock = new WatchdogClock();
         var commit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var watchdog = new AiReplyWatchdog(commit.Task, default, TimeSpan.FromMilliseconds(200));
-        await Task.Delay(250);
+        await using var watchdog = new AiReplyWatchdog(commit.Task, default, TimeSpan.FromMilliseconds(200), clock);
+        clock.Advance(TimeSpan.FromSeconds(30));
         Assert.False(watchdog.Token.IsCancellationRequested);
         commit.SetResult();
-        await Task.Delay(100);
+        await clock.FirstArmed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        clock.Advance(TimeSpan.FromMilliseconds(100));
         watchdog.Progress();
-        await Task.Delay(130);
+        clock.Advance(TimeSpan.FromMilliseconds(130));
         Assert.False(watchdog.Token.IsCancellationRequested);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Delay(2000, watchdog.Token));
+        clock.Advance(TimeSpan.FromMilliseconds(69));
+        Assert.False(watchdog.TimedOut);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
         Assert.True(watchdog.TimedOut);
     }
     [Fact]
     public async Task BufferedSpeechDoesNotTripIdleDeadlineWhileWaitingForTurnCompletion()
     {
-        await using var watchdog = new AiReplyWatchdog(Task.CompletedTask, default, TimeSpan.FromMilliseconds(100));
+        var clock = new WatchdogClock();
+        await using var watchdog = new AiReplyWatchdog(Task.CompletedTask, default, TimeSpan.FromMilliseconds(100), clock);
         watchdog.AudioProgress(48000); // One second of audio delivered instantly.
-        await Task.Delay(250);
+        clock.Advance(TimeSpan.FromMilliseconds(250));
         Assert.False(watchdog.TimedOut);
         watchdog.Progress(); // A tool response must not shorten the playback allowance.
-        await Task.Delay(200);
+        clock.Advance(TimeSpan.FromMilliseconds(200));
         Assert.False(watchdog.TimedOut);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Delay(2500, watchdog.Token));
+        clock.Advance(TimeSpan.FromMilliseconds(649));
+        Assert.False(watchdog.TimedOut);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
         Assert.True(watchdog.TimedOut); // A genuinely missing completion remains bounded.
     }
 
@@ -433,12 +440,15 @@ public class AiVoiceStreamingTests
     public async Task PlaybackAllowanceResetsBetweenAttemptsAndParentCancellationStillWins()
     {
         using var parent = new CancellationTokenSource();
-        await using var watchdog = new AiReplyWatchdog(Task.CompletedTask, parent.Token, TimeSpan.FromMilliseconds(100));
+        var clock = new WatchdogClock();
+        await using var watchdog = new AiReplyWatchdog(Task.CompletedTask, parent.Token, TimeSpan.FromMilliseconds(100), clock);
         watchdog.AudioProgress(48000 * 60);
         watchdog.ResetAudio();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Delay(2000, watchdog.Token));
+        clock.Advance(TimeSpan.FromMilliseconds(99));
+        Assert.False(watchdog.TimedOut);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
         Assert.True(watchdog.TimedOut);
-        await using var second = new AiReplyWatchdog(Task.CompletedTask, parent.Token);
+        await using var second = new AiReplyWatchdog(Task.CompletedTask, parent.Token, timeProvider: clock);
         second.AudioProgress(48000 * 60);
         await parent.CancelAsync();
         Assert.True(second.Token.IsCancellationRequested);
@@ -452,6 +462,74 @@ public class AiVoiceStreamingTests
         await using var watchdog = new AiReplyWatchdog(Task.CompletedTask, parent.Token);
         await parent.CancelAsync();
         Assert.False(watchdog.TimedOut);
+    }
+
+    [Fact]
+    public async Task DefaultDeadlineAndTinyKeepalivesRetainTheTwentySecondLimit()
+    {
+        var clock = new WatchdogClock();
+        await using var watchdog = new AiReplyWatchdog(Task.CompletedTask, default, timeProvider: clock);
+        clock.Advance(TimeSpan.FromMilliseconds(19999));
+        watchdog.AudioProgress(2);
+        Assert.False(watchdog.TimedOut);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.True(watchdog.TimedOut);
+    }
+
+    [Fact]
+    public async Task DisposingBeforeSendDisarmsTheTimerAndDoesNotWaitForRecording()
+    {
+        var clock = new WatchdogClock();
+        var recording = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var watchdog = new AiReplyWatchdog(recording.Task, default, timeProvider: clock);
+        await watchdog.DisposeAsync();
+        recording.SetResult();
+        clock.Advance(TimeSpan.FromMinutes(10));
+        Assert.False(clock.FirstArmed.Task.IsCompleted);
+    }
+
+    // Advance elapsed time and deadlines together. Real 100 ms sleeps on a busy
+    // runner can overshoot by a second and falsely report a watchdog regression.
+    private sealed class WatchdogClock : TimeProvider
+    {
+        private long ticks;
+        private readonly List<Deadline> timers = [];
+        public TaskCompletionSource FirstArmed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => ticks;
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new Deadline(this, callback, state);
+            timers.Add(timer);
+            timer.Change(dueTime, period);
+            return timer;
+        }
+        public void Advance(TimeSpan elapsed)
+        {
+            var target = checked(ticks + elapsed.Ticks);
+            while (timers.Where(t => t.Due <= target).OrderBy(t => t.Due).FirstOrDefault() is { } next) {
+                ticks = next.Due;
+                next.Due = long.MaxValue;
+                next.Fire();
+            }
+            ticks = target;
+        }
+        private sealed class Deadline(WatchdogClock clock, TimerCallback callback, object? state) : ITimer
+        {
+            public long Due { get; set; } = long.MaxValue;
+            private bool disposed;
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                if (disposed) return false;
+                Assert.Equal(Timeout.InfiniteTimeSpan, period);
+                Due = dueTime == Timeout.InfiniteTimeSpan ? long.MaxValue : clock.ticks + dueTime.Ticks;
+                if (dueTime != Timeout.InfiniteTimeSpan) clock.FirstArmed.TrySetResult();
+                return true;
+            }
+            public void Fire() { if (!disposed) callback(state); }
+            public void Dispose() { disposed = true; Due = long.MaxValue; }
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        }
     }
     [Theory]
     [InlineData("Resource exhausted. Please try again later.", true)]
