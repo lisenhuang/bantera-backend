@@ -14,10 +14,15 @@ public sealed record SpeakingSnapshot(Guid DeviceId, LanguageWordActivityDay[] D
 public sealed record SpeakingProfileChoice(bool ShowProfile);
 public sealed record SpeakingRow(string Key, long? Rank, string? Name, string? AvatarUrl, bool IsMe,
     bool ProfileHidden, long SpokenWords, string? LearningLanguage,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? AdminUserId = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? AdminUserId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? NativeLanguage = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? NativeLanguageFlag = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? LearningLanguageFlag = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? IpCountryCode = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? IpCountryFlag = null);
 public sealed record SpeakingReport(DateOnly FromDate, DateOnly ThroughDate, string TimeZone, DateTime AsOf,
     int Limit, long Participants, bool IncludesLegacyDates, bool ShowProfile, SpeakingRow[] Rows, SpeakingRow You,
-    int Offset, bool HasMore, bool CanChoosePeriod = false, DateTime? FromUtc = null, DateTime? ThroughUtc = null);
+    int Offset, bool HasMore, bool CanChoosePeriod = false, DateTime? FromUtc = null, DateTime? ThroughUtc = null, int PeriodDays = 7);
 public sealed class SpeakingSqlRow
 {
     public Guid UserId { get; set; }
@@ -156,21 +161,43 @@ public sealed class SpeakingLeaderboardService(AppDbContext db, LinkGenerator li
             )
             SELECT * FROM ranked WHERE ("Position" > {offset} AND "Position" <= {end}) OR "UserId" = {owner} ORDER BY "Position"
             """).ToArrayAsync(ct);
-        SpeakingRow Map(SpeakingSqlRow row) => new(
+        // One bounded lookup for the page and the owner's row. Location stays
+        // admin-only and comes from the latest recorded country, never a language.
+        var admin = context.User.IsInRole("admin");
+        var metadata = new Dictionary<Guid, (string? NativeLanguage, string? CountryCode)>();
+        if (admin && rows.Length > 0) {
+            var ids = rows.Select(r => r.UserId).ToArray();
+            var people = await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id)).Select(u => new {
+                u.Id, u.NativeLanguage,
+                CountryCode = db.UserActivityDaily.Where(a => a.UserId == u.Id && a.CountryCode != null)
+                    .OrderByDescending(a => a.Date).Select(a => a.CountryCode).FirstOrDefault()
+            }).ToArrayAsync(ct);
+            metadata = people.ToDictionary(p => p.Id, p => (
+                string.IsNullOrWhiteSpace(p.NativeLanguage) ? null : p.NativeLanguage,
+                Activity.CloudflareGeo.NormalizeCountry(p.CountryCode)));
+        }
+        static string? Flag(string? language) => LanguageFlags.For(language) is var flag && flag != LanguageFlags.Globe ? flag : null;
+        SpeakingRow Map(SpeakingSqlRow row) {
+            metadata.TryGetValue(row.UserId, out var person);
+            return new(
             Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(settings.Value.Secret),
                 Encoding.UTF8.GetBytes($"speaking:{through:yyyy-MM-dd}:{row.UserId}"))).ToLowerInvariant(), row.Rank,
             row.Name,
             row.AvatarObjectKey != null
                 ? links.GetUriByName(context, "GetUserAvatar", new { userId = row.UserId, v = row.AvatarUpdatedAt?.Ticks }) : null,
             row.UserId == owner, false, row.SpokenWords,
-            row.LearningLanguage, context.User.IsInRole("admin") ? row.UserId : null);
+            row.LearningLanguage, admin ? row.UserId : null, person.NativeLanguage,
+            admin ? Flag(person.NativeLanguage) : null, admin ? Flag(row.LearningLanguage) : null,
+            person.CountryCode, LanguageFlags.FromCountryCode(person.CountryCode));
+        }
         var own = rows.FirstOrDefault(x => x.UserId == owner);
         var ownLanguage = own?.LearningLanguage ?? await db.Users.AsNoTracking()
             .Where(x => x.Id == owner).Select(x => x.LearningLanguage).FirstOrDefaultAsync(ct);
         return new(from, through, "UTC", now, 100, rows.FirstOrDefault()?.Participants ?? 0,
             rows.Any(x => x.IncludesLegacyDates), true, rows.Where(x => x.Position > offset && x.Position <= end).Select(Map).ToArray(),
             own == null ? new("you", null, null, null, true, false, 0, ownLanguage) : Map(own),
-            offset, (rows.FirstOrDefault()?.Participants ?? 0) > end, context.User.IsInRole("admin"), rollingHours != null ? since : null, rollingHours != null ? now : null);
+            offset, (rows.FirstOrDefault()?.Participants ?? 0) > end, admin, rollingHours != null ? since : null, rollingHours != null ? now : null,
+            rollingHours is { } hours ? hours / 24 : days);
     }
 }
 
@@ -185,6 +212,22 @@ public static class SpeakingLeaderboardEndpoints
     public static void Map(WebApplication app)
     {
         SpeakingEventEndpoints.Map(app);
+        SpeakingLeaderboardSettings.Map(app);
+        // New clients follow the admin-configured rolling period. The released
+        // fixed 7/30-day routes below keep their original interpretation.
+        app.MapGet("/api/speaking-leaderboard/configured", async (ClaimsPrincipal user, SpeakingLeaderboardService service,
+            AppDbContext db, HttpContext context, int? offset, DateTimeOffset? until, CancellationToken ct) => {
+            if (Owner(user) is not { } owner) return Results.Unauthorized();
+            if (offset is < 0 or > 10000000) return Results.BadRequest(new { message = "Invalid ranking page." });
+            var now = DateTime.UtcNow;
+            if (context.Request.Query.Keys.Any(key => !key.Equals("offset", StringComparison.OrdinalIgnoreCase) && !key.Equals("until", StringComparison.OrdinalIgnoreCase)) ||
+                until > now || until < now.AddMinutes(-15))
+                return Results.BadRequest(new { message = "Invalid ranking period." });
+            context.Response.Headers.CacheControl = "no-store";
+            var days = await SpeakingLeaderboardSettings.GetAsync(db, ct);
+            return Results.Ok(await service.GetAsync(owner, context, ct, at: until?.UtcDateTime ?? now,
+                offset: offset ?? 0, days: 30, rollingHours: days * 24));
+        }).RequireAuthorization();
         app.MapGet("/api/speaking-leaderboard", async (ClaimsPrincipal user, SpeakingLeaderboardService service, HttpContext context, int? offset, int? days, int? hours, DateTimeOffset? until, CancellationToken ct) => {
             if (Owner(user) is not { } owner) return Results.Unauthorized();
             if (offset is < 0 or > 10000000) return Results.BadRequest(new { message = "Invalid ranking page." });

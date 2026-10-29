@@ -10,6 +10,40 @@ namespace BanteraApi.Tests;
 
 public class SpeakingRollingWindowTests
 {
+    [RankingDatabaseFact]
+    public async Task ConfiguredRetentionPrunesEventsAndLocalWindowsAtTheSameBoundedThreshold()
+    {
+        var connection = Environment.GetEnvironmentVariable("BANTERA_RANKING_TEST_DB")!;
+        Assert.Contains("bantera_word_rankings_verify", connection);
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(connection).Options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TEMP TABLE app_settings ("Key" text PRIMARY KEY, "Value" text);
+            CREATE TEMP TABLE speaking_events ("UserId" uuid, "DeviceId" uuid, "EventId" uuid, "OccurredAt" timestamptz, "Language" text, "SpokenWords" bigint, PRIMARY KEY ("UserId","DeviceId","EventId"));
+            CREATE TEMP TABLE speaking_day_windows ("UserId" uuid, "DeviceId" uuid, "Date" date, "Language" text, "FromUtc" timestamptz, "ThroughUtc" timestamptz, "SpokenWords" bigint, PRIMARY KEY ("UserId","DeviceId","Date","Language"));
+            """);
+        var owner = Guid.NewGuid(); var device = Guid.NewGuid();
+        var now = new DateTime(2026, 10, 29, 12, 0, 0, DateTimeKind.Utc);
+        foreach (var (days, retention) in new[] { (30, 35), (90, 95), (365, 370) }) {
+            await db.Database.ExecuteSqlRawAsync("TRUNCATE app_settings, speaking_events, speaking_day_windows");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO app_settings VALUES ({SpeakingLeaderboardSettings.Key}, {days.ToString()})");
+            var cutoff = now.AddDays(-retention);
+            foreach (var (when, language) in new[] { (cutoff.AddSeconds(-1), "en"), (cutoff, "ja"), (cutoff.AddSeconds(1), "ko") }) {
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO speaking_events VALUES ({owner},{device},{Guid.NewGuid()},{when},{language},10);
+                    INSERT INTO speaking_day_windows VALUES ({owner},{device},{DateOnly.FromDateTime(when)},{language},{when.AddHours(-1)},{when},10);
+                    """);
+            }
+            await SpeakingEventEndpoints.SaveAsync(db, owner, new(device, [new(Guid.NewGuid(), now, "en", 10)]), now, default);
+            await SpeakingLocalDayStorage.SaveAsync(db, owner, device, new(DateOnly.FromDateTime(now), now.AddHours(-1), now,
+                [new(DateOnly.FromDateTime(now), "en", 0, 10)]), default);
+            Assert.Equal(3, await db.Set<BanteraApi.Database.Entities.SpeakingEvent>().CountAsync());
+            Assert.Equal(3, await db.Set<BanteraApi.Database.Entities.SpeakingDayWindow>().CountAsync());
+            Assert.Equal(cutoff, await db.Set<BanteraApi.Database.Entities.SpeakingEvent>().MinAsync(e => e.OccurredAt));
+            Assert.Equal(cutoff, await db.Set<BanteraApi.Database.Entities.SpeakingDayWindow>().MinAsync(e => e.ThroughUtc));
+        }
+    }
+
     [Fact]
     public void EventValidationRejectsFutureStaleAndDuplicateEvents()
     {
@@ -33,6 +67,8 @@ public class SpeakingRollingWindowTests
         await db.Database.OpenConnectionAsync();
         await db.Database.ExecuteSqlRawAsync("""
             CREATE TEMP TABLE users ("Id" uuid PRIMARY KEY, "Name" text, "Role" text, "Status" text, "DeletedAt" timestamptz, "AvatarObjectKey" text, "AvatarUpdatedAt" timestamptz, "LearningLanguage" text);
+            CREATE TEMP TABLE app_settings ("Key" text PRIMARY KEY, "Value" text);
+            INSERT INTO app_settings VALUES ('speakingLeaderboard.days', '365');
             CREATE TEMP TABLE user_word_activity ("UserId" uuid, "DeviceId" uuid, "Date" date, "SpokenWords" bigint);
             CREATE TEMP TABLE user_language_word_activity (LIKE user_word_activity); ALTER TABLE user_language_word_activity ADD COLUMN "Language" text;
             CREATE TEMP TABLE speaking_devices ("UserId" uuid, "DeviceId" uuid, "LegacyThroughDate" date);
@@ -49,7 +85,7 @@ public class SpeakingRollingWindowTests
             INSERT INTO speaking_devices VALUES ({owner}, {device}, null)
             """);
         var service = new SpeakingLeaderboardService(db, null!, Options.Create(new JwtSettings { Secret = "isolated-rolling-test-secret-long-enough" }));
-        foreach (var hours in new[] {24, 168, 720})
+        foreach (var hours in new[] {24, 168, 720, 14 * 24, 365 * 24})
         {
             await db.Database.ExecuteSqlRawAsync("TRUNCATE speaking_events, speaking_days");
             var since = now.AddHours(-hours);
@@ -65,6 +101,7 @@ public class SpeakingRollingWindowTests
             await SpeakingEventEndpoints.SaveAsync(db, owner, batch, now, default);
             var report = await service.GetAsync(owner, new DefaultHttpContext(), default, now, rollingHours: hours);
             Assert.Equal(60, report.You.SpokenWords);
+            Assert.Equal(hours / 24, report.PeriodDays);
             Assert.Equal(since, report.FromUtc); Assert.Equal(now, report.ThroughUtc);
             // The first partial day cannot be guessed. Current UTC totals are
             // known to be within the window, after subtracting timestamped events.

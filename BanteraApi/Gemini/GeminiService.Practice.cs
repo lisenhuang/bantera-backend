@@ -67,8 +67,17 @@ public partial class GeminiService
         if (!MaoriPracticeTranslation.Applies(d.Locale)) throw new InvalidOperationException("Server practice translation is restricted to Maori.");
         return PracticeJsonAsync<MaoriEnglishTranslation>(
             "Translate the three supplied Maori sentences into natural New Zealand English (en-NZ). Preserve their meaning and differences. " +
-            "Return {cue, reply, distractor} containing the English translations only. Do not change the source sentences.",
+            "Return {cue, reply, distractor, alignments}. Keep cue/reply/distractor as English strings. Do not change the source sentences. " + MaoriPracticeTranslation.AlignmentInstruction,
             new { d.Cue, d.Reply, d.Distractor }, ct);
+    }
+
+    public Task<MaoriEnglishAlignments> GenerateMaoriAlignmentsAsync(PracticeDialogue d, MaoriEnglishTranslation translation, CancellationToken ct)
+    {
+        if (!MaoriPracticeTranslation.Applies(d.Locale)) throw new InvalidOperationException("Server practice alignment is restricted to Maori.");
+        return PracticeJsonAsync<MaoriEnglishAlignments>(
+            "Align the supplied immutable Maori sentences and their existing English translations. Return ONLY the alignments object {cue: [...], reply: [...], distractor: [...]}. " +
+            MaoriPracticeTranslation.AlignmentInstruction + "Return cue/reply/distractor arrays at the root without an alignments wrapper.",
+            new { source = new { d.Cue, d.Reply, d.Distractor }, target = new { translation.Cue, translation.Reply, translation.Distractor } }, ct);
     }
 
     public Task<PracticePronunciationData> GeneratePracticePronunciationAsync(PracticeDialogue d, CancellationToken ct) =>

@@ -32,7 +32,8 @@ public static class SpeakingLocalDayStorage
                     "ThroughUtc"=GREATEST(speaking_day_windows."ThroughUtc", EXCLUDED."ThroughUtc")
                 """, ct);
         }
-        var cutoff = day.ThroughUtc.UtcDateTime.AddDays(-35);
+        var retention = SpeakingLeaderboardSettings.RetentionDays(await SpeakingLeaderboardSettings.GetAsync(db, ct));
+        var cutoff = day.ThroughUtc.UtcDateTime.AddDays(-retention);
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             DELETE FROM speaking_day_windows WHERE "UserId"={owner} AND "ThroughUtc"<{cutoff}
             """, ct);

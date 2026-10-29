@@ -466,13 +466,7 @@ app.MapGet("/version", () =>
 .WithMetadata(new SwaggerOperationAttribute("API version", "Returns the current API version number."))
 .Produces<object>(200);
 
-app.MapGet("/api/public/learning-languages", () => Results.Ok(LearningLanguageCatalog.Items))
-    .WithName("GetLearningLanguages")
-    .WithMetadata(new SwaggerOperationAttribute(
-        "Learning languages catalog",
-        "Returns BCP-47 identifiers with display names and flag emoji for profile and transcription UI. No authentication required."))
-    .Produces<IReadOnlyList<LearningLanguageItem>>(200)
-    .AllowAnonymous();
+PracticeSettings.MapPublic(app);
 
 app.MapGet("/api/public/translation-languages", () => Results.Ok(TranslationLanguageCatalog.Items))
     .WithName("GetTranslationLanguages")

@@ -41,4 +41,22 @@ public class MaoriLanguageCatalogTests
     [InlineData("zh-HK", true)]
     public void StaleClientsCannotGenerateRetiredAudio(string locale, bool supported)
         => Assert.Equal(supported, LearningLanguageCatalog.SupportsAudioDialogues(locale));
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("invalid", false)]
+    [InlineData("false", false)]
+    [InlineData("true", true)]
+    public void PublicVisibilityDefaultsOff(string? stored, bool visible)
+    {
+        Assert.Equal(visible, BanteraApi.Practice.PracticeSettings.ResolveMaoriPublic(stored));
+        Assert.Equal(visible, LearningLanguageCatalog.PublicItems(visible).Any(x => x.Identifier == "mi-NZ"));
+        Assert.Equal(visible ? "mi-NZ" : null, LearningLanguageCatalog.ResolvePracticeLocale("mi-NZ", false, visible));
+        Assert.Equal("mi-NZ", LearningLanguageCatalog.ResolvePracticeLocale("mi-NZ", true, visible));
+        Assert.Equal(visible, LearningLanguageCatalog.CanSelectProfileLanguage("mi-NZ", false, false, visible));
+        Assert.True(LearningLanguageCatalog.CanSelectProfileLanguage("mi-NZ", false, true, visible));
+        Assert.False(LearningLanguageCatalog.CanSelectProfileLanguage("mi-NZ", true, true, visible));
+        Assert.False(LearningLanguageCatalog.SupportsAudioDialogues("mi-NZ"));
+    }
+
 }

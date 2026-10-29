@@ -41,6 +41,10 @@ public static class PracticeEndpoints
             if (!await db.Users.AnyAsync(x => x.Id == userId && x.DeletedAt == null && x.Status == "active", http.RequestAborted))
                 return Results.Unauthorized();
             if (http.Request.Headers["X-Practice-Consent"] != "1") return Results.StatusCode(403);
+            // Existing saved exposures must also respect a later return to testing mode.
+            if (!http.User.IsInRole("admin") && Guid.TryParse(http.Request.RouteValues["id"]?.ToString(), out var exposureId) &&
+                await db.Set<PracticeExposure>().AnyAsync(e => e.Id == exposureId && e.UserId == userId && e.Dialogue.Locale == "mi-NZ", http.RequestAborted) &&
+                !await PracticeSettings.MaoriPublicEnabledAsync(db, http.RequestAborted)) return Results.StatusCode(403);
             try { return await next(context); }
             catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested) { throw; }
             catch (Exception ex)
@@ -52,17 +56,21 @@ public static class PracticeEndpoints
         });
         group.MapPost("/{id:guid}/english-translation", async (Guid id, ClaimsPrincipal user, AppDbContext db, PracticeWorker worker, CancellationToken ct) =>
         {
+            if (!user.IsInRole("admin") && !await PracticeSettings.MaoriPublicEnabledAsync(db, ct)) return Results.StatusCode(403);
             var owner = Guid.Parse(user.FindFirstValue("sub")!);
             var exposure = await db.Set<PracticeExposure>().AsNoTracking().Include(e => e.Dialogue)
                 .FirstOrDefaultAsync(e => e.Id == id && e.UserId == owner, ct);
             if (exposure == null || !MaoriPracticeTranslation.Applies(exposure.Dialogue.Locale)) return Results.NotFound();
             if (exposure.Dialogue.ContentVersion != PracticeRules.ContentVersion) return Results.StatusCode(410);
             var translated = MaoriPracticeTranslation.Present(exposure);
-            if (translated != null) return Results.Ok(new { status = "ready", translations = translated, translationLocale = "en-NZ" });
             var d = exposure.Dialogue;
-            worker.Request(new(owner, d.Locale, d.Language, d.Level, d.Id));
-            return Results.Json(new { status = "preparing" }, statusCode: 202);
-        }).RequireAuthorization("Admin");
+            if (translated == null || MaoriPracticeTranslation.NeedsAlignment(d))
+                worker.Request(new(owner, d.Locale, d.Language, d.Level, d.Id));
+            if (translated != null) return Results.Ok(new { status = "ready", translations = translated, translationLocale = "en-NZ",
+                translationAlignments = MaoriPracticeTranslation.PresentAlignments(exposure),
+                translationAlignmentStatus = MaoriPracticeTranslation.AlignmentStatus(d) });
+            return Results.Json(new { status = "preparing", translationAlignmentStatus = "preparing" }, statusCode: 202);
+        });
         group.MapPost("/{id:guid}/pronunciation", async (Guid id, ClaimsPrincipal user, AppDbContext db, IServiceProvider services, CancellationToken ct) =>
         {
             var userId = Guid.Parse(user.FindFirstValue("sub")!);
@@ -82,7 +90,8 @@ public static class PracticeEndpoints
         });
         group.MapPost("/level", async (LevelRequest request, ClaimsPrincipal user, AppDbContext db, PracticeWorker worker, CancellationToken ct) =>
         {
-            var locale = LearningLanguageCatalog.ResolvePracticeLocale(request.Locale, user.IsInRole("admin"));
+            var maoriPublicEnabled = await PracticeSettings.MaoriPublicEnabledAsync(db, ct);
+            var locale = LearningLanguageCatalog.ResolvePracticeLocale(request.Locale, user.IsInRole("admin"), maoriPublicEnabled);
             if (locale is null) return Results.BadRequest();
             var userId = Guid.Parse(user.FindFirstValue("sub")!);
             var language = WordActivityEndpoints.NormalizeLanguage(locale);
@@ -102,7 +111,8 @@ public static class PracticeEndpoints
         group.MapPost("/next", async (NextRequest request, ClaimsPrincipal user, AppDbContext db, PracticeWorker worker, R2StorageService storage, CancellationToken ct) =>
         {
             if (request.RequestId == Guid.Empty || string.IsNullOrWhiteSpace(request.Locale)) return Results.BadRequest();
-            var locale = LearningLanguageCatalog.ResolvePracticeLocale(request.Locale, user.IsInRole("admin"));
+            var maoriPublicEnabled = await PracticeSettings.MaoriPublicEnabledAsync(db, ct);
+            var locale = LearningLanguageCatalog.ResolvePracticeLocale(request.Locale, user.IsInRole("admin"), maoriPublicEnabled);
             if (locale is null) return Results.BadRequest();
             var listeningLevel = request.ListeningLevel == null ? (int?)null : PracticeRules.LevelIndex(request.ListeningLevel);
             if (listeningLevel is < PracticeRules.BeginnerLevel or > 5 ||
@@ -118,6 +128,7 @@ public static class PracticeEndpoints
                 .FirstOrDefaultAsync(x => x.UserId == userId && x.RequestId == request.RequestId, ct);
             if (existing is not null)
             {
+                if (MaoriPracticeTranslation.Applies(existing.Dialogue.Locale) && !user.IsInRole("admin") && !maoriPublicEnabled) return Results.StatusCode(403);
                 if (existing.Dialogue.ContentVersion == PracticeRules.ContentVersion && (request.SupportsA0 || existing.Dialogue.Level >= 0))
                 {
                     var existingProgress = existing.Dialogue.Language == language ? progress : await Progress(db, userId, existing.Dialogue.Language, ct);
@@ -269,6 +280,8 @@ public static class PracticeEndpoints
             cueAudioUrl = storage.GeneratePresignedUrl(d.CueAudio, TimeSpan.FromHours(4)), choices,
             pronunciation = PracticePronunciation.Present(e),
             translations = MaoriPracticeTranslation.Present(e),
+            translationAlignments = MaoriPracticeTranslation.PresentAlignments(e),
+            translationAlignmentStatus = MaoriPracticeTranslation.AlignmentStatus(d),
             translationLocale = MaoriPracticeTranslation.Applies(d.Locale) ? "en-NZ" : null,
             levelStates = PracticeRules.LevelStates(progress), highestUnlockedLevel = PracticeRules.LevelName(PracticeRules.HighestUnlockedLevel(progress)),
             deferredScoring = e.DeferredScoring, translationUsed = e.TranslationUsed,

@@ -1,5 +1,79 @@
 # Bantera deployment on Oracle AU
 
+## 29 October 2026: Māori visibility, translation alignment and leaderboard settings
+
+Release **bantera-20261029-4** is verified live: API **1.55.0**, website
+**0.28.0**. Māori remains **admin-only** (`maoriPublicEnabled=false`) and the
+configured app leaderboard remains **30 days**. No live setting was changed.
+
+The Practice admin page controls Māori visibility. Public language availability
+is exposed through `/api/public/language-availability`; profile and Practice
+access enforce the setting. Māori native-language and full-dialogue restrictions
+remain. Practice English translations retain their existing string fields and
+add validated UTF-16 word/phrase ranges. Existing English is preserved during
+alignment-only backfill, with two persisted attempts and bounded pending status.
+Model correspondence quality still needs human assessment; invalid ranges are
+not presented as highlights.
+
+Admins can configure 1–365 leaderboard days at
+`/api/admin/speaking-leaderboard-settings`. New app clients use
+`/api/speaking-leaderboard/configured`, which returns the actual `periodDays` and
+rolling UTC boundaries. The legacy public 7/30-day and admin 24-hour/7/30-day
+routes keep their previous behavior. Admin rows additionally include current
+native/learning language flags and the most recent recorded IP-country flag;
+these optional metadata fields are omitted for ordinary users. No raw IP or
+country inferred from language is returned. Timestamp/local-day retention is
+`max(35, configuredDays + 5)` days, preserving the 35-day default. Previously
+deleted timestamp history cannot be recovered; existing daily-summary handling
+remains conservative.
+
+**GO for published apps:** new routes and response fields are additive. No
+migration, new environment variable, secret or app-store update is required for
+existing clients. The production migration remains
+`20261029080529_PracticeRecentRotation`. Backend build passed; **1,788 tests
+passed, 34 database-conditional tests skipped**, and **71 focused PostgreSQL
+tests passed with zero skips**. Website typecheck, production build and **33
+tests** passed; existing dependency/lint warnings remain.
+
+Candidate and public verification each passed **32 non-mutating checks**,
+including exact versions, admin authorization, default-off Māori, a 720-hour
+configured leaderboard, and admin/ordinary-user metadata separation. The
+authenticated Practice page was checked. The live authenticated leaderboard
+dashboard was not rendered because its normal request would change real activity
+tracking; its source, tests and production build passed. Validation API tokens
+used the existing tracking exemption and were never printed or persisted.
+
+The first promotion automatically restored release 2 when the verification
+script's Python 3.10 parser rejected a valid seven-digit .NET timestamp. The
+parser was corrected and checked with 0/3/6/7 fractional digits, preserving the
+exact-duration assertion. The same candidate images then passed all public
+checks and the two-minute stability window. Across both attempts, **144/144**
+public availability samples returned HTTP 200. API/website startup checks showed
+zero errors or restarts. Final verification passed again after cleanup.
+
+Runtime: API `bantera-api-20261029-4` (18178), website
+`bantera-website-20261029-4` (13069), connector `cloudflared-20261029-4` (12108).
+Port 12107 belongs to an unrelated connector and was preserved. Release 2 is the
+working rollback; its API remains running because an internal model-queue
+connection persisted, while its website and connector are retained stopped.
+The private release-3 candidates were superseded before promotion and removed.
+
+Cleanup removed six obsolete application/connector containers and four unused
+Bantera image tags, retaining current release 4 and rollback release 2. No
+volumes, databases or backups were deleted. Free disk was **94,989,975,552 bytes**
+before build and **93,805,903,872 bytes** after cleanup (about 87.4 GiB). The
+verified pre-release database backup is **10,343,376 bytes**. Source archives,
+hashes, dirty-file manifests, protected runtime snapshots, build/promotion logs
+and verification proofs are retained under
+`/home/ubuntu/releases/bantera-20261029-4`.
+
+Rollback preserves subsequent database writes:
+`python3 /home/ubuntu/releases/bantera-20261029-4/deploy.py rollback`.
+
+Bantera **3.35.0 (506)** was subsequently installed and confirmed in Ethan's
+iPhone 17 Pro inventory. The app was **not launched**. Installation does not
+establish physical-device behavior. No commit, push or store submission occurred.
+
 ## 29 October 2026: configurable Practice rotation
 
 API **1.53.0** and website **0.26.0**, release **bantera-20261029-2**, are
@@ -395,7 +469,7 @@ The shared Cloudflare Tunnel also serves other domains. Preserve its tunnel iden
 6. Start the backend candidate using the current production environment on the existing database networks, with its host test port bound to loopback only. Startup applies migrations. Permit only backward-compatible migrations while the old application remains online.
 7. Verify backend `/version`, public lesson listing, authenticated-route rejection, migration state and startup logs. Start the website candidate, then verify `/`, `/download`, `/dashboard/login`, the AI admin login redirect, and its deployment marker.
 
-The server-only website build scaffolding uses Node 22 and pnpm, allowing build scripts for `protobufjs`, `sharp` and `unrs-resolver`. Retain the reviewed Dockerfile and dependency-build configuration in the release snapshot. Exclude production env files from the image; inject settings at runtime.
+The current server-only website build scaffolding uses Node 24 and pnpm with the repository's dependency-build configuration. Retain the reviewed Dockerfile and dependency-build configuration in the release snapshot. Exclude production env files from the image; inject settings at runtime.
 
 ## Rolling Cloudflare Tunnel handover
 

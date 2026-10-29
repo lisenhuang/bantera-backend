@@ -18,9 +18,10 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
     private readonly Channel<Demand> queue = Channel.CreateBounded<Demand>(64);
     private readonly ConcurrentDictionary<string, DateTime> pending = new();
     private readonly SemaphoreSlim audioGate = new(1, 1);
+    private static string DemandKey(Demand demand) => $"{demand.Locale}:{demand.Level}:{demand.TranslationDialogueId?.ToString() ?? "pool"}";
     public void Request(Demand demand)
     {
-        var key = $"{demand.Locale}:{demand.Level}";
+        var key = DemandKey(demand);
         var now = DateTime.UtcNow;
         if (pending.TryGetValue(key, out var until) && until > now) return;
         if (pending.Count > 256)
@@ -57,7 +58,7 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception ex) { failed = true; logger.LogWarning("Practice batch failed: {Type}; run {RunId}, {Locale}/{Level}. Retrying after 90 seconds on next demand.", ex.GetType().Name, demand.RunId, demand.Locale, demand.Level); }
-            finally { pending[$"{demand.Locale}:{demand.Level}"] = DateTime.UtcNow.AddSeconds(failed ? 90 : 5); }
+            finally { pending[DemandKey(demand)] = DateTime.UtcNow.AddSeconds(failed ? 90 : 5); }
         }
     }
     private async Task FillAsync(Demand demand, CancellationToken ct)
@@ -65,7 +66,9 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var ai = scope.ServiceProvider.GetRequiredService<GeminiService>();
-        if (!await db.Users.AnyAsync(x => x.Id == demand.UserId && x.DeletedAt == null, ct)) return;
+        var role = await db.Users.Where(x => x.Id == demand.UserId && x.DeletedAt == null).Select(x => x.Role).SingleOrDefaultAsync(ct);
+        if (role == null) return;
+        if (MaoriPracticeTranslation.Applies(demand.Locale) && role != "admin" && !await PracticeSettings.MaoriPublicEnabledAsync(db, ct)) return;
         await db.Database.OpenConnectionAsync(ct);
         // Transaction-scoped database lock prevents duplicate pool generation across API replicas.
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -81,6 +84,11 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
         Task<int> ReadyCount() => PracticeRotation.Available(writer, demand.UserId, demand.Locale, demand.Language, demand.Level, repeatWindow).CountAsync(ct);
         if (MaoriPracticeTranslation.Applies(demand.Locale))
         {
+            if (demand.TranslationDialogueId is { } requestedId) {
+                var requested = await writer.Set<PracticeDialogue>().SingleOrDefaultAsync(d => d.Id == requestedId &&
+                    d.Locale == demand.Locale && d.Ready && d.ContentVersion == PracticeRules.ContentVersion, ct);
+                if (requested != null) await EnsureMaoriTranslationAsync(requested, writer, ct);
+            }
             var existing = await writer.Set<PracticeDialogue>().Where(d => d.Locale == demand.Locale && d.Level == demand.Level &&
                 d.Ready && d.MaoriEnglishJson == null && d.ContentVersion == PracticeRules.ContentVersion)
                 .OrderByDescending(d => d.Id == demand.TranslationDialogueId).ThenBy(d => d.CreatedAt)
@@ -134,7 +142,7 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
                     Topic = draft.Topic, MeaningKey = draft.MeaningKey, Cue = draft.Cue, Reply = draft.Reply,
                     Distractor = draft.Distractor, Explanation = draft.Explanation,
                     MaoriEnglishJson = MaoriPracticeTranslation.Applies(demand.Locale) && MaoriPracticeTranslation.Valid(draft.EnglishTranslation)
-                        ? System.Text.Json.JsonSerializer.Serialize(draft.EnglishTranslation) : null,
+                        ? System.Text.Json.JsonSerializer.Serialize(MaoriPracticeTranslation.Prepare(draft.EnglishTranslation!, draft.Cue, draft.Reply, draft.Distractor)) : null,
                     PronunciationAlignmentVersion = PracticePronunciation.AlignmentVersion,
                     PronunciationRequestedAt = pronunciation == null && PracticePronunciation.Scheme(demand.Locale) != null ? DateTime.UtcNow : null,
                     PronunciationJson = pronunciation == null ? null : System.Text.Json.JsonSerializer.Serialize(pronunciation, PracticePronunciation.Json), Fingerprint = PracticeRules.Fingerprint(draft.Cue, draft.Reply) };
@@ -166,12 +174,43 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
     }
     private async Task EnsureMaoriTranslationAsync(PracticeDialogue row, AppDbContext writer, CancellationToken ct)
     {
-        if (!MaoriPracticeTranslation.Applies(row.Locale) || MaoriPracticeTranslation.Read(row) != null) return;
+        if (!MaoriPracticeTranslation.Applies(row.Locale)) return;
         await using var scope = scopes.CreateAsyncScope();
-        var translation = await scope.ServiceProvider.GetRequiredService<GeminiService>().GenerateMaoriEnglishAsync(row, ct);
-        if (!MaoriPracticeTranslation.Valid(translation)) throw new InvalidDataException("Incomplete Maori English translation");
+        var ai = scope.ServiceProvider.GetRequiredService<GeminiService>();
+        var translation = MaoriPracticeTranslation.Read(row);
+        if (translation == null) {
+            translation = await ai.GenerateMaoriEnglishAsync(row, ct);
+            if (!MaoriPracticeTranslation.Valid(translation)) throw new InvalidDataException("Incomplete Maori English translation");
+            translation = MaoriPracticeTranslation.Prepare(translation, row.Cue, row.Reply, row.Distractor);
+            row.MaoriEnglishJson = System.Text.Json.JsonSerializer.Serialize(translation);
+            await writer.SaveChangesAsync(ct);
+        }
+        if (!MaoriPracticeTranslation.NeedsAlignment(row)) return;
+        // Persist the attempt before the remote request, so crashes/restarts
+        // cannot turn a malformed response into unbounded paid retries.
+        translation = translation with {
+            AlignmentVersion = MaoriPracticeTranslation.AlignmentVersion,
+            AlignmentAttempts = translation.AlignmentAttempts + 1,
+            AlignmentPendingUntil = DateTime.UtcNow.AddMinutes(10),
+            Alignments = null
+        };
         row.MaoriEnglishJson = System.Text.Json.JsonSerializer.Serialize(translation);
         await writer.SaveChangesAsync(ct);
+        try {
+            var links = await ai.GenerateMaoriAlignmentsAsync(row, translation, ct);
+            var aligned = translation with { Alignments = links };
+            var prepared = MaoriPracticeTranslation.Prepare(aligned, row.Cue, row.Reply, row.Distractor);
+            // Translation strings remain immutable throughout alignment repair.
+            row.MaoriEnglishJson = System.Text.Json.JsonSerializer.Serialize(translation with { Alignments = prepared.Alignments, AlignmentPendingUntil = null });
+            await writer.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex) {
+            logger.LogWarning("Maori alignment unavailable for {DialogueId}, attempt {Attempt}: {Type}", row.Id, translation.AlignmentAttempts, ex.GetType().Name);
+            row.MaoriEnglishJson = System.Text.Json.JsonSerializer.Serialize(translation with { AlignmentPendingUntil = null });
+            await writer.SaveChangesAsync(ct);
+            // Existing English and practice audio remain usable after failure.
+        }
     }
 
     private async Task CompleteAudioAsync(PracticeDialogue row, AppDbContext writer, Guid runId, CancellationToken ct)

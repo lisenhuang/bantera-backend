@@ -65,6 +65,7 @@ public class SpeakingLeaderboardTests
         await db.Database.OpenConnectionAsync();
         await db.Database.ExecuteSqlRawAsync("""
             CREATE TEMP TABLE users ("Id" uuid PRIMARY KEY, "Name" text, "Role" text, "Status" text, "DeletedAt" timestamptz, "AvatarObjectKey" text, "AvatarUpdatedAt" timestamptz, "LearningLanguage" text);
+            CREATE TEMP TABLE user_activity_daily ("UserId" uuid, "Date" date, "CountryCode" text);
             CREATE TEMP TABLE user_word_activity ("UserId" uuid, "DeviceId" uuid, "Date" date, "ListenedWords" bigint, "SpokenWords" bigint);
             CREATE TEMP TABLE user_language_word_activity (LIKE user_word_activity); ALTER TABLE user_language_word_activity ADD COLUMN "Language" text;
             CREATE TEMP TABLE speaking_visibility ("UserId" uuid PRIMARY KEY, "ShowProfile" boolean);
@@ -80,24 +81,42 @@ public class SpeakingLeaderboardTests
             UPDATE user_language_word_activity SET "SpokenWords" = 12450 WHERE "UserId" = '00000000-0000-0000-0000-000000000002';
             UPDATE user_language_word_activity SET "SpokenWords" = 12000 WHERE "UserId" = '00000000-0000-0000-0000-000000000003';
             INSERT INTO user_word_activity VALUES ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','2026-10-14',0,999999),('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','2026-10-22',0,999999);
+            ALTER TABLE users ADD COLUMN "NativeLanguage" text;
+            UPDATE users SET "NativeLanguage"='zh-HK', "LearningLanguage"='en-NZ' WHERE "Id"='00000000-0000-0000-0000-000000000002';
+            INSERT INTO user_activity_daily VALUES
+              ('00000000-0000-0000-0000-000000000002','2026-10-19','NZ'),
+              ('00000000-0000-0000-0000-000000000002','2026-10-20','JP'),
+              ('00000000-0000-0000-0000-000000000002','2026-10-21',NULL),
+              ('00000000-0000-0000-0000-000000000003','2026-10-21','XX');
             """);
         var service = new SpeakingLeaderboardService(db, null!, Microsoft.Extensions.Options.Options.Create(new BanteraApi.Auth.JwtSettings { Secret = "isolated-ranking-test-secret-with-sufficient-length" }));
         var now = new DateTime(2026,10,21,12,0,0,DateTimeKind.Utc);
         var me = Guid.Parse("00000000-0000-0000-0000-000000000105");
         var report = await service.GetAsync(me, new DefaultHttpContext(), default, now);
         Assert.False(report.CanChoosePeriod);
+        Assert.Equal(7, report.PeriodDays);
         Assert.All(report.Rows, row => Assert.Null(row.AdminUserId));
         Assert.DoesNotContain("AdminUserId", JsonSerializer.Serialize(report));
+        foreach (var field in new[] { "nativeLanguage", "nativeLanguageFlag", "learningLanguageFlag", "ipCountryCode", "ipCountryFlag" })
+            Assert.DoesNotContain(field, JsonSerializer.Serialize(report, JsonSerializerOptions.Web));
         var adminContext = new DefaultHttpContext {
             User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "admin")], "test"))
         };
         var today = await service.GetAsync(me, adminContext, default, now, days: 1);
         Assert.True(today.CanChoosePeriod);
+        Assert.Equal(1, today.PeriodDays);
         Assert.Equal(today.FromDate, today.ThroughDate);
         Assert.Equal(12450, today.Rows[0].SpokenWords);
         Assert.Equal(8000, today.Rows.Single(row => row.Name == "Learner 1").SpokenWords);
         Assert.All(today.Rows, row => Assert.NotNull(row.AdminUserId));
         Assert.Equal(me, today.You.AdminUserId);
+        var person = today.Rows.Single(r => r.Name == "Learner 2");
+        Assert.Equal("zh-HK", person.NativeLanguage); Assert.Equal("🇭🇰", person.NativeLanguageFlag);
+        Assert.Equal("en-NZ", person.LearningLanguage); Assert.Equal("🇳🇿", person.LearningLanguageFlag);
+        Assert.Equal("JP", person.IpCountryCode); Assert.Equal("🇯🇵", person.IpCountryFlag);
+        var unknown = today.Rows.Single(r => r.Name == "Learner 3");
+        Assert.Null(unknown.NativeLanguage); Assert.Null(unknown.NativeLanguageFlag);
+        Assert.Null(unknown.IpCountryCode); Assert.Null(unknown.IpCountryFlag);
         Assert.Equal(100, report.Rows.Length); Assert.Equal(105, report.Participants);
         Assert.True(report.HasMore);
         var next = await service.GetAsync(me, new DefaultHttpContext(), default, now, offset: 100);
@@ -131,6 +150,7 @@ public class SpeakingLeaderboardTests
             ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','2026-09-21',0,999999);
             """);
         var monthly = await service.GetAsync(me, new DefaultHttpContext(), default, now, days: 30);
+        Assert.Equal(30, monthly.PeriodDays);
         Assert.Equal(new DateOnly(2026, 9, 22), monthly.FromDate);
         Assert.Equal(12450 + 999999 + 7, monthly.Rows[0].SpokenWords);
         Assert.Equal(1, monthly.Rows[0].Rank);

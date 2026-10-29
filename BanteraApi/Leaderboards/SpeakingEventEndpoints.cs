@@ -34,7 +34,9 @@ public static class SpeakingEventEndpoints
                 ON CONFLICT DO NOTHING
                 """, ct);
         }
-        var cutoff = now.AddDays(-35);
+        // Preserve the existing 35-day default, extending only for the chosen period.
+        var retention = SpeakingLeaderboardSettings.RetentionDays(await SpeakingLeaderboardSettings.GetAsync(db, ct));
+        var cutoff = now.AddDays(-retention);
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             DELETE FROM speaking_events WHERE "UserId" = {owner} AND "OccurredAt" < {cutoff}
             """, ct);

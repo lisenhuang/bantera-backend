@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using BanteraApi.Database;
@@ -35,8 +36,15 @@ public class SpeakingLeaderboardAuthorizationTests
         await app.StartAsync();
         using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/admin/speaking-leaderboard?days=1")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/speaking-leaderboard/configured")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/admin/speaking-leaderboard-settings")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PutAsJsonAsync("/api/admin/speaking-leaderboard-settings", new { days = 14 })).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.DeleteAsync("/api/admin/practice/exposures/00000000-0000-0000-0000-000000000001")).StatusCode);
         client.DefaultRequestHeaders.Add("X-Test-Role", "user");
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/admin/speaking-leaderboard-settings")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync("/api/admin/speaking-leaderboard-settings", new { days = 14 })).StatusCode);
+        foreach (var query in new[] { "days=14", "hours=336", "periodDays=14", "period=14", "offset=-1", "offset=10000001", "until=2000-01-01T00:00:00Z", "until=2100-01-01T00:00:00Z" })
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/speaking-leaderboard/configured?" + query)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync("/api/admin/practice/exposures/00000000-0000-0000-0000-000000000001")).StatusCode);
         foreach (var days in new[] {1, 7, 30})
             Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/admin/speaking-leaderboard?days={days}")).StatusCode);
@@ -48,6 +56,9 @@ public class SpeakingLeaderboardAuthorizationTests
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/speaking-leaderboard?days=1")).StatusCode);
         client.DefaultRequestHeaders.Remove("X-Test-Role");
         client.DefaultRequestHeaders.Add("X-Test-Role", "admin");
+        foreach (var days in new[] { -1, 0, 366, int.MaxValue })
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync("/api/admin/speaking-leaderboard-settings", new { days })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync("/api/admin/speaking-leaderboard-settings", new { days = 1.5 })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/admin/speaking-leaderboard?days=2")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/admin/speaking-leaderboard?days=1&offset=-1")).StatusCode);
         await app.StopAsync();

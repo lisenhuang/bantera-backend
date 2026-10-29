@@ -107,8 +107,10 @@ public class ProfileService(
         if (user is null)
             return (null, ErrorCodes.Unauthorized);
 
+        var maoriPublicEnabled = LearningLanguageCatalog.IsMaori(normalizedLearningLanguage) &&
+            await BanteraApi.Practice.PracticeSettings.MaoriPublicEnabledAsync(db, cancellationToken);
         if ((hasNativeLanguage && !LearningLanguageCatalog.CanSelectProfileLanguage(normalizedNativeLanguage, true, user.Role == "admin")) ||
-            (hasLearningLanguage && !LearningLanguageCatalog.CanSelectProfileLanguage(normalizedLearningLanguage, false, user.Role == "admin")))
+            (hasLearningLanguage && !LearningLanguageCatalog.CanSelectProfileLanguage(normalizedLearningLanguage, false, user.Role == "admin", maoriPublicEnabled)))
             return (null, ErrorCodes.InvalidProfile);
         if (LearningLanguageCatalog.IsMaori(normalizedLearningLanguage)) normalizedLearningLanguage = "mi-NZ";
 
