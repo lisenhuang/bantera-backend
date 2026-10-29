@@ -101,11 +101,12 @@ public class PracticeTests
         for(var i=0;i<100;i++) PracticeRules.Record(p,false);
         Assert.Equal(0,p.Level); Assert.Equal(12,p.Window.Length);
     }
-    [Fact] public void SchemaHasDatabaseUniquenessForSeenHistoryAndFingerprints()
+    [Fact] public void SchemaAllowsReplaysButKeepsRequestsAndFingerprintsUnique()
     {
         using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql("Host=localhost;Database=unused").Options);
         var exposure = db.Model.FindEntityType(typeof(PracticeExposure))!;
-        Assert.Contains(exposure.GetIndexes(), i => i.IsUnique && i.Properties.Select(p=>p.Name).SequenceEqual(new[]{"UserId","DialogueId"}));
+        Assert.Contains(exposure.GetIndexes(), i => !i.IsUnique && i.Properties.Select(p=>p.Name).SequenceEqual(new[]{"UserId","DialogueId"}));
+        Assert.Contains(exposure.GetIndexes(), i => i.IsUnique && i.Properties.Select(p=>p.Name).SequenceEqual(new[]{"UserId","RequestId"}));
         var dialogue = db.Model.FindEntityType(typeof(PracticeDialogue))!;
         Assert.Contains(dialogue.GetIndexes(), i => i.IsUnique && i.Properties.Select(p=>p.Name).SequenceEqual(new[]{"Language","Fingerprint"}));
     }

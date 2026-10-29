@@ -40,6 +40,12 @@ public partial class GeminiService
         "Examples of cue/reply: Hello./Hello.; Your name?/Anna.; Thank you./You're welcome. " +
         "Keep the explanation to one simple sentence about the meaning. ";
 
+    internal static string PracticeVarietyInstruction(int level) => level == PracticeRules.BeginnerLevel
+        ? "A0 drills may reuse a simple communicative pattern with different useful vocabulary, objects, names or short responses. " +
+          "These beginner variations are valid learning, not semantic duplicates. Reject an identical cue-and-correct-reply pair from existing exercises or this batch, ignoring punctuation and case. " +
+          "Do not reject a beginner drill merely because it shares an intent with an exercise at another level. "
+        : "Use genuinely different intents and situations from nearby existing material and other candidates. Reject paraphrases or exchanges that merely change names or objects. Vocabulary may recur in a different situation. ";
+
     public Task<PracticeDraft[]> GeneratePracticeAsync(string locale, int level, string[] topics, object recent, CancellationToken ct) =>
         PracticeJsonAsync<PracticeDraft[]>("Create exactly five DISTINCT short, adult language-learning reply-selection exercises. " +
             "Return an array of objects {topic, meaningKey, cue, reply, distractor, explanation}. " +
@@ -48,8 +54,9 @@ public partial class GeminiService
             "Cue 1 must leave the communicative intent unanswered for cue 2; never include an answer to its own question. The reply and distractor are separate alternative turns, not mini conversations. " +
             "Avoid ambiguous choices, trivia, invented facts, offensive content, and minimal pairs differing only by a hard-to-hear negation. " +
             "All cue/reply/distractor/explanation text must use the requested regional language, not English translations. Keep explanations short and kind. " +
-            "meaningKey is a concise English description of the communicative intent and answer relationship, ignoring names, places and interchangeable objects. " +
-            "Use genuinely different intents and situations from recent material; do not just substitute nouns. Vocabulary may recur. " +
+            "meaningKey is a short English situation description of 3-8 words, such as ordering coffee or asking a train departure time. Be specific, not just a broad topic. " +
+            PracticeVarietyInstruction(level) +
+            "The recent list contains compact situation descriptions from this locale and level. Plan underrepresented situations before writing; avoid close repeats of those situations while applying the A0 variation rule. These descriptions are coverage hints, not a ban on an entire broad topic. " +
             "Use the given practice difficulty, adapted naturally to the language. A1: very short concrete exchanges; A2: routine situations; B1: reasons and plans; B2: implications; C1/C2: pragmatic nuance while keeping each utterance under 45 words. " +
             (level == PracticeRules.BeginnerLevel ? BeginnerPracticeInstruction : "") +
             "Self-check that only the reply fits before returning. " + MaoriPracticeTranslation.Instruction(locale) + PracticePronunciation.Instruction(locale) + AccentInstructions.GetValueOrDefault(locale, $"Use natural language for {locale}."),
@@ -69,11 +76,11 @@ public partial class GeminiService
             PracticePronunciation.Instruction(d.Locale) + " Return the cue/reply/distractor arrays at the root, without a pronunciation wrapper. This can be a repair request: re-derive all mappings from the immutable source sentences, not from previous romanization. Validate that Chinese has one Han character per segment, Korean one syllable block, Thai one syllable, and word-based scripts have no fragmented words before returning.", new { d.Locale, d.Cue, d.Reply, d.Distractor }, ct);
 
     public Task<int[]> ValidatePracticeAsync(string locale, int level, object candidates, CancellationToken ct) =>
-        PracticeJsonAsync<int[]>("Independently review the supplied language exercises and nearby existing exercises. " +
+        PracticeJsonAsync<int[]>("Independently review the supplied language exercises and compact situation descriptions of nearby existing material. These descriptions are coverage hints; do not reject an entire broad topic. " +
             "Return ONLY a JSON array of the candidate indices that pass ALL checks: correct locale and requested practice difficulty; exactly one suitable reply; " +
             "each cue and each choice is a single person speaking a single turn, with no speaker labels or embedded conversation; cue never answers its own question; " +
-            "distractor clearly mismatches context; natural, safe adult content; distinct from nearby exercises and other candidates in meaning. " +
-            "Reject paraphrases or exchanges that merely change names or objects. Repeated vocabulary in a different communicative situation is fine. " +
+            "distractor clearly mismatches context; natural, safe adult content. " +
+            PracticeVarietyInstruction(level) +
             (level == PracticeRules.BeginnerLevel ? BeginnerPracticeInstruction + "Reject exercises that require A1 sentence comprehension or several new concepts." : ""),
             new { locale, level = PracticeRules.LevelName(level), candidates }, ct);
 

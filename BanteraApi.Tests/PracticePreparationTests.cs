@@ -49,4 +49,64 @@ public class PracticePreparationTests
             Assert.Contains(progress.Level, candidates);
         }
     }
+
+    [Fact]
+    public async Task RefillPreparesTwentyUnseenExercisesAndStopsWhenFull()
+    {
+        var ready = 3;
+        var calls = 0;
+        await PracticePreparation.RefillAsync(() => Task.FromResult(ready), () => {
+            calls++;
+            var produced = Math.Min(5, PracticePreparation.ReadyTarget - ready);
+            ready += produced;
+            return Task.FromResult(produced);
+        }, default);
+        Assert.Equal(20, ready);
+        Assert.Equal(4, calls);
+        await PracticePreparation.RefillAsync(() => Task.FromResult(ready), () => throw new Exception("Full pool must not generate"), default);
+    }
+
+    [Fact]
+    public async Task RefillCanRecoverFromAnEmptyReviewButStopsRepeatedRejection()
+    {
+        var ready = 18;
+        var calls = 0;
+        await PracticePreparation.RefillAsync(() => Task.FromResult(ready), () => {
+            var produced = ++calls == 2 ? 2 : 0;
+            ready += produced;
+            return Task.FromResult(produced);
+        }, default);
+        Assert.Equal(20, ready);
+        calls = 0;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => PracticePreparation.RefillAsync(
+            () => Task.FromResult(0), () => { calls++; return Task.FromResult(0); }, default));
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task RefillRemainsBoundedWhenUserConsumesTheBuffer()
+    {
+        var calls = 0;
+        // New exercises are consumed as fast as they are produced. This must
+        // not be mistaken for repeated generation/review failure.
+        await PracticePreparation.RefillAsync(() => Task.FromResult(0), () => {
+            calls++; return Task.FromResult(5);
+        }, default);
+        Assert.Equal(6, calls);
+        using var stop = new CancellationTokenSource();
+        stop.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => PracticePreparation.RefillAsync(
+            () => Task.FromResult(0), () => throw new Exception("Cancelled refill generated"), stop.Token));
+    }
+
+    [Fact]
+    public void BeginnerVocabularyVariationsAreAllowedButExactPairsStayBlocked()
+    {
+        var old = new PracticeDialogue { Cue = "Tea?", Reply = "Yes, please.", MeaningKey = "accept drink" };
+        old.Fingerprint = PracticeRules.Fingerprint(old.Cue, old.Reply);
+        var variation = new PracticeDraft("food", "accept drink", "Coffee?", "Yes, please.", "Goodbye.", "Accept a drink.");
+        Assert.False(PracticePreparation.Duplicate(variation, old, -1));
+        Assert.True(PracticePreparation.Duplicate(variation, old, 0));
+        Assert.True(PracticePreparation.Duplicate(variation with { Cue = "TEA!", Reply = "Yes please" }, old, -1));
+    }
 }

@@ -1733,8 +1733,7 @@ namespace BanteraApi.Migrations
 
                     b.HasIndex("DialogueId");
 
-                    b.HasIndex("UserId", "DialogueId")
-                        .IsUnique();
+                    b.HasIndex("UserId", "DialogueId");
 
                     b.HasIndex("UserId", "RequestId")
                         .IsUnique();

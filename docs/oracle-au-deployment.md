@@ -1,5 +1,93 @@
 # Bantera deployment on Oracle AU
 
+## 29 October 2026: configurable Practice rotation
+
+API **1.53.0** and website **0.26.0**, release **bantera-20261029-2**, are
+verified live. [Practice rotation](practice-rotation.md) now excludes the last
+50 presentations per user/language/level by default, reuses older audio-ready
+exercises with fresh attempts, and guides generation with compact situation
+labels. Admins can change the exclusion window from 10 to 500 at
+`https://bantera.app/dashboard/practice`; settings persist without a restart.
+Unseen exercises are preferred. Small pools prepare more rather than repeat early.
+
+**GO for published apps:** existing app APIs and authentication are unchanged;
+no app update or new environment variable is required. Migration
+`20261029080529_PracticeRecentRotation` replaces the unique user/dialogue index
+with a non-unique index. Request idempotency and fingerprint uniqueness remain.
+No history, saved exercises, audio or progress was deleted. Production schema
+checks confirmed the migration, replay support, request uniqueness and default
+window 50. Rollback must retain this schema once replay rows exist; never delete
+history or restore a database backup to undo an application release.
+
+Validation: Release build, **1,758 passing backend tests / 31 conditional skips**,
+**11 focused PostgreSQL rotation/settings tests** and **2 existing saved-review
+endpoint tests** passed. Website typecheck, lint (existing warnings), **25 tests**
+and production build passed. Existing dependency advisories remain; no unrelated
+dependency upgrade was included. Admin authorization, input bounds, persistence,
+30/50/100 windows, user/language/level isolation, replay audio/attempts,
+idempotency, saved history and pool exhaustion were checked.
+
+A verified **10,335,547-byte** database backup precedes the migration. Both
+candidate services passed health and authentication checks. All **128/128**
+public availability probes returned HTTP 200 during promotion. Public versions,
+admin-settings 401 and dashboard login redirect were rechecked after cleanup.
+Free disk was **104,318,709,760 bytes** before build and about **94 GiB** after
+cleanup. Current and previous releases remain protected; no volumes or database
+backups were deleted.
+
+Runtime: API `bantera-api-20261029-2` (18176), web
+`bantera-website-20261029-2` (13067), tunnel `cloudflared-20261029-2` (12105).
+Rollback: `python3 /home/ubuntu/releases/bantera-20261029-2/deploy.py rollback`
+restores release `bantera-20261029-1` without restoring the database. Reviewed
+working-tree archive hashes, base commits and changed paths are recorded in the
+server source manifest. No commit, push, app installation or store submission.
+
+## 29 October 2026: Practice preparation and A0 variety
+
+API **1.52.0**, release **bantera-20261029-1**, is verified live. Practice
+preparation now targets 20 ready, unseen exercises for the requesting learner's
+locale and level. Each refill has at most six batches, stops after two consecutive
+empty batches, and retains the existing ten-minute job limit and 90-second
+failure backoff. Audio-ready exercises are saved individually for immediate use.
+
+The en-NZ A0 investigation found 16 ready exercises, all already seen by the
+requesting learner, and 40 recent reviews approving no candidates. Review output
+does not include rejection reasons, so the exact reason for each rejection is
+unknown. The shared novelty rule was too restrictive for beginner variations:
+A0 generation/review now permits useful vocabulary variations of simple patterns,
+while exact normalized cue/reply pairs remain blocked. Other levels retain their
+existing semantic duplicate checks. Naturalness, difficulty, safety and the
+single-correct-answer checks remain in place.
+
+After promotion, read-only production verification found **26 ready en-NZ A0
+exercises**, including **9 unseen** for the affected learner, compared with 16/0
+before deployment. This confirms new exercises reached audio-ready state. TTS
+quota failures were also observed, with five successful provider fallback events;
+provider availability can still delay replenishment. The 20-exercise target is a
+buffer target, not a guarantee of zero waiting.
+
+**GO for published apps:** endpoints, authentication and response shapes remain
+unchanged. No schema migration, new configuration, secret or app update is needed.
+No history, progress, saved items or existing exercise content was cleared.
+The unchanged website image `bantera-website:bantera-20261027-11` was retained.
+
+Validation: Release build and full backend suite passed: **1,748 passed, 30
+environment-dependent skips, 0 failed**. Candidate checks covered version, public
+lessons, protected admin/AI/callback routes and website pages. All **134/134**
+public availability probes returned HTTP 200 during promotion; public API version
+and website marker were rechecked after cleanup. A verified 9,583,010-byte database
+backup is retained in the release directory. Free disk was 104,836,239,360 bytes
+before build and approximately 98 GiB after cleanup; no volumes or backups were
+deleted.
+
+Runtime: `bantera-api-20261029-1` (18175), `bantera-website-20261029-1` (13066),
+`cloudflared-20261029-1` (12104). Current and previous release artifacts are retained.
+Rollback: `python3 /home/ubuntu/releases/bantera-20261029-1/deploy.py rollback`
+restores `bantera-20261028-1` / API 1.51.0 without restoring the database.
+The deployed source is the reviewed working tree based on `5cf7f11770d6e43f9633214af578082fff9f455a`;
+the archive hash and changed paths are recorded in the server-side source manifest.
+No Git commit/push, app installation or store submission was performed.
+
 ## 28 October 2026: same-session AI voice transcript refinement
 
 API **1.51.0** adds a backend-handled `refine_input_transcript` tool to AI

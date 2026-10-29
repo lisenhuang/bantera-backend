@@ -14,6 +14,7 @@ public static class PracticeEndpoints
     public sealed record AnswerRequest(Guid AttemptId, string Transcript, string? Recognition);
     public static void MapAdmin(WebApplication app)
     {
+        PracticeSettings.Map(app);
         app.MapDelete("/api/admin/practice/exposures/{id:guid}", async (Guid id, ClaimsPrincipal user, AppDbContext db, R2StorageService storage, ILogger<PracticeDialogue> logger, CancellationToken ct) =>
         {
             if (!Guid.TryParse(user.FindFirstValue("sub"), out var owner)) return Results.Unauthorized();
@@ -163,9 +164,12 @@ public static class PracticeEndpoints
             }
             if (await exposures.CountAsync(x => x.UserId == userId && x.SeenAt >= DateTime.UtcNow.Date, ct) >= 200)
                 return Results.Json(new { code = "practice_daily_limit" }, statusCode: 429);
-            var available = db.Set<PracticeDialogue>().Where(d => d.Locale == locale && d.Level == targetLevel && d.Ready && d.ContentVersion == PracticeRules.ContentVersion &&
-                !exposures.Any(e => e.UserId == userId && e.DialogueId == d.Id));
-            var selected = await available.OrderBy(d => d.CreatedAt).FirstOrDefaultAsync(ct);
+            var repeatWindow = await PracticeSettings.GetAsync(db, ct);
+            var available = PracticeRotation.Available(db, userId, locale, language, targetLevel, repeatWindow);
+            // Prefer unseen material, then mix older exercises rather than replaying
+            // the original sequence. A replay receives its own exposure/attempts.
+            var selected = await available.OrderBy(d => exposures.Any(e => e.UserId == userId && e.DialogueId == d.Id))
+                .ThenBy(d => EF.Functions.Random()).FirstOrDefaultAsync(ct);
             PracticeExposure? exposure = null;
             if (selected is not null)
             {

@@ -77,9 +77,8 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
         // Commit each ready exercise promptly using a separate scoped context, while holding this lock.
         await using var writeScope = scopes.CreateAsyncScope();
         var writer = writeScope.ServiceProvider.GetRequiredService<AppDbContext>();
-        Task<int> ReadyCount() => writer.Set<PracticeDialogue>().CountAsync(d => d.Locale == demand.Locale && d.Level == demand.Level &&
-            d.Ready && d.ContentVersion == PracticeRules.ContentVersion &&
-            !writer.Set<PracticeExposure>().Any(e => e.UserId == demand.UserId && e.DialogueId == d.Id), ct);
+        var repeatWindow = await PracticeSettings.GetAsync(writer, ct);
+        Task<int> ReadyCount() => PracticeRotation.Available(writer, demand.UserId, demand.Locale, demand.Language, demand.Level, repeatWindow).CountAsync(ct);
         if (MaoriPracticeTranslation.Applies(demand.Locale))
         {
             var existing = await writer.Set<PracticeDialogue>().Where(d => d.Locale == demand.Locale && d.Level == demand.Level &&
@@ -99,24 +98,28 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
             await CompleteAudioAsync(row, writer, demand.RunId, ct);
             if (await ReadyCount() >= PracticePreparation.ReadyTarget) return;
         }
-        // At most two batches per demand; no unbounded regeneration loop.
-        for (var batch = 0; batch < 2; batch++)
+        // Fill ahead while this pool is in use. Bound both total work and empty
+        // review rounds; no-progress runs use the existing 90-second backoff.
+        var batch = 0;
+        await PracticePreparation.RefillAsync(ReadyCount, async () =>
         {
-            if (await ReadyCount() >= PracticePreparation.ReadyTarget) break;
             var history = await writer.Set<PracticeDialogue>().AsNoTracking().Where(d => d.Language == demand.Language && d.ContentVersion == PracticeRules.ContentVersion).ToListAsync(ct);
             var topics = (demand.Level == PracticeRules.BeginnerLevel ? PracticeRules.BeginnerTopics : PracticeRules.Topics).OrderBy(t => history.Count(d => d.Level == demand.Level && d.Topic == t)).Take(5).ToArray();
-            var recent = history.OrderByDescending(d => d.CreatedAt).Take(8).Select(d => new { d.Cue, d.Reply, d.MeaningKey }).ToArray();
+            var recentHistory = history.Where(d => d.Locale == demand.Locale && d.Level == demand.Level)
+                .OrderByDescending(d => d.CreatedAt).ThenByDescending(d => d.Id).Take(Math.Min(repeatWindow, PracticeRotation.TopicContextLimit)).ToList();
+            var recent = PracticeRotation.Descriptions(recentHistory, demand.Locale, demand.Level, repeatWindow);
+            var fingerprints = history.Select(d => d.Fingerprint).ToHashSet();
             // One generation batch and one batch review. No unbounded regeneration loop.
-            var logContext = new PracticeLogContext(demand.RunId, demand.Locale, demand.Level, Batch: batch + 1);
+            var logContext = new PracticeLogContext(demand.RunId, demand.Locale, demand.Level, Batch: ++batch);
             var generated = await diagnostics.RunAsync("text", logContext,
                 () => ai.GeneratePracticeAsync(demand.Locale, demand.Level, topics, recent, ct));
-            var drafts = generated.Take(5).Where(PracticeRules.Valid).Where(d => !history.Any(h => PracticeRules.Duplicate(d, h))).ToArray();
+            var drafts = generated.Take(5).Where(PracticeRules.Valid).Where(d => !fingerprints.Contains(PracticeRules.Fingerprint(d.Cue, d.Reply)) && !recentHistory.Any(h => PracticePreparation.Duplicate(d, h, demand.Level))).ToArray();
             if (drafts.Length != generated.Length)
                 await diagnostics.NoteAsync("text", "candidates_filtered", logContext, new { generated = generated.Length, eligible = drafts.Length });
-            if (drafts.Length == 0) return;
-            var review = drafts.Select((d, index) => new { index, exercise = d, nearby = history
+            if (drafts.Length == 0) return 0;
+            var review = drafts.Select((d, index) => new { index, exercise = d, nearby = recentHistory
                 .OrderByDescending(h => PracticeRules.Similarity(d.Cue + d.Reply + d.MeaningKey, h.Cue + h.Reply + h.MeaningKey))
-                .Take(5).Select(h => new { h.Cue, h.Reply, h.MeaningKey }).ToArray() }).ToArray();
+                .Take(3).Select(h => PracticeRotation.Descriptions([h], demand.Locale, demand.Level)[0]).ToArray() }).ToArray();
             var approved = (await diagnostics.RunAsync("review", logContext,
                 () => ai.ValidatePracticeAsync(demand.Locale, demand.Level, review, ct))).ToHashSet();
             if (approved.Count == 0)
@@ -125,7 +128,7 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
             for (var i = 0; i < drafts.Length; i++)
             {
                 var draft = drafts[i];
-                if (!approved.Contains(i) || history.Any(h => PracticeRules.Duplicate(draft, h))) continue;
+                if (!approved.Contains(i) || fingerprints.Contains(PracticeRules.Fingerprint(draft.Cue, draft.Reply)) || recentHistory.Any(h => PracticePreparation.Duplicate(draft, h, demand.Level))) continue;
                 var pronunciation = PracticePronunciation.Valid(draft.Pronunciation, draft.Cue, draft.Reply, draft.Distractor, demand.Locale) ? draft.Pronunciation : null;
                 var row = new PracticeDialogue { ContentVersion = PracticeRules.ContentVersion, Locale = demand.Locale, Language = demand.Language, Level = demand.Level,
                     Topic = draft.Topic, MeaningKey = draft.MeaningKey, Cue = draft.Cue, Reply = draft.Reply,
@@ -146,10 +149,19 @@ public sealed class PracticeWorker(IServiceScopeFactory scopes, ILogger<Practice
                 }
                 // Keep the approved row even when synthesis needs a retry.
                 history.Add(row);
+                recentHistory.Add(row);
+                fingerprints.Add(row.Fingerprint);
                 reserved.Add(row);
             }
-            foreach (var row in reserved) await CompleteAudioAsync(row, writer, demand.RunId, ct);
-        }
+            var completed = 0;
+            foreach (var row in reserved)
+            {
+                await CompleteAudioAsync(row, writer, demand.RunId, ct);
+                completed++;
+                if (await ReadyCount() >= PracticePreparation.ReadyTarget) break;
+            }
+            return completed;
+        }, ct);
         await transaction.CommitAsync(ct);
     }
     private async Task EnsureMaoriTranslationAsync(PracticeDialogue row, AppDbContext writer, CancellationToken ct)

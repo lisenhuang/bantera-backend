@@ -73,7 +73,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.DeferredScoring).HasDefaultValue(false);
             e.Property(x => x.TranslationUsed).HasDefaultValue(false);
             e.Property(x => x.ReviewMode).HasDefaultValue(false);
-            e.HasIndex(x => new { x.UserId, x.DialogueId }).IsUnique();
+            e.HasIndex(x => new { x.UserId, x.DialogueId });
             e.HasIndex(x => new { x.UserId, x.RequestId }).IsUnique();
             e.HasIndex(x => new { x.UserId, x.SeenAt });
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
