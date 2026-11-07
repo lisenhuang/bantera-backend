@@ -3146,3 +3146,38 @@ Rollback preserves database writes:
 ```sh
 python3 /home/ubuntu/releases/bantera-20261107-2/deploy.py rollback
 ```
+
+## 8 November 2026: Ordinary AI chat and image search review guard
+
+Authorized working-tree release `bantera-20261108-1` deployed backend **1.56.2**.
+The V3 prompt now explicitly authorizes ordinary search before other tools and
+pauses an active review for an unrelated search without consuming a review item.
+Context version 14 prevents old provider-session instructions being resumed.
+App **3.38.1 (521)** adds the device-side gate fix; both changes are required for
+the complete correction. Published V1/V2/V3 contracts remain compatible.
+No database migration, new configuration or backend-executed search.
+
+- API loopback 18181; website 13072; connector readiness 12111.
+- Existing website **0.28.0** image/public marker `bantera-20261029-4` retained.
+- Source archive SHA-256:
+  `0ec188fdc5ea798d85969fc575b8061270a25dad6354928944ebc3fd6001821e`.
+- Verified database backup **11,198,446 bytes**. Candidate health/authentication,
+  startup and public stability checks passed: **128/128 HTTP 200**.
+- Cleanup preserved current and rollback release `bantera-20261107-2`; no volumes
+  or database backups deleted. Free space approximately 89 GiB afterward
+  (90 GiB before). Both public domains rechecked after cleanup.
+- App analysis passed its errors/warnings gate; 70 app regression tests passed,
+  including review/photo-search sockets and required callback/CallKit/audio tests.
+  Backend 165 passed, 7 environment-dependent tests skipped. Debug and signed iOS
+  builds and signature validation passed.
+- Initial installation was blocked by an unavailable CoreDevice connection.
+  After the user reconnected and unlocked the iPhone, app 3.38.1 (521) was
+  installed successfully and its version verified in device inventory, without
+  launching or testing the app on the phone.
+- No commit, push or store submission included.
+
+Rollback without reverting database writes:
+
+```sh
+python3 /home/ubuntu/releases/bantera-20261108-1/deploy.py rollback
+```

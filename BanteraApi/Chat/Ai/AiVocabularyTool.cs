@@ -26,7 +26,7 @@ public static class AiVocabularyTool
         "A null word or zero eligible means no word matches; explain that and offer another pool instead of inventing a saved word. " +
         "Reads and quiz selection do not mark review or change anything. After actual practice use review with the returned exact id; never mark review just for selecting a word. ";
     public const string ReviewPrompt = " DEVICE REVIEW PROTOCOL V3: Before speaking on EVERY turn (including reconnects), call manage_vocabulary. " +
-        "For ordinary conversation use review_conversation; it only authorizes ordinary speech when no review session is active. " +
+        "For ordinary conversation, including web/image searches, FIRST use review_conversation before speaking or calling other tools. If review_session_active is returned for an unrelated current request, call review_pause with explicitChange=true and then fulfil that request. Do not call review_status or start a quiz for an image/search request. Never describe an ordinary search failure as a vocabulary review failure. " +
         "For vocabulary revision use review_start with explicit scope (due/all/recent/new), style (guess_expression/explain_meaning), and optional language. " +
         "Due reviews mean scope=due. Guessing a word or phrase from its meaning means guess_expression; explaining the given expression means explain_meaning. " +
         "Never infer a new pool from next/continue or an answer. First call review_status on subsequent turns and reconnects. " +

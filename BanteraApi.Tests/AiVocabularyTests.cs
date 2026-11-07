@@ -59,6 +59,8 @@ public class AiVocabularyTests
         var setup = JsonSerializer.Serialize(GeminiLiveService.Setup("gemini-3.1-flash-live-preview", "", true, deviceVocabulary: true, vocabularyVersion: 3));
         Assert.Contains("DEVICE REVIEW PROTOCOL V3", setup);
         Assert.Contains("dueCutoff", setup);
+        Assert.Contains("FIRST use review_conversation", setup);
+        Assert.Contains("Never describe an ordinary search failure as a vocabulary review failure", setup);
         Assert.Contains("VERBATIM", setup);
         Assert.DoesNotContain(AiVocabularyTool.ReadPrompt, setup);
         var user = new BanteraApi.Database.Entities.User { Id = Guid.NewGuid() };
