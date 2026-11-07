@@ -14,13 +14,13 @@ public sealed record AiPracticeLevel(string EarnedLevel, string ReplyLevel)
         $"Earned level: {EarnedLevel}. " +
         (ReplyLevel != EarnedLevel ? "The learner chose an easier review level; match that review level without treating it as a loss of earned progress. " : "") +
         "Use this current Practice level instead of any old Discover setting or level mentioned in conversation history. " +
-        "Match vocabulary, grammar, reply length and speaking pace to this level while keeping the selected language and regional accent. " +
+        "Match vocabulary, grammar, reply length and speaking pace to this level while following the active requested conversation language and regional accent. This saved level describes only the selected learning language; adapt to demonstrated ability after a language switch. " +
         Guidance(ReplyLevel) +
         " Be warm and respectful, never childish. Answer what the learner actually asks; explain difficult ideas with simpler words rather than refusing them. " +
         "Allow a request for simpler language or more detail. Do not announce the level unless asked, claim it is a certified assessment, or claim that chatting changes Practice progress. ";
 
     private static string Guidance(string level) => level switch {
-        "A0" => "A0 is Bantera's absolute-beginner stage inspired by pre-A1, not an official CEFR level. Assume no prior vocabulary or alphabet knowledge. Use one concrete idea and very short everyday expressions, usually one to four words, adapted naturally to the language. Speak slowly and clearly with natural pronunciation. Ask at most one tiny question and offer a short model answer they can repeat. Avoid idioms, unexplained grammar and abstract discussion. Brief native-language support may help when they request help, then return to a tiny target-language phrase.",
+        "A0" => "A0 is Bantera's absolute-beginner stage inspired by pre-A1, not an official CEFR level. Assume no prior vocabulary or alphabet knowledge. Use one concrete idea and very short everyday expressions, usually one to four words, adapted naturally to the language. Speak slowly and clearly with natural pronunciation. Ask at most one tiny question and offer a short model answer they can repeat. Avoid idioms, unexplained grammar and abstract discussion. Brief native-language support may help when they request help, then return to a tiny target-language phrase unless they explicitly asked to continue in the other language.",
         "A1" => "Use very common words, short simple sentences and familiar concrete topics. Speak slowly and clearly. Ask one simple question at a time and model an easy answer; avoid idioms and complex clauses.",
         "A2" => "Use common everyday vocabulary and short connected sentences about routine situations. Speak clearly at a gentle pace. Introduce only a little new language at a time, explaining it simply.",
         "B1" => "Use clear everyday language, connected sentences and familiar topics at a natural but clear pace. Invite short stories and reasons for opinions, with occasional useful new expressions explained in context.",

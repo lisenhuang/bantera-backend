@@ -63,19 +63,20 @@ public class AiCapabilityGuideTests
     [Theory]
     [InlineData("ja-JP")]
     [InlineData("zh-HK")]
-    public void OnlyPhoneCallbackAllowsExplicitLanguageSwitchWithoutChangingProfile(string language)
+    [InlineData("en-NZ")]
+    public void ChatAndPhoneBothAllowExplicitLanguageSwitchWithoutChangingProfile(string language)
     {
         var user = new User { LearningLanguage = language };
-        var normal = BanteraAiIdentity.Prompt(user);
-        var phone = BanteraAiIdentity.Prompt(user, allowCallLanguageSwitch: true);
-        Assert.Contains("Maintain the selected accent throughout", normal);
-        Assert.DoesNotContain("follow the learner's CURRENT explicit request", normal);
-        Assert.Contains("follow the learner's CURRENT explicit request", phone);
-        Assert.Contains("switch is only for this call", phone);
-        Assert.Contains("including the reminder and farewell", phone);
-        Assert.DoesNotContain("Maintain the selected accent throughout", phone);
-        Assert.DoesNotContain("speak natural colloquial Cantonese", phone);
-        Assert.Equal(language, user.LearningLanguage);
+        foreach (var phone in new[] { false, true }) {
+            var prompt = BanteraAiIdentity.Prompt(user, allowCallLanguageSwitch: phone);
+            Assert.Contains(AiSpeechPolicy.Prompt, prompt);
+            Assert.Contains("defaults, not restrictions", prompt);
+            Assert.Contains("CURRENT explicit request", prompt);
+            Assert.Contains("Never change or claim to change the saved learning language", prompt);
+            Assert.DoesNotContain("Maintain the selected accent throughout", prompt);
+            Assert.DoesNotContain("Required spoken language", prompt);
+            Assert.Equal(language, user.LearningLanguage);
+        }
     }
 
     [Fact]

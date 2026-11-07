@@ -3119,3 +3119,30 @@ Rollback, without restoring the database or discarding newer writes:
 ```sh
 python3 /home/ubuntu/releases/bantera-20261107-1/deploy.py rollback
 ```
+
+
+## 7 November 2026: Explicit AI conversation language and accent
+
+Authorized working-tree release `bantera-20261107-2` deployed backend **1.56.1**.
+Existing published app contracts remain unchanged; no migration or new settings.
+Session context version 13 invalidates cached older language instructions.
+
+- API loopback 18180; website 13071; connector readiness 12110.
+- Existing website image **0.28.0** and public marker `bantera-20261029-4`
+  retained; website internal API origin updated to the new backend.
+- Source archive SHA-256:
+  `b98bdd90c1db44d9c31d62d5d8d567e723c15bb3fb3e8cae31546e08e0d5119c`.
+- Verified backup **11,174,730 bytes**. Staged health/authentication checks,
+  startup and public two-minute stability checks passed: **128/128 HTTP 200**.
+- Retention cleanup completed, preserving current release and previous release
+  `bantera-20261107-1`. No volumes or database backups deleted. About 90 GiB free
+  before and after. Both public version markers reverified after cleanup.
+- App **3.38.0 (520)** reinstalled after backend verification, without launch or
+  testing on the physical iPhone. No new app build was required for this change.
+- No Git commit/push or store submission was performed for this release.
+
+Rollback preserves database writes:
+
+```sh
+python3 /home/ubuntu/releases/bantera-20261107-2/deploy.py rollback
+```
