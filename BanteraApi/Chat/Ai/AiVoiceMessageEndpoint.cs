@@ -47,7 +47,7 @@ public static class AiVoiceMessageEndpoint
             metadata = metadata with { ReportSource = inputMode == "text" ? "text_chat" : "voice_message" };
             input = new AiVoiceInput(AiVoiceImages.Read(root), textOnly: inputMode == "text");
             lifetime.CancelAfter(TimeSpan.FromSeconds(190));
-            await GeminiLiveService.SendAsync(client, new { type = "ready", acceptImages = true, acceptText = true }, lifetime.Token);
+            await GeminiLiveService.SendAsync(client, new { type = "ready", acceptImages = true, acceptText = true, vocabularyVersion = metadata.VocabularyVersion }, lifetime.Token);
             var deviceTools = (metadata.DeviceWebSearch || metadata.DeviceVocabulary || metadata.DeviceEmojis || metadata.DeviceFormattedText) ? new AiVoiceDeviceTools() : null;
             receive = ReceiveRecordingAsync(client, input, lifetime, deviceTools);
             model = await settings.GetModelAsync(lifetime.Token);

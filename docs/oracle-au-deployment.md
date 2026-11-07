@@ -3089,3 +3089,33 @@ Cleanup kept both retained application sets and their mounted configurations,
 removed no volumes/data, and left **98 GB free (50% used)**, unchanged from before
 the rollback. Public version checks passed again after cleanup. Historical
 release-13 entries above describe the reverted deployment, not the active code.
+
+## 7 November 2026: Device vocabulary review V3
+
+Authorized working-tree release `bantera-20261107-1` deployed backend **1.56.0**.
+The website reused the existing **0.28.0** image and retained public marker
+`bantera-20261029-4`; its new container targets the new API internally.
+
+- API loopback: 18179; website: 13070; connector readiness: 12109.
+- V3 vocabulary tools and ready-message negotiation are additive. Published
+  V1/V2 clients keep their existing contracts. No migration or new configuration.
+- Reviewed backend archive SHA-256:
+  `ef1a7bcfa4c45e328910148564720860a7393936abd9a598de1fc09c23e6332b`.
+- Verified database backup: **11,171,551 bytes**. Runtime settings were cloned
+  privately on the server without printing secrets.
+- Staged API, lesson listing, authentication gates and unchanged website checks
+  passed. Promotion completed its two-minute stability window; **128/128**
+  public availability samples returned HTTP 200. Startup succeeded with no
+  unhandled startup exception. Both public version markers passed after cleanup.
+- Existing retention cleanup completed; free space was about **90 GiB** after
+  deployment (91 GiB before). Volumes and database backups were not deleted.
+- Previous release `bantera-20261029-4` and its connector remain available for
+  rollback. Proof is in `verification-proof.json` in the new release directory.
+- App **3.38.0 (520)** was installed only after the backend passed public checks.
+  No app launch, physical-device tests, Git commit/push or store submission.
+
+Rollback, without restoring the database or discarding newer writes:
+
+```sh
+python3 /home/ubuntu/releases/bantera-20261107-1/deploy.py rollback
+```

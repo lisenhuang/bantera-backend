@@ -192,7 +192,7 @@ public static class BanteraAiEndpoints
             // New calls receive the full nine minutes from the first audio.
             // Renewals keep the existing remaining budget, including startup.
             timeout.CancelAfter(TimeSpan.FromSeconds(resuming ? duration : 35));
-            await GeminiLiveService.SendAsync(client, new { type = "ready", maxCallSeconds = AiCallPolicy.DurationSeconds }, timeout.Token);
+            await GeminiLiveService.SendAsync(client, new { type = "ready", maxCallSeconds = AiCallPolicy.DurationSeconds, vocabularyVersion = metadata.VocabularyVersion }, timeout.Token);
             await GeminiLiveService.SendAsync(upstream, new { clientContent = new {
                 turns = new[] { new { role = "user", parts = new[] { new { text = metadata.TimePrompt + AiConversationTiming.Prompt(history, metadata.Clock) + AiCallPolicy.Opening(resuming, reminder) } } } }, turnComplete = true
             } }, timeout.Token);

@@ -42,6 +42,30 @@ public class AiVocabularyTests
         Assert.DoesNotContain("manage_vocabulary", JsonSerializer.Serialize(GeminiLiveService.Setup(model, "", true, vocabularyVersion: 2)));
     }
     [Fact]
+    public void ReviewV3IsNegotiatedWithoutChangingLegacyContracts()
+    {
+        var meta = AiClientMetadata.Read("""{"deviceVocabulary":true,"vocabularyVersion":3}""") with { ConversationId = Guid.NewGuid().ToString() };
+        Assert.Equal(3, meta.VocabularyVersion);
+        Assert.Equal(1, AiClientMetadata.Read("""{"vocabularyVersion":3}""").VocabularyVersion);
+        var old = JsonSerializer.Serialize(AiVocabularyTool.DeclarationFor(2));
+        var current = JsonSerializer.Serialize(AiVocabularyTool.DeclarationFor(3));
+        Assert.Contains("\"quiz\"", old);
+        Assert.DoesNotContain("review_start", old);
+        Assert.Contains("review_start", current);
+        Assert.Contains("review_feedback", current);
+        Assert.Contains("questionId", current);
+        Assert.Contains("guess_expression", current);
+        Assert.DoesNotContain("\"quiz\"", current);
+        var setup = JsonSerializer.Serialize(GeminiLiveService.Setup("gemini-3.1-flash-live-preview", "", true, deviceVocabulary: true, vocabularyVersion: 3));
+        Assert.Contains("DEVICE REVIEW PROTOCOL V3", setup);
+        Assert.Contains("dueCutoff", setup);
+        Assert.Contains("VERBATIM", setup);
+        Assert.DoesNotContain(AiVocabularyTool.ReadPrompt, setup);
+        var user = new BanteraApi.Database.Entities.User { Id = Guid.NewGuid() };
+        Assert.NotEqual(AiLiveResumeCache.Identity("gemini-3.1-flash-live-preview", user, true, meta, "Aoede", null),
+            AiLiveResumeCache.Identity("gemini-3.1-flash-live-preview", user, true, meta with { VocabularyVersion = 2 }, "Aoede", null));
+    }
+    [Fact]
     public void MetadataNegotiatesReadToolsAndInvalidatesAnOlderSession()
     {
         var old = AiClientMetadata.Read("""{"deviceVocabulary":true}""");
