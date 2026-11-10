@@ -11,6 +11,59 @@ namespace BanteraApi.Tests;
 public class AiVoiceStreamingTests
 {
     [Fact]
+    public async Task LiveUploadReportsPcmSentBeforeCommitAndSeparatesReplyWait()
+    {
+        using var socket = new Socket();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var input = new AiVoiceInput();
+        var clock = new WatchdogClock();
+        var timing = new AiVoiceTiming(clock);
+        timing.ClientReady();
+        clock.Advance(TimeSpan.FromMilliseconds(100));
+        timing.ClientPcm();
+        input.Add(new byte[640]);
+        timing.BeginAttempt();
+        clock.Advance(TimeSpan.FromMilliseconds(500));
+        timing.ProviderReady("pcm");
+        var upload = GeminiLiveService.UploadVoiceAsync(socket, input, timeout.Token, timing: timing);
+        Assert.Contains("activityStart", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        Assert.Contains("audio/pcm", await socket.Sent.Reader.ReadAsync(timeout.Token));
+        Assert.False(upload.IsCompleted);
+        Assert.False(input.Committed.IsCompleted);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        timing.ClientCommit();
+        input.Commit(Metadata);
+        await upload;
+        timing.ProviderInputEnd();
+        clock.Advance(TimeSpan.FromMilliseconds(300));
+        timing.ToolRoundStarted();
+        clock.Advance(TimeSpan.FromMilliseconds(400));
+        timing.ToolRoundFinished();
+        clock.Advance(TimeSpan.FromMilliseconds(500));
+        timing.ProviderAudio();
+        clock.Advance(TimeSpan.FromMilliseconds(50));
+        timing.ClientAudio();
+
+        var snapshot = JsonSerializer.SerializeToElement(timing.Snapshot());
+        Assert.Equal(1250, snapshot.GetProperty("commitToFirstAudioMs").GetInt64());
+        var attempt = snapshot.GetProperty("latestAttempt");
+        Assert.Equal(640, attempt.GetProperty("pcmBytesSentBeforeCommit").GetInt32());
+        Assert.Equal(1200, attempt.GetProperty("inputEndToFirstAudioMs").GetInt64());
+        Assert.Equal(400, attempt.GetProperty("toolMs").GetInt64());
+
+        timing.BeginAttempt();
+        timing.ProviderReady("transcript_recovery");
+        snapshot = JsonSerializer.SerializeToElement(timing.Snapshot());
+        Assert.Equal(2, snapshot.GetProperty("providerAttempts").GetInt32());
+        Assert.Equal(1250, snapshot.GetProperty("commitToFirstAudioMs").GetInt64());
+        attempt = snapshot.GetProperty("latestAttempt");
+        Assert.Equal("transcript_recovery", attempt.GetProperty("inputMode").GetString());
+        Assert.Equal(0, attempt.GetProperty("pcmBytesSentBeforeCommit").GetInt32());
+        Assert.Equal(JsonValueKind.Null, attempt.GetProperty("inputEndToFirstAudioMs").ValueKind);
+    }
+
+    [Fact]
     public async Task ExplicitTextTurnCommitsTextWithoutMicrophoneFrames()
     {
         using var socket = new Socket();

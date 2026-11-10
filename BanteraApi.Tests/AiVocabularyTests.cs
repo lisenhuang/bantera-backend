@@ -67,6 +67,55 @@ public class AiVocabularyTests
         Assert.NotEqual(AiLiveResumeCache.Identity("gemini-3.1-flash-live-preview", user, true, meta, "Aoede", null),
             AiLiveResumeCache.Identity("gemini-3.1-flash-live-preview", user, true, meta with { VocabularyVersion = 2 }, "Aoede", null));
     }
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void LegacyVocabularyPromptsRemainExactlyTheSame(int version)
+    {
+        var expected = AiVocabularyTool.Prompt + (version == 3 ? AiVocabularyTool.ReviewPrompt
+            : version == 2 ? AiVocabularyTool.ReadPrompt : "");
+        Assert.Equal(expected, AiVocabularyTool.PromptFor(version));
+        Assert.DoesNotContain("PROTOCOL V4", AiVocabularyTool.PromptFor(version));
+        Assert.Equal(version, AiClientMetadata.Read(JsonSerializer.Serialize(new {
+            deviceVocabulary = true, vocabularyVersion = version
+        })).VocabularyVersion);
+    }
+    [Theory]
+    [InlineData(true, false)] // Voice messages and text chats share this setup.
+    [InlineData(false, false)] // Foreground live calls.
+    [InlineData(false, true)] // Incoming callbacks.
+    public void V4ScopesReviewInstructionsToReviewWhilePreservingDeviceTools(bool message, bool callback)
+    {
+        var meta = AiClientMetadata.Read("""{"deviceVocabulary":true,"vocabularyVersion":4,"deviceWebSearch":true}""") with {
+            ConversationId = Guid.NewGuid().ToString(), PhoneCallback = callback
+        };
+        var user = new BanteraApi.Database.Entities.User { Id = Guid.NewGuid() };
+        var setup = GeminiLiveService.SessionSetup("gemini-3.8-live", user, message, [], meta, "Aoede", null, null, null);
+        var prompt = setup["setup"]!["systemInstruction"]!["parts"]![0]!["text"]!.GetValue<string>();
+        Assert.Equal(4, meta.VocabularyVersion);
+        Assert.Contains(AiVocabularyTool.ScopedReviewPrompt, prompt);
+        Assert.DoesNotContain(AiVocabularyTool.ReviewPrompt, prompt);
+        Assert.DoesNotContain("Before speaking on EVERY turn", prompt);
+        Assert.Contains("review_status is a read-only inspection", prompt);
+        Assert.Contains("Definitions, translations, example sentences", prompt);
+        Assert.Contains("do not require review_conversation, review_status or any review authorization", prompt);
+        Assert.Contains("EXACT currentId", prompt);
+        Assert.Contains("VERBATIM", prompt);
+        // V4 changes scoping, not tool names, payloads, or device-owned storage.
+        Assert.Equal(JsonSerializer.Serialize(AiVocabularyTool.DeclarationFor(3)),
+            JsonSerializer.Serialize(AiVocabularyTool.DeclarationFor(4)));
+        Assert.NotEqual(AiLiveResumeCache.Identity("gemini-3.8-live", user, message, meta, "Aoede", null),
+            AiLiveResumeCache.Identity("gemini-3.8-live", user, message, meta with { VocabularyVersion = 3 }, "Aoede", null));
+    }
+    [Theory]
+    [InlineData("{\"deviceVocabulary\":true,\"vocabularyVersion\":4}", 4)]
+    [InlineData("{\"deviceVocabulary\":true,\"vocabularyVersion\":100}", 4)]
+    [InlineData("{\"vocabularyVersion\":4}", 1)]
+    [InlineData("{\"deviceVocabulary\":false,\"vocabularyVersion\":4}", 1)]
+    [InlineData("{\"deviceVocabulary\":true,\"vocabularyVersion\":\"4\"}", 1)]
+    public void V4NegotiationRemainsOptInAndBounded(string json, int expected)
+        => Assert.Equal(expected, AiClientMetadata.Read(json).VocabularyVersion);
     [Fact]
     public void MetadataNegotiatesReadToolsAndInvalidatesAnOlderSession()
     {

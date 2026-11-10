@@ -11,7 +11,7 @@ public class AiReminderHistoryTests
     {
         Assert.Contains("very basic everyday words", AiVocabularyTool.Prompt);
         Assert.DoesNotContain("optionally a short example", AiVocabularyTool.Prompt);
-        foreach (var version in new[] { 1, 2 }) {
+        foreach (var version in new[] { 1, 2, 3, 4 }) {
             var json = System.Text.Json.JsonSerializer.Serialize(AiVocabularyTool.DeclarationFor(version));
             Assert.Contains("Required for add, optional for update", json);
             Assert.Contains("very basic everyday words", json);

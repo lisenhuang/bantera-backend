@@ -69,7 +69,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             model = "models/" + model,
             contextWindowCompression = new { slidingWindow = new { } },
             generationConfig = AiLiveModelPolicy.GenerationConfig(model, voice, reasoning),
-            systemInstruction = new { parts = new[] { new { text = prompt + AiBugReportTool.Prompt + AiCallbackService.CapabilityPolicy + AiConversationTiming.LatestMessagePolicy + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (deviceVocabulary ? AiVocabularyTool.Prompt + (vocabularyVersion >= 3 ? AiVocabularyTool.ReviewPrompt : vocabularyVersion >= 2 ? AiVocabularyTool.ReadPrompt : "") : "") + (deviceEmojis ? AiEmojiTool.Prompt : "") + (deviceFormattedText ? AiFormattedTextTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage + AiInputTranscriptTool.Prompt : AiCallPolicy.TurnTaking) } } },
+            systemInstruction = new { parts = new[] { new { text = prompt + AiBugReportTool.Prompt + AiCallbackService.CapabilityPolicy + AiConversationTiming.LatestMessagePolicy + AiConversationTiming.Policy + AiConversationTiming.PlansAndTravelPolicy + (deviceWebSearch ? AiWebSearchTool.Prompt : "") + (deviceVocabulary ? AiVocabularyTool.PromptFor(vocabularyVersion) : "") + (deviceEmojis ? AiEmojiTool.Prompt : "") + (deviceFormattedText ? AiFormattedTextTool.Prompt : "") + (voiceMessage ? AiCallPolicy.VoiceMessage + AiInputTranscriptTool.Prompt : AiCallPolicy.TurnTaking) } } },
             tools = new[] { new { functionDeclarations = AiLiveModelPolicy.Tools(model, deviceWebSearch, deviceVocabulary, deviceEmojis, vocabularyVersion, deviceFormattedText, refineInputTranscript: voiceMessage) } },
             inputAudioTranscription = new { }, outputAudioTranscription = new { },
             realtimeInputConfig = new { automaticActivityDetection = voiceMessage
@@ -254,17 +254,19 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
     public async Task<AiVoiceReply> StreamReplyAsync(string model, User user, AiVoiceInput input,
         IReadOnlyList<AiContextTurn> history, JsonElement snapshot, AiClientMetadata metadata, string voice,
         Func<JsonElement, Task<object>>? executeTool, Func<byte[]?, Task> output, CancellationToken ct,
-        Func<string, string, Task>? transcript = null, string? reasoning = null)
+        Func<string, string, Task>? transcript = null, string? reasoning = null, AiVoiceTiming? timing = null)
     {
         // Wait only until speech is detected, not until Send: genuine recordings
         // still stream while the user talks. Empty/noise-only recordings cannot
         // open/resume a Live turn or manufacture a transcript/tool action.
         if (!await input.SpeechDetected.WaitAsync(ct)) throw new AiNoSpeechException();
+        timing?.SpeechDetected();
         var tools = MemoizeTools(executeTool);
         var attempts = 0;
         string? capturedInput = null;
         return await WithKeysAsync(model, async (key, token) => {
             var recovering = attempts++ > 0;
+            timing?.BeginAttempt();
             if (recovering) await output(null); // Start a distinct attempt with the same bounded recording/context.
             using var socket = await ConnectKeyAsync(key, model, user, true, history, token, metadata, voice, reasoning);
             await using var watchdog = new AiReplyWatchdog(input.Committed, token);
@@ -274,23 +276,37 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
             var providerEvents = new Dictionary<string, int>();
             void Observe(string name) {
                 providerEvents[name] = providerEvents.GetValueOrDefault(name) + 1;
-                if (name == "toolResponses") watchdog.Progress();
+                if (name == "toolRoundStarted") timing?.ToolRoundStarted();
+                if (name == "toolResponses") {
+                    timing?.ToolRoundFinished();
+                    watchdog.Progress();
+                }
             }
             void Annotate(Exception ex) {
                 foreach (var (name, count) in providerEvents) ex.Data[name] = count;
             }
             var transcriptRecovery = input.Text ?? (input.Images.Count == 0 && recovering && !string.IsNullOrWhiteSpace(capturedInput) ? capturedInput : null);
+            timing?.ProviderReady(input.TextOnly ? "text" : transcriptRecovery is null ? "pcm" : "transcript_recovery");
             var attemptInput = new StringBuilder();
             // A transcription proves the audio reached Gemini. On a silent
             // attempt, commit that utterance as a text turn to the SAME Live
             // model, avoiding another proactive-audio decision on replayed PCM.
-            var upload = transcriptRecovery is not null
-                ? UploadTranscriptAsync(socket, input, transcriptRecovery, attempt.Token, history)
-                : UploadVoiceAsync(socket, input, attempt.Token, requireReply: recovering, history: history);
+            async Task UploadAsync() {
+                if (transcriptRecovery is not null)
+                    await UploadTranscriptAsync(socket, input, transcriptRecovery, attempt.Token, history);
+                else
+                    await UploadVoiceAsync(socket, input, attempt.Token, requireReply: recovering, history: history, timing: timing);
+                timing?.ProviderInputEnd();
+            }
+            var upload = UploadAsync();
             if (transcriptRecovery is not null && transcript is not null) await transcript("user", transcriptRecovery);
             var reply = ReadReplyAsync(socket, snapshot, tools, attempt.Token, async bytes => {
                 if (bytes is null) { attemptInput.Clear(); watchdog.ResetAudio(); }
-                if (bytes is { Length: > 2 }) { receivedAudio = true; watchdog.AudioProgress(bytes.Length); }
+                if (bytes is { Length: > 2 }) {
+                    timing?.ProviderAudio();
+                    receivedAudio = true;
+                    watchdog.AudioProgress(bytes.Length);
+                }
                 await output(bytes);
             }, upload, async (role, text) => {
                 if (role == "user") { attemptInput.Append(text); capturedInput = attemptInput.ToString(); }
@@ -348,7 +364,8 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         } }, ct);
     }
 
-    public static async Task UploadVoiceAsync(WebSocket socket, AiVoiceInput input, CancellationToken ct, bool requireReply = false, IReadOnlyList<AiContextTurn>? history = null)
+    public static async Task UploadVoiceAsync(WebSocket socket, AiVoiceInput input, CancellationToken ct,
+        bool requireReply = false, IReadOnlyList<AiContextTurn>? history = null, AiVoiceTiming? timing = null)
     {
         await SendAsync(socket, new { realtimeInput = new { activityStart = new { } } }, ct);
         // Serialize socket writes, but do not pause microphone streaming during
@@ -371,8 +388,10 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
         }
         async Task Audio() {
             try {
-                await foreach (var chunk in input.ReadAsync(uploadLifetime.Token))
+                await foreach (var chunk in input.ReadAsync(uploadLifetime.Token)) {
                     await Write(new { realtimeInput = new { audio = new { mimeType = "audio/pcm;rate=16000", data = Convert.ToBase64String(chunk) } } });
+                    timing?.ProviderPcmSent(chunk.Length);
+                }
             } catch { await uploadLifetime.CancelAsync(); throw; }
         }
         await Task.WhenAll(Images(), Audio());
@@ -414,6 +433,7 @@ public sealed class GeminiLiveService(IOptions<GeminiSettings> options, GeminiKe
                 if (++toolRounds > 16) throw new InvalidDataException("Too many Live tool rounds.");
                 awaitingToolReply = true;
                 if (uploaded is not null) await uploaded.WaitAsync(ct);
+                observe?.Invoke("toolRoundStarted");
                 var responses = new List<object>();
                 foreach (var call in toolCall.GetProperty("functionCalls").EnumerateArray())
                 {

@@ -3181,3 +3181,83 @@ Rollback without reverting database writes:
 ```sh
 python3 /home/ubuntu/releases/bantera-20261108-1/deploy.py rollback
 ```
+
+## 8 November 2026: Separate ordinary vocabulary conversation from reviews
+
+Authorized working-tree release `bantera-20261108-2` deploys API **1.56.3**.
+Vocabulary protocol V4 is opt-in and removes mandatory review bookkeeping from
+ordinary definitions, examples, translations and notebook writes. Published
+V1–V3 prompts and tool contracts are unchanged. App **3.38.3 (523)** corrects
+read-only status handling, preserves ordinary replies and isolates actual review
+delivery validation. Context version 15 invalidates older provider instructions.
+
+**GO for published apps:** no endpoint removal, schema migration, new settings
+or secrets. The existing website **0.28.0** image and `bantera-20261029-4` public
+marker remain; the replacement website container points to the new API.
+
+- Candidate API 18182, website 13073, connector readiness 12112.
+- Source archive SHA-256:
+  `2417241e64e46493d640f04c5b9942a0a4f97b0e47a40b5e2d2b1fc6ca3afaca`.
+- Verified database backup: **11,238,812 bytes**. No vocabulary, practice or
+  user progress was reset or repaired in production.
+- 585 backend AI tests passed, 19 opt-in tests skipped; 298 app AI tests passed,
+  including required callback/CallKit/audio regressions and the reproduced
+  antidote definition/save/translation conversation.
+- Candidate and public health/auth checks passed. Handover: **128/128 HTTP 200**;
+  stable two-minute public window and final post-cleanup verification passed.
+  New containers have zero restarts; startup logged with no unhandled exception.
+- Retention cleanup retained current release and rollback `bantera-20261108-1`.
+  No volumes/database backups deleted. Free disk was **95,325,417,472 bytes**
+  before build and **94,914,048,000 bytes** after cleanup (about 88.4 GiB).
+- Final proof: `/home/ubuntu/releases/bantera-20261108-2/verification-proof.json`.
+  The initial verification script only read the latest 400 log lines and missed
+  the startup line; inspection of the complete new-container log confirmed
+  startup and zero failures, and final verification passed.
+- No Git commit, push or app-store submission. Physical-device installation is
+  authorized, but opening/testing the app on the phone is not.
+
+Rollback preserves subsequent database writes:
+
+```sh
+python3 /home/ubuntu/releases/bantera-20261108-2/deploy.py rollback
+```
+
+After public verification, app **3.38.3 (523)** was installed and confirmed in
+Ethan’s iPhone inventory. It was not launched or tested on the physical device.
+
+## 10 November 2026: AI voice latency measurements
+
+Authorized working-tree release `bantera-20261110-1` deployed API **1.56.4**.
+Adds monotonic phase timings to existing `ai_voice_server` success/failure
+records, including PCM sent before commit, provider setup/retries, tool time and
+commit-to-first-reply-audio. See [voice latency diagnostics](ai-voice-latency.md).
+This is instrumentation, not a confirmed latency fix. A fresh user voice message
+is still needed to diagnose the reported delay.
+
+**GO for published apps:** unchanged wire protocol, database schema and runtime
+configuration. No app installation required. Website **0.28.0** and public marker
+`bantera-20261029-4` retained; its replacement container targets the new API.
+
+- Candidate API 18183, website 13074, connector readiness 12113.
+- Source archive SHA-256:
+  `ba34411ca853919d534b3c4db2be6436252921070bde59521bac6ce3505bf284`.
+- Source compared against the previous deployed archive: only timing diagnostics,
+  corresponding tests, version and documentation differ. Existing changes preserved.
+- Existing local build and focused diagnostics/AI tests passed; production Docker
+  Release build passed. Verified database backup: **11,295,402 bytes**.
+- Candidate and public checks passed. All **128/128** availability samples were
+  HTTP 200 through the handover and two-minute stability window. After cleanup,
+  both public domains, exact versions, public lessons and authentication gates
+  passed; all three new containers had zero restarts and no startup exception.
+- Cleanup retained current and rollback release `bantera-20261108-2`; no volumes
+  or database backups deleted. Its unrelated legacy target lookups emitted two
+  harmless not-found messages; cleanup exited successfully and public checks passed.
+  Free disk: **94,971,559,936 bytes** before build, **94,582,964,224** after cleanup.
+- Verification proof: `/home/ubuntu/releases/bantera-20261110-1/verification-proof.json`.
+- No Git commit/push, app install or store submission.
+
+Rollback preserves subsequent database writes:
+
+```sh
+python3 /home/ubuntu/releases/bantera-20261110-1/deploy.py rollback
+```

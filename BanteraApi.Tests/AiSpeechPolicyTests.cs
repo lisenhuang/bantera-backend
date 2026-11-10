@@ -12,6 +12,9 @@ public class AiSpeechPolicyTests
     [InlineData(true, false, 3)]
     [InlineData(false, false, 3)]
     [InlineData(false, true, 3)]
+    [InlineData(true, false, 4)]
+    [InlineData(false, false, 4)]
+    [InlineData(false, true, 4)]
     public void EveryFreshTransportIncludesExplicitOverrideAndKeepsDefault(bool message, bool callback, int version)
     {
         var user = new User { LearningLanguage = "en-NZ", NativeLanguage = "zh-CN" };

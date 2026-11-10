@@ -37,7 +37,7 @@ public sealed record AiClientMetadata(AiClock Clock, string? PushToken, bool? Ha
         var vocabulary = doc.RootElement.TryGetProperty("deviceVocabulary", out var vocabFlag) && vocabFlag.ValueKind == JsonValueKind.True;
         var emojis = doc.RootElement.TryGetProperty("deviceEmojis", out var emojiFlag) && emojiFlag.ValueKind == JsonValueKind.True;
         var vocabularyVersion = vocabulary && doc.RootElement.TryGetProperty("vocabularyVersion", out var v) &&
-            v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var version) && version >= 2 ? Math.Min(version, 3) : 1;
+            v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var version) && version >= 2 ? Math.Min(version, 4) : 1;
         return new(clock, token, hasMet, alert, level, search, conversation, vocabulary, emojis, vocabularyVersion) {
             DeviceFormattedText = doc.RootElement.TryGetProperty("deviceFormattedText", out var formatted) && formatted.ValueKind == JsonValueKind.True
         };
