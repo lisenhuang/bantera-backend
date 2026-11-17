@@ -2,7 +2,7 @@ using System.IO;
 using System.Data;
 using System.Text.Json;
 using BanteraApi.Auth;
-using BanteraApi.Cloudflare;
+using BanteraApi.OpenAi;
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
 using BanteraApi.Gemini;
@@ -20,7 +20,7 @@ public class VideoService(
     AppDbContext db,
     R2StorageService r2StorageService,
     LinkGenerator linkGenerator,
-    CloudflareImageService cloudflareImageService,
+    OpenAiImageService imageService,
     CueTimingSettingsService cueTimingSettings,
     ILogger<VideoService> logger,
     BanteraApi.Jobs.OperationService? operations = null)
@@ -590,8 +590,8 @@ public class VideoService(
         try
         {
             var imagePrompt = BuildAiAudioCoverPrompt(transcriptLanguage, title);
-            var pngBytes = await cloudflareImageService.GenerateImageAsync(imagePrompt, cancellationToken);
-            using var img = Image.Load(pngBytes);
+            var imageBytes = await imageService.GenerateImageAsync(imagePrompt, cancellationToken);
+            using var img = Image.Load(imageBytes);
             using var jpegMs = new MemoryStream();
             await img.SaveAsJpegAsync(jpegMs, new JpegEncoder { Quality = 85 }, cancellationToken);
 

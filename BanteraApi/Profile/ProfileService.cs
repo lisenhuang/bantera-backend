@@ -1,6 +1,6 @@
 using System.Net;
 using BanteraApi.Auth;
-using BanteraApi.Cloudflare;
+using BanteraApi.OpenAi;
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
 using BanteraApi.Storage;
@@ -15,7 +15,7 @@ namespace BanteraApi.Profile;
 public class ProfileService(
     AppDbContext db,
     R2StorageService r2StorageService,
-    CloudflareImageService cloudflareImageService,
+    OpenAiImageService imageService,
     LinkGenerator linkGenerator,
     ILogger<ProfileService> logger,
     IMemoryCache memoryCache,
@@ -218,8 +218,8 @@ public class ProfileService(
             learningLanguage,
             normalizedAvatarGender);
 
-        var pngBytes = await cloudflareImageService.GenerateImageAsync(prompt, cancellationToken);
-        using var image = Image.Load(pngBytes);
+        var imageBytes = await imageService.GenerateImageAsync(prompt, cancellationToken);
+        using var image = Image.Load(imageBytes);
         await using var jpegStream = new MemoryStream();
         await image.SaveAsJpegAsync(jpegStream, new JpegEncoder { Quality = 85 }, cancellationToken);
         jpegStream.Position = 0;

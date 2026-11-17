@@ -3261,3 +3261,54 @@ Rollback preserves subsequent database writes:
 ```sh
 python3 /home/ubuntu/releases/bantera-20261110-1/deploy.py rollback
 ```
+
+## 17 November 2026: OpenAI profile and cover images
+
+Release **bantera-20261117-1**, API **1.57.0**, is verified live. Generated
+profile avatars and AI-audio covers now use `gpt-image-2.6-flare`, quality `low`,
+1024×1024 JPEG via the shared Images API service. Cloudflare Workers AI image
+requests were removed. Existing images, R2 URLs, TURN, and app contracts remain
+unchanged; local cover fallback is retained. See [image configuration](openai-images.md).
+
+**GO for published apps:** no app update or database migration is required.
+`OpenAiImages__ApiKey` was configured in the protected server runtime snapshot
+using the user-approved existing key. It is not in source or build artifacts.
+Provider errors stay generic, provider requests are not automatically retried,
+and image-service logs record elapsed time and request IDs without raw bodies.
+
+- Local .NET build and production Docker Release build passed. The full backend
+  suite passed **1,828 tests**, with **35 opt-in/environment-dependent skips**.
+  All 16 new deterministic image tests passed. The opt-in live test separately
+  generated and decoded two square JPEGs (avatar and cover).
+- A test harness loaded the deployed container's actual `BanteraApi.dll` and
+  runtime configuration and generated a valid 80,664-byte JPEG in **5.34 seconds**.
+  This used a synthetic prompt and did not create/modify any user or lesson.
+- Candidate API 18184, website 13075, connector readiness 12117. Website **0.28.0**
+  and public marker `bantera-20261029-4` remain unchanged.
+- Live routing had been updated by V2EN after Bantera's previous release. The
+  rollout cloned `cloudflared-v2en-routing-20261114` and its exact current networks
+  and routes, changing only the two Bantera origins. The effective previous
+  connector is recorded for rollback; no unrelated route was reverted.
+- Public handover/stability samples: **128/128 HTTP 200**. Final checks passed for
+  both domains, exact API version, website marker, lessons, authentication gates,
+  image generation and startup. All three new containers had zero restarts.
+- Backup verified: **12,064,335 bytes**. Free disk was **90,110,132,224 bytes** before
+  build and **88,422,834,176 bytes** after cleanup. Cleanup retained current and
+  rollback releases; no volumes, user data or database backups were deleted.
+- The previous API was stopped after confirming zero inbound established
+  connections and zero running AI operations, preventing old image workers from
+  consuming new jobs. Its container and image remain available for rollback.
+- Reviewed backend source archive SHA-256:
+  `e793b6fb71fa3c48023b7164707dadebc998ece5db049048eab9086930a3e91a`.
+  Runtime C# differences from the previous deployed archive are limited to this
+  provider migration. No migration files changed. Existing dependency advisory
+  and compiler warnings remain; no unrelated dependency upgrades were included.
+- Final proof: `/home/ubuntu/releases/bantera-20261117-1/verification-proof.json`.
+  No app install, Git commit/push or store submission was performed.
+
+Rollback restores the retained API/website and the effective previous shared
+connector without reverting database writes:
+
+```sh
+python3 /home/ubuntu/releases/bantera-20261117-1/deploy.py rollback
+```

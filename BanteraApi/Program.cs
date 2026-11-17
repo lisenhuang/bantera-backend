@@ -11,7 +11,6 @@ using BanteraApi.Admin;
 using BanteraApi.Auth;
 using BanteraApi.Chat;
 using BanteraApi.Chat.Ai;
-using BanteraApi.Cloudflare;
 using BanteraApi.Database;
 using BanteraApi.Database.Entities;
 using BanteraApi.Diagnostics;
@@ -99,13 +98,14 @@ builder.Services.AddHttpClient<ChatPushNotificationService>(client =>
 builder.Services.AddHostedService<ChatCleanupService>();
 builder.Services.AddHostedService<ChatCallCleanupService>();
 
-builder.Services.Configure<CloudflareSettings>(builder.Configuration.GetSection("Cloudflare"));
-builder.Services.AddHttpClient("cloudflare", c =>
+builder.Services.Configure<OpenAiImageSettings>(builder.Configuration.GetSection(OpenAiImageSettings.Section));
+builder.Services.AddHttpClient(OpenAiImageService.ClientName, c =>
 {
-    c.BaseAddress = new Uri("https://api.cloudflare.com");
+    c.BaseAddress = new Uri("https://api.openai.com/");
     c.Timeout = TimeSpan.FromSeconds(120);
-});
-builder.Services.AddScoped<CloudflareImageService>();
+    c.MaxResponseContentBufferSize = 16 * 1024 * 1024;
+}).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddScoped<OpenAiImageService>();
 
 builder.Services.Configure<GeminiSettings>(builder.Configuration.GetSection("Gemini"));
 builder.Services.AddTransient<BanteraApi.Diagnostics.GeminiModelCallHandler>();

@@ -46,7 +46,7 @@ BanteraApi/
 ├── Gemini/            # Google Gemini — dialogue generation, TTS, cue timing
 ├── RevAi/             # Rev.ai — word-level audio alignment
 ├── Storage/           # Cloudflare R2 (S3-compatible) object storage
-├── Cloudflare/        # Cloudflare Workers AI — cover image generation
+├── OpenAi/            # ChatGPT integration and OpenAI profile/cover image generation
 ├── Profile/           # User profile & avatar management
 ├── Admin/             # Admin user/video/stats management
 ├── Account/           # Account deletion
@@ -197,7 +197,7 @@ Migrations are applied automatically on startup.
 | **Google Gemini** | Dialogue text generation, TTS audio synthesis, transcript correction, cue timing fallback |
 | **Rev.ai** | Word-level audio alignment (EN, FR, DE, IT, ES) |
 | **Cloudflare R2** | Object storage for videos, audio, profile images, cover images |
-| **Cloudflare Workers AI** | Cover image generation (Flux 1 Schnell, 512×512) |
+| **OpenAI Images API** | Profile and cover images (GPT Image 2.6 Flare, low, 1024×1024); [setup](docs/openai-images.md) |
 | **Apple Sign-In** | Identity token validation via Apple's public key endpoint |
 | **PostgreSQL** | Primary database |
 
