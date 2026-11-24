@@ -106,7 +106,11 @@ public sealed class AiCallbackService(AppDbContext db, IOptions<ApnsSettings> ap
         var due = ResolveDue(args, now);
         if (due is null) return new { error = "Choose an unambiguous time between 10 seconds and 30 days from now.", code = "time_invalid" };
         if (await db.AiCallbacks.CountAsync(c => c.UserId == user && (c.Status == "scheduled" || c.Status == "queued" || c.Status == "generating"), ct) >= 10) return new { error = "There are already ten pending callbacks. Cancel one first.", code = "pending_limit" };
-        var callback = new AiCallback { Id = Guid.NewGuid(), UserId = user, PushTokenId = token.Id, RequestKey = requestKey,
+        Guid? callbackAlertTokenId = null;
+        if (isCall && !string.IsNullOrWhiteSpace(meta.AlertPushToken))
+            callbackAlertTokenId = await db.UserPushTokens.Where(t => t.UserId == user && t.Platform == "ios" &&
+                t.IsSandbox == token.IsSandbox && t.Token == meta.AlertPushToken).Select(t => (Guid?)t.Id).SingleOrDefaultAsync(ct);
+        var callback = new AiCallback { Id = Guid.NewGuid(), UserId = user, PushTokenId = token.Id, CallbackAlertTokenId = callbackAlertTokenId, RequestKey = requestKey,
             Status = isCall ? "scheduled" : "queued", Delivery = isCall ? "call" : "message", TimeZone = meta.Clock.TimeZone, Reminder = reminder, DueAt = due.Value, CreatedAt = now };
         db.AiCallbacks.Add(callback); await db.SaveChangesAsync(ct);
         return new { id = callback.Id, dueAt = callback.DueAt, timeZone = callback.TimeZone, status = callback.Status, reminder = callback.Reminder, delivery = callback.Delivery, storage = "Schedule, reminder and delivery status are stored on the server. Voice reminder audio is temporarily held until received or cancelled, up to seven days; received chat history stays on device." };
@@ -127,12 +131,31 @@ public sealed class AiCallbackWorker(IServiceScopeFactory scopes, ILogger<AiCall
             try { if (!await timer.WaitForNextTickAsync(stoppingToken)) break; } catch (OperationCanceledException) { break; }
         }
     }
+    // Only rows actually changed to missed can produce a message. PostgreSQL
+    // rechecks the status after a competing answer/cancel releases its row lock.
+    internal static Task<int> ExpireCallsAsync(AppDbContext db, DateTime now, CancellationToken ct) =>
+        db.Database.ExecuteSqlInterpolatedAsync($"""
+            WITH missed AS (
+                UPDATE ai_callbacks SET "Status" = 'missed'
+                WHERE "Delivery" = 'call' AND "Status" IN ('scheduled', 'ringing') AND "DueAt" < {now.AddSeconds(-45)}
+                RETURNING "Id", "UserId", "PushTokenId", "CallbackAlertTokenId", "Reminder", "TimeZone", "DueAt"
+            )
+            INSERT INTO ai_callbacks ("Id", "UserId", "PushTokenId", "CallbackAlertTokenId", "RequestKey",
+                "Reminder", "TimeZone", "DueAt", "CreatedAt", "Status", "Delivery", "Attempts")
+            SELECT gen_random_uuid(), m."UserId", m."PushTokenId", m."CallbackAlertTokenId",
+                   {AiReminderDelivery.MissedCallKeyPrefix} || m."Id", m."Reminder", m."TimeZone", m."DueAt", {now}, 'queued', 'message', 0
+            FROM missed m JOIN users u ON u."Id" = m."UserId"
+            WHERE m."DueAt" >= {now.AddDays(-7)} AND btrim(m."Reminder") <> ''
+              AND u."DeletedAt" IS NULL AND u."Status" = 'active' AND u."ChatNotificationsEnabled"
+            ON CONFLICT ("UserId", "RequestKey") DO NOTHING
+            """, ct);
+
     private async Task TickAsync(CancellationToken ct)
     {
         using var scope = scopes.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var now = DateTime.UtcNow;
         // Expire rather than surprise-ring an old request after downtime. Retain only seven days of delivery metadata.
-        await db.AiCallbacks.Where(c => c.Delivery == "call" && (c.Status == "scheduled" || c.Status == "ringing") && c.DueAt < now.AddSeconds(-45)).ExecuteUpdateAsync(u => u.SetProperty(c => c.Status, "missed"), ct);
+        await ExpireCallsAsync(db, now, ct);
         if (now >= nextCleanup) {
             await db.AiCallbacks.Where(c => c.DueAt < now.AddDays(-7)).ExecuteDeleteAsync(ct);
             nextCleanup = now.AddHours(1);

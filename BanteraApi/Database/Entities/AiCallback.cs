@@ -9,6 +9,9 @@ public sealed class AiCallback
     public User User { get; set; } = null!;
     public Guid PushTokenId { get; set; }
     public UserPushToken PushToken { get; set; } = null!;
+    // Optional ordinary APNs registration from the same device. Rotating or
+    // deleting this registration must not delete the call or its voicemail.
+    public Guid? CallbackAlertTokenId { get; set; }
     public string RequestKey { get; set; } = "";
     public string? Reminder { get; set; }
     public string TimeZone { get; set; } = "UTC";
