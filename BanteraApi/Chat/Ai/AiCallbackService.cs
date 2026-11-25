@@ -42,6 +42,18 @@ public sealed class AiCallbackService(AppDbContext db, IOptions<ApnsSettings> ap
             .Where(c => c.Id == callbackId && c.UserId == user && c.Status == "answered")
             .Select(c => c.Reminder).SingleOrDefaultAsync(ct);
 
+    internal static Task<int> CancelFromDeviceAsync(AppDbContext db, Guid userId, Guid id,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        // Published apps send DELETE on timeout. Their deadline is rounded down
+        // to a Unix second in the push payload, so use that same boundary here.
+        var earliestUnexpiredDue = DateTimeOffset.FromUnixTimeSeconds(
+            now.ToUnixTimeSeconds() + 1 - AiCallbackWorker.RingWindowSeconds).UtcDateTime;
+        return db.AiCallbacks.Where(c => c.Id == id && c.UserId == userId && c.Delivery == "call" &&
+                (c.Status == "scheduled" || c.Status == "ringing") && c.DueAt >= earliestUnexpiredDue)
+            .ExecuteUpdateAsync(u => u.SetProperty(c => c.Status, "cancelled"), ct);
+    }
+
     public static DateTime? ResolveDue(JsonElement args, DateTime now)
     {
         if (args.TryGetProperty("delaySeconds", out var delay) && !args.TryGetProperty("atUtc", out _) && delay.TryGetInt32(out var seconds))
@@ -119,6 +131,7 @@ public sealed class AiCallbackService(AppDbContext db, IOptions<ApnsSettings> ap
 
 public sealed class AiCallbackWorker(IServiceScopeFactory scopes, ILogger<AiCallbackWorker> log) : BackgroundService
 {
+    internal const int RingWindowSeconds = 45;
     private DateTime nextCleanup;
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -137,7 +150,7 @@ public sealed class AiCallbackWorker(IServiceScopeFactory scopes, ILogger<AiCall
         db.Database.ExecuteSqlInterpolatedAsync($"""
             WITH missed AS (
                 UPDATE ai_callbacks SET "Status" = 'missed'
-                WHERE "Delivery" = 'call' AND "Status" IN ('scheduled', 'ringing') AND "DueAt" < {now.AddSeconds(-45)}
+                WHERE "Delivery" = 'call' AND "Status" IN ('scheduled', 'ringing') AND "DueAt" < {now.AddSeconds(-RingWindowSeconds)}
                 RETURNING "Id", "UserId", "PushTokenId", "CallbackAlertTokenId", "Reminder", "TimeZone", "DueAt"
             )
             INSERT INTO ai_callbacks ("Id", "UserId", "PushTokenId", "CallbackAlertTokenId", "RequestKey",
@@ -170,7 +183,7 @@ public sealed class AiCallbackWorker(IServiceScopeFactory scopes, ILogger<AiCall
             var data = new Dictionary<string, string> {
                 ["type"] = "incoming_call", ["callId"] = item.Id.ToString(), ["callerUserId"] = AiCallbackService.Identity,
                 ["callerName"] = "Bantera AI", ["mediaKind"] = "audio", ["recipientUserId"] = item.UserId.ToString(),
-                ["expiresAt"] = new DateTimeOffset(item.DueAt.AddSeconds(45), TimeSpan.Zero).ToUnixTimeSeconds().ToString()
+                ["expiresAt"] = new DateTimeOffset(item.DueAt.AddSeconds(RingWindowSeconds), TimeSpan.Zero).ToUnixTimeSeconds().ToString()
             };
             await scope.ServiceProvider.GetRequiredService<ChatPushNotificationService>().SendAsync([item.PushToken], "Bantera AI", "Your scheduled audio call", data, ct, voip: true);
             await scope.ServiceProvider.GetRequiredService<ChatRealtimeService>().SendToUserAsync(item.UserId, new { type = "ai.callback", payload = data }, ct);

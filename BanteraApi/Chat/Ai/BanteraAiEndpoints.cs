@@ -69,8 +69,7 @@ public static class BanteraAiEndpoints
         });
         callbackRoutes.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => {
             if (!Guid.TryParse(user.FindFirst("sub")?.Value, out var userId)) return Results.Unauthorized();
-            await db.AiCallbacks.Where(c => c.Id == id && c.UserId == userId && (c.Status == "scheduled" || c.Status == "ringing"))
-                .ExecuteUpdateAsync(u => u.SetProperty(c => c.Status, "cancelled"), ct);
+            await AiCallbackService.CancelFromDeviceAsync(db, userId, id, DateTimeOffset.UtcNow, ct);
             return Results.NoContent();
         });
         app.MapPost("/api/chat/ai/reply", HandleReplyAsync).RequireAuthorization();
